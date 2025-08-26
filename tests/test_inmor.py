@@ -128,3 +128,19 @@ def test_ta_list_subordinates(loaddata: Redis, start_server: int):
     }
     # make sure that the list of subordinates matches
     assert set(data) == subs
+
+
+def test_ta_fetch_subordinate(loaddata: Redis, start_server: int):
+    "Tests /fetch endpoint"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/fetch?sub=https://fakerp0.lab.sunet.se"
+    resp = httpx.get(url)
+    assert resp.status_code == 404
+    url = f"http://localhost:{port}/fetch?sub=https://fakerp0.labb.sunet.se"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakerp0.labb.sunet.se"
+    assert payload.get("iss") == "http://localhost:8080"
