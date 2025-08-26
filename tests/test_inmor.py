@@ -110,3 +110,21 @@ def test_trust_mark_status_invalid_jwt(loaddata: Redis, start_server: int):
     data = resp.json()
     assert data.get("error") == "invalid_request"
     assert data.get("error_description") == "Could not verify the request"
+
+
+def test_ta_list_subordinates(loaddata: Redis, start_server: int):
+    "Tests /list endpoint"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/list"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 3
+    subs = {
+        "https://fakerp0.labb.sunet.se",
+        "https://fakeop0.labb.sunet.se",
+        "https://fakerp1.labb.sunet.se",
+    }
+    # make sure that the list of subordinates matches
+    assert set(data) == subs
