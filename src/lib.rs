@@ -1,5 +1,5 @@
 #![allow(unused)]
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use lazy_static::lazy_static;
 use log::{debug, info};
@@ -592,7 +592,7 @@ pub fn get_jwks_from_payload(payload: &JwtPayload) -> Result<JwkSet> {
 
 /// Gets the payload and header without any cryptographic verification.
 #[allow(clippy::explicit_counter_loop)]
-pub fn get_unverified_payload_header(data: &str) -> (JwtPayload, JwsHeader) {
+pub fn get_unverified_payload_header(data: &str) -> Result<(JwtPayload, JwsHeader)> {
     let mut indexies: Vec<usize> = Vec::new();
     let mut i: usize = 0;
     for d in data.as_bytes().iter() {
@@ -603,9 +603,11 @@ pub fn get_unverified_payload_header(data: &str) -> (JwtPayload, JwsHeader) {
     }
 
     let input = data.as_bytes();
-    //if indexies.len() != 2 {
-    //bail!("The compact serialization form of JWS must be three parts separated by colon.");
-    //}
+    if indexies.len() != 2 {
+        return Err(anyhow::Error::msg(
+            "The compact serialization form of JWS must be three parts separated by colon.",
+        ));
+    }
 
     let header = &input[0..indexies[0]];
     let payload = &input[(indexies[0] + 1)..(indexies[1])];
@@ -620,13 +622,13 @@ pub fn get_unverified_payload_header(data: &str) -> (JwtPayload, JwsHeader) {
     let map: Map<String, Value> = serde_json::from_slice(&payload).unwrap();
     let payload = JwtPayload::from_map(map).unwrap();
     // End of stupid unverified code
-    (payload, header)
+    Ok((payload, header))
 }
 
 /// Verify JWT against given JWKS
 pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayload, JwsHeader)> {
     // Code to find the header & payload without any verification
-    let (payload, header) = get_unverified_payload_header(data); // Now either use the passed one or use self keys
+    let (payload, header) = get_unverified_payload_header(data)?; // Now either use the passed one or use self keys
     let jwks = match keys {
         Some(d) => d,
         None => get_jwks_from_payload(&payload)?,
@@ -634,7 +636,12 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
     // FIXME: veify it exits
     let kid = header.key_id().unwrap();
     // Let us find the key used to sign the JWT
-    let key = jwks.get(kid)[0];
+    let keys = jwks.get(kid);
+    if keys.is_empty() {
+        // means we can not find the key used to sign this.
+        return Err(anyhow::Error::msg("Can not find kid used to sign."));
+    }
+    let key = keys[0];
     // FIXME: We need different verifiers for different kinds of
     // JWK.
     //println!("ALGO: {:?}", header.algorithm().unwrap());
@@ -654,7 +661,7 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
 /// This function will self veify the JWT and returns
 /// the payload and header after verification.
 pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
-    let (payload, header) = get_unverified_payload_header(data);
+    let (payload, header) = get_unverified_payload_header(data)?;
     let jwks = get_jwks_from_payload(&payload)?;
     let (payload, header) = verify_jwt_with_jwks(data, Some(jwks))?;
     Ok((payload, header))

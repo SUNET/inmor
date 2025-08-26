@@ -163,7 +163,10 @@ async fn main() -> io::Result<()> {
         let mut fe = federation.entities.lock().unwrap();
         for (key, val) in entities.iter() {
             // Let us get the metadata
-            let (payload, _) = get_unverified_payload_header(val);
+            let (payload, _) = match get_unverified_payload_header(val) {
+                Ok(d) => d,
+                Err(_) => panic!("Error in parsing the JWT for suboridnate"),
+            };
             let metadata = payload.claim("metadata").unwrap();
             let trustmarks = payload.claim("trust_marks");
             let x = metadata.as_object().unwrap();
