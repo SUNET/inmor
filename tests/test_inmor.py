@@ -1,8 +1,11 @@
 import json
+import os
 
 import httpx
 from jwcrypto import jwt
 from redis.client import Redis
+
+file_dir = os.path.dirname(os.path.abspath(__file__))
 
 
 def test_server(loaddata: Redis, start_server: int):
@@ -65,3 +68,45 @@ def test_trust_mark_for_missing_entity(loaddata: Redis, start_server: int):
     data = resp.json()
     assert data.get("error") == "not_found"
     assert data.get("error_description") == "Trust mark not found."
+
+
+def test_trust_mark_status(loaddata: Redis, start_server: int):
+    "Tests /trust_mark_status"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/trust_mark?trust_mark_type=https://sunet.se/does_not_exist_trustmark&sub=https://fakerp0.labb.sunet.se"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    url = f"http://localhost:{port}/trust_mark_status?trust_mark={resp.text}"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("active") == True
+
+
+def test_trust_mark_status_invalid(loaddata: Redis, start_server: int):
+    "Tests /trust_mark_status for invalid input"
+    _rdb = loaddata
+    port = start_server
+    with open(os.path.join(file_dir, "data/invalid_for_trust_mark.txt")) as fobj:
+        jwt_text = fobj.read()
+    jwt_text = jwt_text.strip()
+    url = f"http://localhost:{port}/trust_mark_status?trust_mark={jwt_text}"
+    resp = httpx.get(url)
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data.get("error") == "invalid_request"
+    assert data.get("error_description") == "Could not verify the request"
+
+
+def test_trust_mark_status_invalid_jwt(loaddata: Redis, start_server: int):
+    "Tests /trust_mark_status for invalid input"
+    _rdb = loaddata
+    port = start_server
+    jwt_text = "hello_this_is_invalid_jwt"
+    url = f"http://localhost:{port}/trust_mark_status?trust_mark={jwt_text}"
+    resp = httpx.get(url)
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data.get("error") == "invalid_request"
+    assert data.get("error_description") == "Could not verify the request"
