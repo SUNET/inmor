@@ -81,7 +81,7 @@ def test_trust_mark_status(loaddata: Redis, start_server: int):
     resp = httpx.get(url)
     assert resp.status_code == 200
     data = resp.json()
-    assert data.get("active") == True
+    assert data.get("active")
 
 
 def test_trust_mark_status_invalid(loaddata: Redis, start_server: int):
