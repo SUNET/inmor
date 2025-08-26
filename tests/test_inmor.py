@@ -1,4 +1,7 @@
+import json
+
 import httpx
+from jwcrypto import jwt
 from redis.client import Redis
 
 
@@ -36,3 +39,29 @@ def test_trust_marked_list(loaddata: Redis, start_server: int):
 
     # make sure that the list of subordinates matches
     assert set(data) == subs
+
+
+def test_trust_mark_for_entity(loaddata: Redis, start_server: int):
+    "Tests /trust_mark"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/trust_mark?trust_mark_type=https://sunet.se/does_not_exist_trustmark&sub=https://fakerp0.labb.sunet.se"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("trust_mark_type") == "https://sunet.se/does_not_exist_trustmark"
+    assert payload.get("sub") == "https://fakerp0.labb.sunet.se"
+    # TODO:What else should we test here?
+
+
+def test_trust_mark_for_missing_entity(loaddata: Redis, start_server: int):
+    "Tests for unknown/missing entity trustmark"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/trust_mark?trust_mark_type=https://sunet.se/does_not_exist_trustmark&sub=https://fakerp31.labb.sunet.se"
+    resp = httpx.get(url)
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data.get("error") == "not_found"
+    assert data.get("error_description") == "Trust mark not found."
