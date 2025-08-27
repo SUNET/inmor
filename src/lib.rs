@@ -711,10 +711,7 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
     } else if metadata.get("openid_provider").is_some() {
         // Means OP
 
-        match redis::Cmd::sadd("inmor:op", entity_id).query::<String>(conn) {
-            Ok(_) => (),
-            Err(_) => return,
-        }
+        let _ = redis::Cmd::sadd("inmor:op", entity_id).query::<String>(conn);
     } else {
         // Means a TA/IA.
         match redis::Cmd::sadd("inmor:taia", entity_id).query::<String>(conn) {
@@ -732,27 +729,24 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
             // TODO: add debug point here
             return;
         }
-        match get_query_sync(list_endpoint.unwrap().as_str().unwrap()) {
-            Ok(resp) => {
-                // Here we will loop through the subordinates
-                let subs: Value = serde_json::from_str(&resp).unwrap();
-                for sub in subs.as_array().unwrap() {
-                    let sub_str = sub.as_str().unwrap();
-                    let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
-                        .query::<bool>(conn)
-                        .unwrap_or_default();
-                    if ismember {
-                        // Means we already visited it, it is a loop
-                        // We should skip it.
-                        info!("We have a loop: {sub_str}");
-                        continue;
-                    }
-                    // Means we have a new subordinate
-                    info!("Found new subordinate: {sub_str}");
-                    queue_lpush(sub_str, conn);
+        if let Ok(resp) = get_query_sync(list_endpoint.unwrap().as_str().unwrap()) {
+            // Here we will loop through the subordinates
+            let subs: Value = serde_json::from_str(&resp).unwrap();
+            for sub in subs.as_array().unwrap() {
+                let sub_str = sub.as_str().unwrap();
+                let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
+                    .query::<bool>(conn)
+                    .unwrap_or_default();
+                if ismember {
+                    // Means we already visited it, it is a loop
+                    // We should skip it.
+                    info!("We have a loop: {sub_str}");
+                    continue;
                 }
+                // Means we have a new subordinate
+                info!("Found new subordinate: {sub_str}");
+                queue_lpush(sub_str, conn);
             }
-            Err(_) => return,
         }
     }
 }
@@ -815,10 +809,10 @@ pub fn fetch_all_subordinate_statements(
         let fetch_endpoint = fed_entity.get("federation_fetch_endpoint");
 
         println!("SEE {fetch_endpoint:?}");
-        if fetch_endpoint.is_some() {
+        if let Some(fetch_endpoint) = fetch_endpoint {
             // HACK: Enable TA hack here
             // TODO: ^^
-            let fetch_endpoint = fetch_endpoint.unwrap();
+            //let fetch_endpoint = fetch_endpoint.unwrap();
             let sub_statement =
                 fetch_sub_statement_sync(fetch_endpoint.as_str().unwrap(), entity_id);
             if let Ok((jwt_str, url)) = sub_statement {
@@ -1205,28 +1199,29 @@ pub async fn trust_marked_list(
         .query_async::<Vec<String>>(&mut conn)
         .await
         .map_err(error::ErrorInternalServerError);
-    if res.is_err() {
-        Ok(HttpResponse::NotFound().body(""))
-    } else {
-        let mut result = res.unwrap();
-        if sub.is_some() {
-            // Means we have a sub value to check
-            let sub_entity = sub.unwrap();
-            if result.contains(&sub_entity) {
-                result = vec![sub_entity];
-            } else {
-                // Means so such sub for the trust_mark_type in redis
-                return Ok(HttpResponse::NotFound().body(""));
+    match res {
+        Ok(mut result) => {
+            //let mut result = res.unwrap();
+            if let Some(sub_entity) = sub {
+                // Means we have a sub value to check
+                //let sub_entity = sub.unwrap();
+                if result.contains(&sub_entity) {
+                    result = vec![sub_entity];
+                } else {
+                    // Means so such sub for the trust_mark_type in redis
+                    return Ok(HttpResponse::NotFound().body(""));
+                }
             }
-        }
 
-        let body = match serde_json::to_string(&result) {
-            Ok(d) => d,
-            Err(_) => return Err(error::ErrorInternalServerError("JSON error")),
-        };
-        Ok(HttpResponse::Ok()
-            .insert_header(("content-type", "application/json"))
-            .body(body))
+            let body = match serde_json::to_string(&result) {
+                Ok(d) => d,
+                Err(_) => return Err(error::ErrorInternalServerError("JSON error")),
+            };
+            Ok(HttpResponse::Ok()
+                .insert_header(("content-type", "application/json"))
+                .body(body))
+        }
+        Err(_) => Ok(HttpResponse::NotFound().body("")),
     }
 }
 
