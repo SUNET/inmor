@@ -1,21 +1,40 @@
-[build-system]
-requires = ["flit_core >=3.11,<4"]
-build-backend = "flit_core.buildapi"
-
 [project]
 name = "pyinmor"
 authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
-dynamic = ["version", "description"]
+version = "0.1.0"
+description = "Inmor Trust Anchor"
 license = { file="LICENSE" }
+requires-python = '>=3.13'
 
 dependencies = [
 	"jwcrypto",
 	"httpx",
-	"redis"
+	"redis",
+	"django",
+	"django-types",
+	"black",
+	"ruff",
+	"redis",
+	"django-extensions",
+	"django-debug-toolbar",
+	"pytz",
+	"psycopg2-binary",
+	"pysaml2",
+	"djangosaml2",
+	"django-redis",
+	"jwcrypto",
+	"types-jwcrypto",
+	"httpx",
+	"django-click",
+	"pydantic",
+	"ty",
+	"port-for",
+	"pytest-redis",
+	"pytest",
 ]
 
 [project.urls]
-Home = "https://github.com/kushaldas/pyinmor"
+Home = "https://github.com/SUNET/inmor"
 
 [tool.pyright]
 stubPath = "typings"
@@ -62,3 +81,6 @@ exclude = [
 exclude = [
     "db",
 ]
+
+[tool.pytest.ini_options]
+testpaths = "tests"

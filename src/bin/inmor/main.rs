@@ -110,11 +110,15 @@ struct Cli {
         help = "Configuration file for the server in .toml format"
     )]
     toml_file_path: String,
+    #[arg(short, long, default_value_t = 8080, help = "Port to run the server")]
+    port: u16,
 }
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
-    let toml_file_path = Cli::parse().toml_file_path;
+    let args = Cli::parse();
+    let port = args.port;
+    let toml_file_path = args.toml_file_path;
     let server_config = ServerConfiguration::from_toml(&toml_file_path).unwrap_or_else(|_| {
         panic!(
             "Failed reading server configuration from {}.",
@@ -129,7 +133,7 @@ async fn main() -> io::Result<()> {
         server_config.endpoints.to_openid_metadata(),
     );
     let entity_data = compile_entityid(
-        &format!("{}/", &server_config.domain),
+        &format!("{}", &server_config.domain),
         &server_config.domain,
         json!(federation_entity).into(),
     )
@@ -159,7 +163,10 @@ async fn main() -> io::Result<()> {
         let mut fe = federation.entities.lock().unwrap();
         for (key, val) in entities.iter() {
             // Let us get the metadata
-            let (payload, _) = get_unverified_payload_header(val);
+            let (payload, _) = match get_unverified_payload_header(val) {
+                Ok(d) => d,
+                Err(_) => panic!("Error in parsing the JWT for suboridnate"),
+            };
             let metadata = payload.claim("metadata").unwrap();
             let trustmarks = payload.claim("trust_marks");
             let x = metadata.as_object().unwrap();
@@ -213,7 +220,7 @@ async fn main() -> io::Result<()> {
             .wrap(middleware::Logger::default())
     })
     .workers(2)
-    .bind(("0.0.0.0", 8080))?
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }

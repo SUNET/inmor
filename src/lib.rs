@@ -1,5 +1,5 @@
 #![allow(unused)]
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use lazy_static::lazy_static;
 use log::{debug, info};
@@ -592,7 +592,7 @@ pub fn get_jwks_from_payload(payload: &JwtPayload) -> Result<JwkSet> {
 
 /// Gets the payload and header without any cryptographic verification.
 #[allow(clippy::explicit_counter_loop)]
-pub fn get_unverified_payload_header(data: &str) -> (JwtPayload, JwsHeader) {
+pub fn get_unverified_payload_header(data: &str) -> Result<(JwtPayload, JwsHeader)> {
     let mut indexies: Vec<usize> = Vec::new();
     let mut i: usize = 0;
     for d in data.as_bytes().iter() {
@@ -603,9 +603,11 @@ pub fn get_unverified_payload_header(data: &str) -> (JwtPayload, JwsHeader) {
     }
 
     let input = data.as_bytes();
-    //if indexies.len() != 2 {
-    //bail!("The compact serialization form of JWS must be three parts separated by colon.");
-    //}
+    if indexies.len() != 2 {
+        return Err(anyhow::Error::msg(
+            "The compact serialization form of JWS must be three parts separated by colon.",
+        ));
+    }
 
     let header = &input[0..indexies[0]];
     let payload = &input[(indexies[0] + 1)..(indexies[1])];
@@ -620,13 +622,13 @@ pub fn get_unverified_payload_header(data: &str) -> (JwtPayload, JwsHeader) {
     let map: Map<String, Value> = serde_json::from_slice(&payload).unwrap();
     let payload = JwtPayload::from_map(map).unwrap();
     // End of stupid unverified code
-    (payload, header)
+    Ok((payload, header))
 }
 
 /// Verify JWT against given JWKS
 pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayload, JwsHeader)> {
     // Code to find the header & payload without any verification
-    let (payload, header) = get_unverified_payload_header(data); // Now either use the passed one or use self keys
+    let (payload, header) = get_unverified_payload_header(data)?; // Now either use the passed one or use self keys
     let jwks = match keys {
         Some(d) => d,
         None => get_jwks_from_payload(&payload)?,
@@ -634,7 +636,12 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
     // FIXME: veify it exits
     let kid = header.key_id().unwrap();
     // Let us find the key used to sign the JWT
-    let key = jwks.get(kid)[0];
+    let keys = jwks.get(kid);
+    if keys.is_empty() {
+        // means we can not find the key used to sign this.
+        return Err(anyhow::Error::msg("Can not find kid used to sign."));
+    }
+    let key = keys[0];
     // FIXME: We need different verifiers for different kinds of
     // JWK.
     //println!("ALGO: {:?}", header.algorithm().unwrap());
@@ -654,7 +661,7 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
 /// This function will self veify the JWT and returns
 /// the payload and header after verification.
 pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
-    let (payload, header) = get_unverified_payload_header(data);
+    let (payload, header) = get_unverified_payload_header(data)?;
     let jwks = get_jwks_from_payload(&payload)?;
     let (payload, header) = verify_jwt_with_jwks(data, Some(jwks))?;
     Ok((payload, header))
@@ -704,10 +711,7 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
     } else if metadata.get("openid_provider").is_some() {
         // Means OP
 
-        match redis::Cmd::sadd("inmor:op", entity_id).query::<String>(conn) {
-            Ok(_) => (),
-            Err(_) => return,
-        }
+        let _ = redis::Cmd::sadd("inmor:op", entity_id).query::<String>(conn);
     } else {
         // Means a TA/IA.
         match redis::Cmd::sadd("inmor:taia", entity_id).query::<String>(conn) {
@@ -725,27 +729,24 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
             // TODO: add debug point here
             return;
         }
-        match get_query_sync(list_endpoint.unwrap().as_str().unwrap()) {
-            Ok(resp) => {
-                // Here we will loop through the subordinates
-                let subs: Value = serde_json::from_str(&resp).unwrap();
-                for sub in subs.as_array().unwrap() {
-                    let sub_str = sub.as_str().unwrap();
-                    let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
-                        .query::<bool>(conn)
-                        .unwrap_or_default();
-                    if ismember {
-                        // Means we already visited it, it is a loop
-                        // We should skip it.
-                        info!("We have a loop: {sub_str}");
-                        continue;
-                    }
-                    // Means we have a new subordinate
-                    info!("Found new subordinate: {sub_str}");
-                    queue_lpush(sub_str, conn);
+        if let Ok(resp) = get_query_sync(list_endpoint.unwrap().as_str().unwrap()) {
+            // Here we will loop through the subordinates
+            let subs: Value = serde_json::from_str(&resp).unwrap();
+            for sub in subs.as_array().unwrap() {
+                let sub_str = sub.as_str().unwrap();
+                let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
+                    .query::<bool>(conn)
+                    .unwrap_or_default();
+                if ismember {
+                    // Means we already visited it, it is a loop
+                    // We should skip it.
+                    info!("We have a loop: {sub_str}");
+                    continue;
                 }
+                // Means we have a new subordinate
+                info!("Found new subordinate: {sub_str}");
+                queue_lpush(sub_str, conn);
             }
-            Err(_) => return,
         }
     }
 }
@@ -808,10 +809,10 @@ pub fn fetch_all_subordinate_statements(
         let fetch_endpoint = fed_entity.get("federation_fetch_endpoint");
 
         println!("SEE {fetch_endpoint:?}");
-        if fetch_endpoint.is_some() {
+        if let Some(fetch_endpoint) = fetch_endpoint {
             // HACK: Enable TA hack here
             // TODO: ^^
-            let fetch_endpoint = fetch_endpoint.unwrap();
+            //let fetch_endpoint = fetch_endpoint.unwrap();
             let sub_statement =
                 fetch_sub_statement_sync(fetch_endpoint.as_str().unwrap(), entity_id);
             if let Ok((jwt_str, url)) = sub_statement {
@@ -1198,28 +1199,29 @@ pub async fn trust_marked_list(
         .query_async::<Vec<String>>(&mut conn)
         .await
         .map_err(error::ErrorInternalServerError);
-    if res.is_err() {
-        Ok(HttpResponse::NotFound().body(""))
-    } else {
-        let mut result = res.unwrap();
-        if sub.is_some() {
-            // Means we have a sub value to check
-            let sub_entity = sub.unwrap();
-            if result.contains(&sub_entity) {
-                result = vec![sub_entity];
-            } else {
-                // Means so such sub for the trust_mark_type in redis
-                return Ok(HttpResponse::NotFound().body(""));
+    match res {
+        Ok(mut result) => {
+            //let mut result = res.unwrap();
+            if let Some(sub_entity) = sub {
+                // Means we have a sub value to check
+                //let sub_entity = sub.unwrap();
+                if result.contains(&sub_entity) {
+                    result = vec![sub_entity];
+                } else {
+                    // Means so such sub for the trust_mark_type in redis
+                    return Ok(HttpResponse::NotFound().body(""));
+                }
             }
-        }
 
-        let body = match serde_json::to_string(&result) {
-            Ok(d) => d,
-            Err(_) => return Err(error::ErrorInternalServerError("JSON error")),
-        };
-        Ok(HttpResponse::Ok()
-            .insert_header(("content-type", "application/json"))
-            .body(body))
+            let body = match serde_json::to_string(&result) {
+                Ok(d) => d,
+                Err(_) => return Err(error::ErrorInternalServerError("JSON error")),
+            };
+            Ok(HttpResponse::Ok()
+                .insert_header(("content-type", "application/json"))
+                .body(body))
+        }
+        Err(_) => Ok(HttpResponse::NotFound().body("")),
     }
 }
 
