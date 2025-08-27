@@ -2,7 +2,6 @@ import os
 import subprocess
 import tempfile
 
-import port_for
 import pytest
 from pytest_redis import factories
 from redis.client import Redis
@@ -31,7 +30,10 @@ def loaddata(rdb: Redis) -> Redis:
 @pytest.fixture(scope="session")
 def start_server(trdb):
     """Starts the inmor rust application on a port and returns it."""
-    port = port_for.get_port(None)
+    # port = port_for.get_port(None)
+    # Comment the line below and uncomment the above to run the test server
+    # on a random port.
+    port = 8080
     with tempfile.TemporaryDirectory() as tmpdir:
         tconfig = os.path.join(tmpdir, "testconfig.toml")
         with open(tconfig, "w") as f:

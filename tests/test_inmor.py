@@ -144,3 +144,18 @@ def test_ta_fetch_subordinate(loaddata: Redis, start_server: int):
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("sub") == "https://fakerp0.labb.sunet.se"
     assert payload.get("iss") == "http://localhost:8080"
+
+
+def test_ta_resolve_subordinate(loaddata: Redis, start_server: int):
+    "Tests /resolve endpoint"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/resolve?sub=https://fakeop0.labb.sunet.se&entity_type=openid_provider&trust_anchor=http://localhost:8080"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
+    assert payload.get("iss") == f"http://localhost:{port}"
+    trust_chain = payload.get("trust_chain", [])
+    assert len(trust_chain) == 3
