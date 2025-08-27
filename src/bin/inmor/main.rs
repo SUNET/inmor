@@ -133,7 +133,7 @@ async fn main() -> io::Result<()> {
         server_config.endpoints.to_openid_metadata(),
     );
     let entity_data = compile_entityid(
-        &format!("{}/", &server_config.domain),
+        &format!("{}", &server_config.domain),
         &server_config.domain,
         json!(federation_entity).into(),
     )
