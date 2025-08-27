@@ -159,3 +159,18 @@ def test_ta_resolve_subordinate(loaddata: Redis, start_server: int):
     assert payload.get("iss") == f"http://localhost:{port}"
     trust_chain = payload.get("trust_chain", [])
     assert len(trust_chain) == 3
+    # 0th position is the fakeop0
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(trust_chain[0])
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
+    assert payload.get("iss") == "https://fakeop0.labb.sunet.se"
+    # 1st position is the subordinate statement
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(trust_chain[1])
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
+    assert payload.get("iss") == "http://localhost:8080"
+    # 2nd position is the TA's entity configuration
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(trust_chain[2])
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "http://localhost:8080"
+    assert payload.get("iss") == "http://localhost:8080"
