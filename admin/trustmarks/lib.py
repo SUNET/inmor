@@ -16,7 +16,7 @@ class TrustMarkTypeRequest(BaseModel):
     type: str
 
 
-def add_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str:
+def add_trustmark(entity: str, trustmarktype: str, expiry: int, r: redis.Redis) -> str:
     """Adds a new subordinate to the federation.
 
     :args entity_id: The entity_id to be added
@@ -27,7 +27,7 @@ def add_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str:
     sub_data = {"iss": settings.TRUSTMARK_PROVIDER}
     sub_data["sub"] = entity
     now = datetime.now()
-    exp = now + timedelta(days=365)
+    exp = now + timedelta(days=expiry)
     sub_data["iat"] = now.timestamp()
     sub_data["exp"] = exp.timestamp()
     # TODO: ref: we have to add this claim too in future
