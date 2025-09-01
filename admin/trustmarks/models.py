@@ -5,7 +5,8 @@ from django.db.models.functions import Now
 # Create your models here.
 class TrustMarkType(models.Model):
     id: int
-    tmtype = models.CharField()
+    tmtype = models.CharField(unique=True)
+    valid_for = models.IntegerField(default=365)  # Means by default it is valid for 365 days
 
     def __str__(self):
         return self.tmtype
