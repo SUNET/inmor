@@ -43,7 +43,10 @@ reportAny = false
 reportUnknownMemberType = false
 reportUnknownVariableType = false
 reportUnknownArgumentType = false
+reportUnannotatedClassAttribute = false
 reportExplicitAny = false
+reportImplicitOverride = false
+reportUninitializedInstanceVariable = false
 
 [tool.ruff]
 line-length = 100
