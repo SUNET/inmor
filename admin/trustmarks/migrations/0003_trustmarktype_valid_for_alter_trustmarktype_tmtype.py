@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("trustmarks", "0002_alter_trustmark_unique_together"),
     ]
