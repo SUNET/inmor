@@ -6,7 +6,8 @@ venv_command := if path_exists(".venv") == "false" { "uv venv && uv pip install 
 
 # To create the virtual environment for development
 venv:
-  {{ venv_command }}
+  #{{ venv_command }}
+  uv sync
 
 # To create a development environment
 dev: venv
