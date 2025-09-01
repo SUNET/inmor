@@ -17,6 +17,7 @@ dependencies = [
 	"redis",
 	"django-extensions",
 	"django-debug-toolbar",
+	"django-ninja",
 	"pytz",
 	"psycopg2-binary",
 	"pysaml2",
