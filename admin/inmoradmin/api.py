@@ -11,7 +11,12 @@ class TrustMarkTypeSchema(Schema):
     valid_for: int = 365  # How many days the default entry will be valid for
 
 
-@api.post("/trust_mark_type")
+class Message(Schema):
+    message: str
+    id: int = 0
+
+
+@api.post("/trust_mark_type", response={200: Message, 403: Message, 500: Message})
 def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
     """Creates a new trust_mark_type"""
     try:
@@ -19,12 +24,12 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
             tmtype=data.tmtype, valid_for=data.valid_for
         )
         if created:
-            return 200, {"msg": "TrustMarkType created Succesfully.", "id": tmt.id}
+            return {"message": "TrustMarkType created Succesfully.", "id": tmt.id}
         else:
-            return 403, {"msg": "TrustMarkType already existed.", "id": tmt.id}
+            return 403, {"message": f"TrustMarkType already existed.", "id": tmt.id}
     except Exception as e:
         print(e)
-        return 500, {"msg": "Error while creating a new TrustMarkType"}
+        return 500, {"message": "Error while creating a new TrustMarkType"}
 
 
 @api.get("/trust_mark_type/list", response=list[TrustMarkTypeSchema])
