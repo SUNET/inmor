@@ -72,6 +72,12 @@ services:
       - ./public.json:/code/public.json
     ports:
       - "8000:8000"
+  admin-frontend:
+    build: ./admin/frontend
+    volumes:
+      - ./admin/frontend:/app
+    ports:
+      - 5173:5173
 networks:
   inmor-net:
     driver: bridge
