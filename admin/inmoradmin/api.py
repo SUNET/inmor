@@ -26,7 +26,7 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
         if created:
             return {"message": "TrustMarkType created Succesfully.", "id": tmt.id}
         else:
-            return 403, {"message": f"TrustMarkType already existed.", "id": tmt.id}
+            return 403, {"message": "TrustMarkType already existed.", "id": tmt.id}
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMarkType"}
