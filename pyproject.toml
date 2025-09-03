@@ -32,6 +32,7 @@ dependencies = [
 	"port-for",
 	"pytest-redis",
 	"pytest",
+	"humanreadable",
 ]
 
 [project.urls]

@@ -20,3 +20,4 @@ port-for
 pytest-redis
 pytest
 django-ninja
+humanreadable
