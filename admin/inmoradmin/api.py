@@ -35,7 +35,10 @@ class Message(Schema):
     id: int = 0
 
 
-@router.post("/trustmarktypes", response={201: Message, 403: Message, 500: Message})
+@router.post(
+    "/trustmarktypes",
+    response={201: TrustMarkTypeOutSchema, 403: TrustMarkTypeOutSchema, 500: Message},
+)
 def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
     """Creates a new trust_mark_type"""
     try:
@@ -47,9 +50,9 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
             active=data.active,
         )
         if created:
-            return 201, {"message": "TrustMarkType created Succesfully.", "id": tmt.id}
+            return 201, tmt
         else:
-            return 403, {"message": "TrustMarkType already existed.", "id": tmt.id}
+            return 403, tmt
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMarkType"}
