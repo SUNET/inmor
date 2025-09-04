@@ -1,9 +1,10 @@
 from django.http import HttpRequest
-from ninja import NinjaAPI, Schema
+from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
 from trustmarks.models import TrustMarkType
 
 api = NinjaAPI()
+router = Router()
 
 
 class TrustMarkTypeSchema(Schema):
@@ -16,7 +17,7 @@ class Message(Schema):
     id: int = 0
 
 
-@api.post("/trust_mark_type", response={200: Message, 403: Message, 500: Message})
+@router.post("/trust_mark_type", response={200: Message, 403: Message, 500: Message})
 def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
     """Creates a new trust_mark_type"""
     try:
@@ -32,10 +33,13 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
         return 500, {"message": "Error while creating a new TrustMarkType"}
 
 
-@api.get("/trust_mark_type/list", response=list[TrustMarkTypeSchema])
+@router.get("/trust_mark_type/list", response=list[TrustMarkTypeSchema])
 @paginate(LimitOffsetPagination)
 def list_trust_mark_type(
     request: HttpRequest,
 ):
     """Lists all existing TrustMarkType(s) from database."""
     return TrustMarkType.objects.all()
+
+
+api.add_router("", router)
