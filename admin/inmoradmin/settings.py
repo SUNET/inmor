@@ -151,9 +151,18 @@ TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay
 METADATA_POLICY = {}
 
-# DATABASES = {
-# "default": {
-# "ENGINE": "django.db.backends.sqlite3",
-# "NAME": BASE_DIR / "db.sqlite3",
-# }
-# }
+# The following are the default values the system will use while creating new entries via API.
+TA_DEFAULTS = {
+    "trustmarktype": {
+        "autorenew": True,
+        "valid_for": 8760,
+        "renewal_time": 48,
+        "active": True,
+    },
+    "trustmark": {
+        "autorenew": True,
+        "valid_for": 8760,
+        "renewal_time": 48,
+        "active": True,
+    },
+}
