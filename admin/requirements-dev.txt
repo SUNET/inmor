@@ -21,3 +21,4 @@ pytest-redis
 pytest
 django-ninja
 humanreadable
+pytest-django

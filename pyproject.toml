@@ -32,6 +32,7 @@ dependencies = [
 	"port-for",
 	"pytest-redis",
 	"pytest",
+	"pytest-django",
 	"humanreadable",
 ]
 
@@ -89,3 +90,5 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = "tests"
+pythonpath = [".", "admin"]
+DJANGO_SETTINGS_MODULE = "inmoradmin.settings"
