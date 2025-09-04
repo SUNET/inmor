@@ -46,7 +46,7 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
         return 500, {"message": "Error while creating a new TrustMarkType"}
 
 
-@router.get("/trust_mark_type/list", response=list[TrustMarkTypeSchema])
+@router.get("/trustmarktypes", response=list[TrustMarkTypeSchema])
 @paginate(LimitOffsetPagination)
 def list_trust_mark_type(
     request: HttpRequest,
