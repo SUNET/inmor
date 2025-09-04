@@ -1,3 +1,4 @@
+import pytest
 from django.test import TestCase
 from ninja.testing import TestClient
 
@@ -35,19 +36,69 @@ def test_trustmarktypes_list(db):
     self.assertEqual(marks["items"], trustmark_list)
 
 
+@pytest.mark.django_db
 def test_trustmarktypes_create(db):
     # don't forget to import router from code above
     self = TestCase()
     self.maxDiff = None
-    data =     {
-            "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
-            "valid_for": 8760,
-            "active": True,
-            "autorenew": True,
-            "renewal_time": 48,
-        }
+    data = {
+        "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
+        "valid_for": 8760,
+        "active": True,
+        "autorenew": True,
+        "renewal_time": 48,
+    }
     client: TestClient = TestClient(router)
     response = client.post("/trustmarktypes", json=data)
 
     self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    for key in data:
+        self.assertEqual(data[key], resp.get(key))
 
+
+@pytest.mark.django_db
+def test_trustmarktypes_create_default(db):
+    # don't forget to import router from code above
+    self = TestCase()
+    self.maxDiff = None
+    data = {
+        "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
+    }
+    client: TestClient = TestClient(router)
+    response = client.get("/trustmarktypes")
+    marks = response.json()
+    self.assertEqual(marks["count"], 2)
+    response = client.post("/trustmarktypes", json=data)
+
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    for key in data:
+        self.assertEqual(data[key], resp.get(key))
+
+
+@pytest.mark.django_db
+def test_trustmarktypes_create_double(db):
+    "We will try to create same entry twice."
+    # don't forget to import router from code above
+    self = TestCase()
+    self.maxDiff = None
+    data = {
+        "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
+        "valid_for": 8760,
+        "active": True,
+        "autorenew": True,
+        "renewal_time": 48,
+    }
+
+    client: TestClient = TestClient(router)
+    response = client.get("/trustmarktypes")
+    marks = response.json()
+    self.assertEqual(marks["count"], 2)
+    response = client.post("/trustmarktypes", json=data)
+    self.assertEqual(response.status_code, 201)
+    response = client.post("/trustmarktypes", json=data)
+    self.assertEqual(response.status_code, 403)
+    resp = response.json()
+    for key in data:
+        self.assertEqual(data[key], resp.get(key))
