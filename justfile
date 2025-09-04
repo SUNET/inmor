@@ -70,6 +70,9 @@ up:
 down:
   docker compose down
 
+t-admin:
+  docker compose exec admin pytest -vvv
+
 debug-ta:
   docker compose run --rm ta /bin/bash
 
