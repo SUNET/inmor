@@ -10,6 +10,20 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+        # will assign a random free host port
+        - 5432/tcp
+        # needed because the postgres container does not provide a healthcheck
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -37,5 +51,13 @@ jobs:
       - name: Build TA appliation
         run: cargo build
 
-      - name: Run tests for inmor
-        run: just test
+      - name: Run tests for inmor TA
+        run: just test-ta
+
+      - name: Run tests for inmor Admin API
+        run: just test-admin
+        env:
+          # use localhost for the host here because we are running the job on the VM.
+          # If we were running the job on in a container this would be postgres
+          DB_HOST: localhost
+          DB_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
