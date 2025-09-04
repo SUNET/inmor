@@ -1,15 +1,24 @@
+from typing import Any
+
+from django.conf import settings
 from django.http import HttpRequest
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
+
 from trustmarks.models import TrustMarkType
 
 api = NinjaAPI()
 router = Router()
 
+DEFAULTS: dict[str, dict[str, Any]] = settings.TA_DEFAULTS
+
 
 class TrustMarkTypeSchema(Schema):
     tmtype: str
-    valid_for: int = 365  # How many days the default entry will be valid for
+    autorenew: bool = DEFAULTS["trustmarktype"]["autorenew"]
+    valid_for: int = DEFAULTS["trustmarktype"]["valid_for"]
+    renewal_time: int = DEFAULTS["trustmarktype"]["renewal_time"]
+    active: bool = DEFAULTS["trustmarktype"]["active"]
 
 
 class Message(Schema):
@@ -17,15 +26,19 @@ class Message(Schema):
     id: int = 0
 
 
-@router.post("/trust_mark_type", response={200: Message, 403: Message, 500: Message})
+@router.post("/trustmarktypes", response={201: Message, 403: Message, 500: Message})
 def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
     """Creates a new trust_mark_type"""
     try:
         tmt, created = TrustMarkType.objects.get_or_create(
-            tmtype=data.tmtype, valid_for=data.valid_for
+            tmtype=data.tmtype,
+            autorenew=data.autorenew,
+            valid_for=data.valid_for,
+            renewal_time=data.renewal_time,
+            active=data.active,
         )
         if created:
-            return {"message": "TrustMarkType created Succesfully.", "id": tmt.id}
+            return 201, {"message": "TrustMarkType created Succesfully.", "id": tmt.id}
         else:
             return 403, {"message": "TrustMarkType already existed.", "id": tmt.id}
     except Exception as e:
