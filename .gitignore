@@ -1,5 +1,6 @@
 /target
 *.json
+!db.json
 
 
 # Byte-compiled / optimized / DLL files
