@@ -1,0 +1,97 @@
+[project]
+name = "inmoradmin"
+authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
+version = "0.1.0"
+description = "Inmor Trust Anchor Admin portal"
+license = { file="LICENSE" }
+requires-python = '>=3.13'
+
+dependencies = [
+	"jwcrypto",
+	"httpx",
+	"redis",
+	"django",
+	"django-types",
+	"black",
+	"ruff",
+	"redis",
+	"django-extensions",
+	"django-debug-toolbar",
+	"django-ninja",
+	"pytz",
+	"psycopg2-binary",
+	"pysaml2",
+	"djangosaml2",
+	"django-redis",
+	"jwcrypto",
+	"types-jwcrypto",
+	"httpx",
+	"django-click",
+	"pydantic",
+	"ty",
+	"port-for",
+	"pytest-redis",
+	"pytest",
+	"pytest-django",
+	"humanreadable",
+	"python-dotenv",
+	"pytest-dotenv",
+]
+
+[project.urls]
+Home = "https://github.com/SUNET/inmor"
+
+[tool.pyright]
+stubPath = "typings"
+reportAny = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnannotatedClassAttribute = false
+reportExplicitAny = false
+reportImplicitOverride = false
+reportUninitializedInstanceVariable = false
+
+[tool.ruff]
+line-length = 100
+exclude = [
+    "db",
+    "redis",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "django_redis",
+]
+
+[tool.ty.src]
+exclude = [
+    "db",
+]
+
+[tool.pytest.ini_options]
+testpaths = "tests"
+pythonpath = ["."]
+DJANGO_SETTINGS_MODULE = "inmoradmin.settings"
+env_files = [".env"]
