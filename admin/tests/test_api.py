@@ -18,4 +18,3 @@ def test_trustmarktypes_list(db):
     marks = response.json()
     self.assertEqual(marks["count"], 2)
     self.assertEqual(marks["items"], trustmark_list)
-
