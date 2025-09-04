@@ -21,6 +21,15 @@ class TrustMarkTypeSchema(Schema):
     active: bool = DEFAULTS["trustmarktype"]["active"]
 
 
+class TrustMarkTypeOutSchema(Schema):
+    id: int
+    tmtype: str
+    autorenew: bool
+    valid_for: int
+    renewal_time: int
+    active: bool
+
+
 class Message(Schema):
     message: str
     id: int = 0
@@ -46,7 +55,7 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
         return 500, {"message": "Error while creating a new TrustMarkType"}
 
 
-@router.get("/trustmarktypes", response=list[TrustMarkTypeSchema])
+@router.get("/trustmarktypes", response=list[TrustMarkTypeOutSchema])
 @paginate(LimitOffsetPagination)
 def list_trust_mark_type(
     request: HttpRequest,
