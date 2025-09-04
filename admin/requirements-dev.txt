@@ -22,3 +22,5 @@ pytest
 django-ninja
 humanreadable
 pytest-django
+python-dotenv
+pytest-dotenv
