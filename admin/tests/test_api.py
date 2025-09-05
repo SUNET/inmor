@@ -102,3 +102,27 @@ def test_trustmarktypes_create_double(db):
     resp = response.json()
     for key in data:
         self.assertEqual(data[key], resp.get(key))
+
+
+@pytest.mark.django_db
+def test_trustmarktypes_update(db):
+    """Updates the values of an existing TrustMarkType."""
+    self = TestCase()
+    self.maxDiff = None
+    data = {
+        "active": False,
+        "autorenew": False,
+        "renewal_time": 4,
+        "valid_for": 100,
+    }
+    client: TestClient = TestClient(router)
+    response = client.put("/trustmarktypes/2", json=data)
+    mark = response.json()
+    print(mark)
+    for key in data:
+        self.assertEqual(data[key], mark.get(key))
+    # Now the other values
+    self.assertEqual(2, mark.get("id"))
+    self.assertEqual("https://example.com/trust_mark_type",mark.get("tmtype"))
+
+

@@ -29,6 +29,13 @@ class TrustMarkTypeOutSchema(Schema):
     renewal_time: int
     active: bool
 
+class TrustMarkTypeUpdateSchema(Schema):
+    autorenew: bool| None = None
+    valid_for: int | None = None
+    renewal_time: int | None = None
+    active: bool | None = None
+
+
 
 class Message(Schema):
     message: str
@@ -65,6 +72,39 @@ def list_trust_mark_type(
 ):
     """Lists all existing TrustMarkType(s) from database."""
     return TrustMarkType.objects.all()
+
+
+@router.put("/trustmarktypes/{int:tmtid}", response={200: TrustMarkTypeOutSchema, 404: Message, 500: Message})
+def update_trust_mark_type(
+    request: HttpRequest,
+    tmtid: int,
+    data: TrustMarkTypeUpdateSchema
+):
+    """Updates TrustMarkType"""
+    try:
+        updated = False
+        tmt = TrustMarkType.objects.get(id=tmtid)
+        if not data.active is None:
+            tmt.active = data.active
+            updated = True
+        if not data.autorenew is None:
+            tmt.autorenew = data.autorenew
+            updated = True
+        if not data.valid_for is None:
+            tmt.valid_for = data.valid_for
+            updated = True
+        if not data.renewal_time is None:
+            tmt.renewal_time = data.renewal_time
+            updated = True
+        # Now save if only updated
+        if updated:
+            tmt.save()
+        return tmt 
+    except TrustMarkType.DoesNotExist:
+        return 404, {"message": "TrustMarkType could not be found.", "id": tmtid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to update TrustMarkType.", "id": tmtid}
 
 
 api.add_router("", router)
