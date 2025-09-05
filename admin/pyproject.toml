@@ -95,3 +95,4 @@ testpaths = "tests"
 pythonpath = ["."]
 DJANGO_SETTINGS_MODULE = "inmoradmin.settings"
 env_files = [".env"]
+filterwarnings = ["ignore::DeprecationWarning"]
