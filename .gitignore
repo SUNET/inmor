@@ -1,7 +1,8 @@
 /target
 *.json
-!package*.json
-!tsconfig*.json
+!db.json
+!private.json
+!public.json
 
 
 # Byte-compiled / optimized / DLL files
@@ -21,7 +22,6 @@ downloads/
 eggs/
 .eggs/
 lib/
-!admin/frontend/src/lib/
 lib64/
 parts/
 sdist/

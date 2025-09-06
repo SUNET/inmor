@@ -6,7 +6,10 @@ from django.db.models.functions import Now
 class TrustMarkType(models.Model):
     id: int
     tmtype = models.CharField(unique=True)
-    valid_for = models.IntegerField(default=365)  # Means by default it is valid for 365 days
+    autorenew = models.BooleanField(default=False)
+    valid_for = models.IntegerField(default=8760)  # Means 365 days
+    renewal_time = models.IntegerField(default=48)  # Means 2 days
+    active = models.BooleanField(default=True)  # Means active by default
 
     def __str__(self):
         return self.tmtype
@@ -22,7 +25,10 @@ class TrustMark(models.Model):
     tmt = models.ForeignKey(TrustMarkType, on_delete=models.CASCADE)
     added = models.DateTimeField(db_default=Now())
     domain = models.CharField()
-    active = models.BooleanField(default=False)
+    active = models.BooleanField()
+    autorenew = models.BooleanField()
+    valid_for = models.IntegerField()
+    renewal_time = models.IntegerField()
 
     def __str__(self):
         return self.domain
@@ -32,4 +38,5 @@ class TrustMark(models.Model):
         indexes = [
             models.Index(fields=["domain"]),
             models.Index(fields=["active"]),
+            models.Index(fields=["tmt"]),
         ]
