@@ -123,6 +123,4 @@ def test_trustmarktypes_update(db):
         self.assertEqual(data[key], mark.get(key))
     # Now the other values
     self.assertEqual(2, mark.get("id"))
-    self.assertEqual("https://example.com/trust_mark_type",mark.get("tmtype"))
-
-
+    self.assertEqual("https://example.com/trust_mark_type", mark.get("tmtype"))
