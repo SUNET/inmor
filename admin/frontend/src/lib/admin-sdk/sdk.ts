@@ -31,7 +31,7 @@ export class AdminSDK {
     /**
      * @throws {FetchError}
      */
-    async #fetch(method: HttpMethod, path: string|URL, options: RequestInit = {}): Promise<any> {
+    async #fetch(method: HttpMethod, path: string|URL, options: RequestInit = {}): Promise<unknown> {
         const input = new URL(path, this.#apiUrl);
         input.pathname = `/api/v1/${input.pathname.replace(/^\/|\/$/g, '')}`; // Prepend api base path.
 
