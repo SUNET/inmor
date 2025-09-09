@@ -174,7 +174,7 @@ def test_trustmarktypes_update(db):
 
 
 @pytest.mark.django_db
-def test_trustmark_create(db, trdb):
+def test_trustmark_create(db, loadredis):
     domain = "https://fakerp0.labb.sunet.se"
 
     self = TestCase()
@@ -192,7 +192,7 @@ def test_trustmark_create(db, trdb):
 
 
 @pytest.mark.django_db
-def test_trustmark_create_twice(db, trdb):
+def test_trustmark_create_twice(db, loadredis):
     domain = "https://fakerp0.labb.sunet.se"
 
     self = TestCase()

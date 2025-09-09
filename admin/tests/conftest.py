@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from pytest_redis import factories
 from redis.client import Redis
 
-trdb = factories.redis_proc()
+trdb = factories.redis_proc(port=6088)
 
 rdb = factories.redisdb("trdb")
 
