@@ -76,11 +76,12 @@ def test_trustmarktypes_get_bytype(db):
         "renewal_time": 48,
     }
     client: TestClient = TestClient(router)
-    response = client.get("/trustmarktypes/", json={"tmtype": "https://example.com/trust_mark_type"})
+    response = client.get(
+        "/trustmarktypes/", json={"tmtype": "https://example.com/trust_mark_type"}
+    )
     self.assertEqual(response.status_code, 200)
     mark = response.json()
     self.assertEqual(mark, data)
-
 
 
 @pytest.mark.django_db
