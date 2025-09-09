@@ -16,6 +16,10 @@ router = Router()
 DEFAULTS: dict[str, dict[str, Any]] = settings.TA_DEFAULTS
 
 
+class TrustMarkTypeGetSchema(Schema):
+    tmtype: str
+
+
 class TrustMarkTypeSchema(Schema):
     tmtype: str
     autorenew: bool = DEFAULTS["trustmarktype"]["autorenew"]
@@ -98,6 +102,38 @@ def list_trust_mark_type(
 ):
     """Lists all existing TrustMarkType(s) from database."""
     return TrustMarkType.objects.all()
+
+
+@router.get(
+    "/trustmarktypes/{int:tmtid}",
+    response={200: TrustMarkTypeOutSchema, 404: Message, 500: Message},
+)
+def get_trustmarktype_byid(request: HttpRequest, tmtid: int):
+    """Gets a TrustMarkType"""
+    try:
+        tmt = TrustMarkType.objects.get(id=tmtid)
+        return tmt
+    except TrustMarkType.DoesNotExist:
+        return 404, {"message": "TrustMarkType could not be found.", "id": tmtid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to get TrustMarkType.", "id": tmtid}
+
+
+@router.get(
+    "/trustmarktypes/",
+    response={200: TrustMarkTypeOutSchema, 404: Message, 500: Message},
+)
+def get_trustmarktype_bytype(request: HttpRequest, data: TrustMarkTypeGetSchema):
+    """Gets a TrustMarkType"""
+    try:
+        tmt = TrustMarkType.objects.get(tmtype=data.tmtype)
+        return tmt
+    except TrustMarkType.DoesNotExist:
+        return 404, {"message": "TrustMarkType could not be found."}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to get TrustMarkType."}
 
 
 @router.put(

@@ -44,6 +44,45 @@ def test_trustmarktypes_list(db):
     self.assertEqual(marks["items"], trustmark_list)
 
 
+def test_trustmarktypes_get_byid(db):
+    # don't forget to import router from code above
+    self = TestCase()
+    self.maxDiff = None
+    data = {
+        "tmtype": "https://example.com/trust_mark_type",
+        "id": 2,
+        "valid_for": 720,
+        "active": True,
+        "autorenew": True,
+        "renewal_time": 48,
+    }
+    client: TestClient = TestClient(router)
+    response = client.get("/trustmarktypes/2")
+    self.assertEqual(response.status_code, 200)
+    mark = response.json()
+    self.assertEqual(mark, data)
+
+
+def test_trustmarktypes_get_bytype(db):
+    # don't forget to import router from code above
+    self = TestCase()
+    self.maxDiff = None
+    data = {
+        "tmtype": "https://example.com/trust_mark_type",
+        "id": 2,
+        "valid_for": 720,
+        "active": True,
+        "autorenew": True,
+        "renewal_time": 48,
+    }
+    client: TestClient = TestClient(router)
+    response = client.get("/trustmarktypes/", json={"tmtype": "https://example.com/trust_mark_type"})
+    self.assertEqual(response.status_code, 200)
+    mark = response.json()
+    self.assertEqual(mark, data)
+
+
+
 @pytest.mark.django_db
 def test_trustmarktypes_create(db):
     # don't forget to import router from code above
@@ -149,6 +188,7 @@ def test_trustmark_create(db):
     payload = get_payload(jwt_token)
     self.assertEqual(domain, payload.get("sub"))
     self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+
 
 @pytest.mark.django_db
 def test_trustmark_create_twice(db):
