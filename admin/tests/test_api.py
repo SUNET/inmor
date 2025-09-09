@@ -1,8 +1,16 @@
 import pytest
 from django.test import TestCase
+from jwcrypto import jwt
+from jwcrypto.common import json_decode
 from ninja.testing import TestClient
 
 from inmoradmin.api import router
+
+
+def get_payload(token_str: str):
+    "Helper method to get payload"
+    jose = jwt.JWT.from_jose_token(token_str)
+    return json_decode(jose.token.objects.get("payload", ""))
 
 
 def test_trustmarktypes_list(db):
@@ -118,9 +126,26 @@ def test_trustmarktypes_update(db):
     client: TestClient = TestClient(router)
     response = client.put("/trustmarktypes/2", json=data)
     mark = response.json()
-    print(mark)
     for key in data:
         self.assertEqual(data[key], mark.get(key))
     # Now the other values
     self.assertEqual(2, mark.get("id"))
     self.assertEqual("https://example.com/trust_mark_type", mark.get("tmtype"))
+
+
+@pytest.mark.django_db
+def test_trustmark_create(db):
+    domain = "https://fakerp0.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+    data = {"tmt": 2, "domain": domain}
+    client: TestClient = TestClient(router)
+    response = client.post("/trustmarks", json=data)
+
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    self.assertEqual(domain, payload.get("sub"))
+    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
