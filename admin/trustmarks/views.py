@@ -42,7 +42,9 @@ def addtrustmark(request: HttpRequest) -> HttpResponse:
                 t.save()
                 con: Redis = get_redis_connection("default")
                 # Next create the actual trustmark
-                _trust_mark = add_trustmark(tmr.entity, trust_mark_type.tmtype, con)
+                _trust_mark = add_trustmark(
+                    tmr.entity, trust_mark_type.tmtype, trust_mark_type.valid_for, con
+                )
                 msg = f"Added {tmr.entity}"
             except IntegrityError:
                 msg = f"{tmr.entity} was already added for the selected Trust mark."

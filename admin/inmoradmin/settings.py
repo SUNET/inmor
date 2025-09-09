@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 from typing import List
 
@@ -83,8 +84,8 @@ DATABASES = {
         "NAME": "postgres",
         "USER": "postgres",
         "PASSWORD": "",
-        "HOST": "db",
-        "PORT": 5432,
+        "HOST": os.environ.get("DB_HOST", "db"),
+        "PORT": os.environ.get("DB_PORT", 5432),
     }
 }
 
@@ -133,10 +134,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
+REDIS_LOCATION: str = os.environ.get("REDIS_LOCATION", "redis://redis:6379/0")
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/0",
+        "LOCATION": REDIS_LOCATION,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
@@ -150,9 +153,18 @@ TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay
 METADATA_POLICY = {}
 
-# DATABASES = {
-# "default": {
-# "ENGINE": "django.db.backends.sqlite3",
-# "NAME": BASE_DIR / "db.sqlite3",
-# }
-# }
+# The following are the default values the system will use while creating new entries via API.
+TA_DEFAULTS = {
+    "trustmarktype": {
+        "autorenew": True,
+        "valid_for": 8760,
+        "renewal_time": 48,
+        "active": True,
+    },
+    "trustmark": {
+        "autorenew": True,
+        "valid_for": 8760,
+        "renewal_time": 48,
+        "active": True,
+    },
+}
