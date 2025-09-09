@@ -149,3 +149,26 @@ def test_trustmark_create(db):
     payload = get_payload(jwt_token)
     self.assertEqual(domain, payload.get("sub"))
     self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+
+@pytest.mark.django_db
+def test_trustmark_create_twice(db):
+    domain = "https://fakerp0.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+    data = {"tmt": 2, "domain": domain}
+    client: TestClient = TestClient(router)
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    self.assertEqual(domain, payload.get("sub"))
+    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 403)
+    resp = response.json()
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    self.assertEqual(domain, payload.get("sub"))
+    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
