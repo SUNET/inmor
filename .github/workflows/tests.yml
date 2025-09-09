@@ -61,3 +61,4 @@ jobs:
           # If we were running the job on in a container this would be postgres
           DB_HOST: localhost
           DB_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
+          REDIS_LOCATION: "redis://localhost:6379/0"
