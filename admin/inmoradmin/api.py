@@ -65,7 +65,6 @@ class TrustMarkOutSchema(Schema):
     mark: str | None = None
 
 
-
 class TrustMarkRenewSchema(Schema):
     trustmark_id: int
 
