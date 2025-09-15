@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from django.conf import settings
@@ -7,7 +8,7 @@ from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
 from redis.client import Redis
 
-from trustmarks.lib import add_trustmark, get_expiry, get_trustmark
+from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
 api = NinjaAPI()
@@ -56,12 +57,17 @@ class TrustMarkSchema(Schema):
 class TrustMarkOutSchema(Schema):
     id: int
     domain: str
-    expire_at: float
+    expire_at: datetime
     autorenew: bool | None = None
     valid_for: int | None = None
     renewal_time: int | None = None
     active: bool | None = None
     mark: str | None = None
+
+
+
+class TrustMarkRenewSchema(Schema):
+    trustmark_id: int
 
 
 class Message(Schema):
@@ -225,20 +231,26 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
 
             mark = add_trustmark(tm.domain, tmt.tmtype, tm.valid_for, con)
             # Adds the newly created JWT in the response
-            setattr(tm, "mark", mark)
-            setattr(tm, "expire_at", get_expiry(mark))
+            tm.mark = mark
+            expiry = datetime.fromtimestamp(get_expiry(mark))
+            tm.expire_at = expiry
+            tm.save()
             return 201, tm
         else:
-            mark = get_trustmark(tm.domain, tmt.tmtype, con)
-            if isinstance(mark, str):
-                setattr(tm, "mark", mark)
-                setattr(tm, "expire_at", get_expiry(mark))
-                return 403, tm
-            else:
-                return 500, {"message": "TrustMark already exists but could not be fetched."}
+            return 403, tm
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
+
+
+@router.get(
+    "/trustmarks",
+    response={200: list[TrustMarkOutSchema], 403: TrustMarkOutSchema, 404: Message, 500: Message},
+)
+@paginate(LimitOffsetPagination)
+def get_trustmark_list(request: HttpRequest):
+    """Returns a list of existing TrustMarks."""
+    return TrustMark.objects.all()
 
 
 api.add_router("", router)
