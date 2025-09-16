@@ -181,7 +181,7 @@ def update_trust_mark_type(request: HttpRequest, tmtid: int, data: TrustMarkType
     response={201: TrustMarkOutSchema, 403: TrustMarkOutSchema, 404: Message, 500: Message},
 )
 def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
-    """Creates a new TrustMarak for  given domain nd TrustMarkType ID."""
+    """Creates a new TrustMark for a given domain and TrustMarkType ID."""
     # First get the TrustMarkType
     try:
         tmt = TrustMarkType.objects.get(id=data.tmt)
