@@ -37,7 +37,7 @@ test-ta:
 # To run django tests for admin
 [working-directory: 'admin']
 test-admin:
-  uv run pytest -vvv
+  uv run pytest -vvv -s
 
 # Test target for both rust and django code
 test: test-ta test-admin
@@ -70,8 +70,8 @@ up:
 down:
   docker compose down
 
-t-admin:
-  docker compose exec admin pytest -vvv
+t-admin *FLAGS:
+  docker compose exec admin pytest -vvv {{FLAGS}}
 
 debug-ta:
   docker compose run --rm ta /bin/bash
@@ -83,3 +83,9 @@ debug-admin:
 clean:
   rm -rf .venv
   rm -f public.json private.json admin/private.json
+
+# To recreate db/redis on Fedora
+recreate-fedora:
+  sudo rm -rf ./db ./redis
+  mkdir db redis
+  sudo chcon -Rt container_file_t ./db ./redis
