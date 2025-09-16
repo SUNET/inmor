@@ -256,5 +256,3 @@ def test_trustmark_renew(db, loadredis):
     response = client.post(f"/trustmarks/{resp['id']}/renew")
     self.assertEqual(response.status_code, 200)
     # TODO: Now verify the rewnewd trustmark
-
-

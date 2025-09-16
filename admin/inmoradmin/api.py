@@ -269,7 +269,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
         tm.save()
         return 200, tm
     except TrustMark.DoesNotExist:
-        return 404, {"message": "TrustMark does not exist." ,"id": tmid}
+        return 404, {"message": "TrustMark does not exist.", "id": tmid}
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
