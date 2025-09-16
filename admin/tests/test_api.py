@@ -213,3 +213,32 @@ def test_trustmark_create_twice(db, loadredis):
     payload = get_payload(jwt_token)
     self.assertEqual(domain, payload.get("sub"))
     self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+
+
+@pytest.mark.django_db
+def test_trustmark_list(db, loadredis):
+    domain0 = "https://fakerp0.labb.sunet.se"
+    domain1 = "https://fakerp1.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+    # Add the first trustmark
+    data = {"tmt": 2, "domain": domain0}
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 201)
+    # Add the second trustmark
+    data = {"tmt": 2, "domain": domain1}
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 201)
+
+    response = client.get("/trustmarks")
+    self.assertEqual(response.status_code, 200)
+
+    # Now verify the data we received
+    resp = response.json()
+    self.assertTrue(isinstance(resp.get("items"), list))
+    self.assertEqual(2, resp["count"])
+
+
+
