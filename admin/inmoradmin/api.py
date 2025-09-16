@@ -252,4 +252,27 @@ def get_trustmark_list(request: HttpRequest):
     return TrustMark.objects.all()
 
 
+@router.post(
+    "/trustmarks/{int:tmid}/renew",
+    response={200: TrustMarkOutSchema, 403: TrustMarkOutSchema, 404: Message, 500: Message},
+)
+def renew_trustmark(request: HttpRequest, tmid: int):
+    """Renews a TrustMark"""
+    try:
+        tm = TrustMark.objects.get(id=tmid)
+        con: Redis = get_redis_connection("default")
+        mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, con)
+        # Adds the newly created JWT in the response
+        tm.mark = mark
+        expiry = datetime.fromtimestamp(get_expiry(mark))
+        tm.expire_at = expiry
+        tm.save()
+        return 200, tm
+    except TrustMark.DoesNotExist:
+        return 404, {"message": "TrustMark does not exist." ,"id": tmid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Error while creating a new TrustMark."}
+
+
 api.add_router("", router)
