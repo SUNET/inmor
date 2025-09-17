@@ -242,6 +242,33 @@ def test_trustmark_list(db, loadredis):
 
 
 @pytest.mark.django_db
+def test_trustmark_list_entity(db, loadredis):
+    domain0 = "https://fakerp0.labb.sunet.se"
+    domain1 = "https://fakerp1.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+    # Add the first trustmark
+    data = {"tmt": 2, "domain": domain0}
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 201)
+    # Add the second trustmark
+    data = {"tmt": 2, "domain": domain1}
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 201)
+
+    data = {"domain": domain0}
+    response = client.post(f"/trustmarks/list", json=data)
+    self.assertEqual(response.status_code, 200)
+
+    # Now verify the data we received
+    resp = response.json()
+    self.assertTrue(isinstance(resp.get("items"), list))
+    self.assertEqual(1, resp["count"])
+
+
+@pytest.mark.django_db
 def test_trustmark_renew(db, loadredis):
     domain0 = "https://fakerp0.labb.sunet.se"
 
@@ -271,7 +298,7 @@ def test_trustmark_update(db, loadredis):
     self.assertEqual(response.status_code, 201)
     resp = response.json()
     update_data = {"autorenew": False, "active": False}
-    response = client.post(f"/trustmarks/{resp['id']}", json=update_data)
+    response = client.put(f"/trustmarks/{resp['id']}", json=update_data)
     self.assertEqual(response.status_code, 200)
     resp = response.json()
     self.assertEqual(False, resp.get("autorenew"))

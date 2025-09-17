@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any
 
+import pytz
 from django.conf import settings
 from django.http import HttpRequest
 from django_redis import get_redis_connection
@@ -68,6 +69,10 @@ class TrustMarkOutSchema(Schema):
 class TrustMarkUpdateSchema(Schema):
     autorenew: bool | None = None
     active: bool | None = None
+
+
+class TrustMarkListSchema(Schema):
+    domain: str
 
 
 class Message(Schema):
@@ -232,7 +237,7 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
             mark = add_trustmark(tm.domain, tmt.tmtype, tm.valid_for, con)
             # Adds the newly created JWT in the response
             tm.mark = mark
-            expiry = datetime.fromtimestamp(get_expiry(mark))
+            expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
             tm.expire_at = expiry
             tm.save()
             return 201, tm
@@ -241,6 +246,18 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
+
+
+@router.post(
+    "/trustmarks/list",
+    response={200: list[TrustMarkOutSchema], 403: TrustMarkOutSchema, 404: Message, 500: Message},
+)
+@paginate(LimitOffsetPagination)
+def get_trustmark_list_perdomain(request: HttpRequest, data: TrustMarkListSchema):
+    """Returns a list of existing TrustMarks for a given domain."""
+    if data.domain:
+        return TrustMark.objects.filter(domain=data.domain)
+    return TrustMark.objects.all()
 
 
 @router.get(
@@ -265,7 +282,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
         mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, con)
         # Adds the newly created JWT in the response
         tm.mark = mark
-        expiry = datetime.fromtimestamp(get_expiry(mark))
+        expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
         tm.expire_at = expiry
         tm.save()
         return 200, tm
@@ -276,7 +293,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
         return 500, {"message": "Error while creating a new TrustMark."}
 
 
-@router.post(
+@router.put(
     "/trustmarks/{int:tmid}",
     response={200: TrustMarkOutSchema, 404: Message, 500: Message},
 )
