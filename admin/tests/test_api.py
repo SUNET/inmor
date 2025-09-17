@@ -259,7 +259,7 @@ def test_trustmark_list_entity(db, loadredis):
     self.assertEqual(response.status_code, 201)
 
     data = {"domain": domain0}
-    response = client.post(f"/trustmarks/list", json=data)
+    response = client.post("/trustmarks/list", json=data)
     self.assertEqual(response.status_code, 200)
 
     # Now verify the data we received

@@ -1046,7 +1046,7 @@ pub async fn resolve_entity(
                         &val, metadata
                     );
 
-                    match apply_policy_on_metadata(val, &metadata) {
+                    match apply_policy_on_metadata(val, metadata) {
                         Ok(val) => Some(val),
                         Err(_) => {
                             return error_response_400(
