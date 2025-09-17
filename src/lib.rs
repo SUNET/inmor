@@ -1039,67 +1039,22 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
-                    let mut meta_keys: HashSet<String> = HashSet::new();
+
                     let metadata = res.payload.claim("metadata").unwrap().as_object().unwrap();
                     eprintln!(
                         "\nFinal policy checking: val= {:?}\n\n metadata= {:?}\n\n",
                         &val, metadata
                     );
-                    // If the particular key of metadata exists in policy, then only we apply the
-                    // policy on the metata
-                    for (mkey, mvalue) in metadata.iter() {
-                        // Check for the key
-                        if val.contains_key(mkey) {
-                            // Now we need that particular policy and actual metadata for that
-                            // part.
-                            let mpolicy = val.get(mkey).unwrap().as_object().unwrap();
-                            let result =
-                                resolve_metadata_policy(mpolicy, mvalue.as_object().unwrap());
-                            // Now we have the result for one particular metadata
-                            // If it is Okay, then we should put the resolved metadata to the val
-                            //
-                            match result {
-                                Ok(v) => {
-                                    let temp = v.as_object().unwrap().get(mkey).unwrap();
-                                    val.insert(mkey.clone(), temp.clone());
-                                    // Now keep a note that we have used this key
-                                    meta_keys.insert(mkey.clone());
-                                }
-                                Err(_) => {
-                                    return error_response_400(
-                                        "invalid_trust_chain",
-                                        "received error in applying metadata policy on metadata",
-                                    );
-                                }
-                            }
-                        } else {
-                            // Here the policy object does not have the key of the metadata, means
-                            // we directly copy it over.
-                            meta_keys.insert(mkey.clone());
-                            val.insert(mkey.clone(), mvalue.clone());
+
+                    match apply_policy_on_metadata(val, &metadata) {
+                        Ok(val) => Some(val),
+                        Err(_) => {
+                            return error_response_400(
+                                "invalid_trust_chain",
+                                "received error in applying metadata policy on metadata",
+                            );
                         }
                     }
-
-                    // Now remove any extra key/value pair from the final resolved metadata.
-                    // These extra key/values were part of policy but does not matter for this
-                    // metadata.
-                    let mut to_remove = Vec::new();
-                    for (key, _) in val.iter() {
-                        if !meta_keys.contains(key) {
-                            // Then remove it
-                            to_remove.push(key.clone());
-                        }
-                    }
-                    // Now all extra key/value
-                    for key in to_remove.iter() {
-                        val.remove(key);
-                    }
-                    //
-                    println!("Succesfully applied metadata policy on metadata");
-                    println!("{:?}\n", &val);
-
-                    // No error, all good.
-                    Some(val)
                 }
             }
 

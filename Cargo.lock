@@ -1611,9 +1611,9 @@ dependencies = [
 
 [[package]]
 name = "oidfed_metadata_policy"
-version = "0.0.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd164bf2307ba16568a106eb73b3c979ad4186e66d9b890618ebb2dac790b41"
+checksum = "9a6b3874a25a898040a2fa1a66f13ad7108aa55bb085d5487ceee7b35a1c120a"
 dependencies = [
  "anyhow",
  "env_logger",
