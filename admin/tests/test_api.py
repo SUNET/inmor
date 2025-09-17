@@ -256,3 +256,23 @@ def test_trustmark_renew(db, loadredis):
     response = client.post(f"/trustmarks/{resp['id']}/renew")
     self.assertEqual(response.status_code, 200)
     # TODO: Now verify the rewnewd trustmark
+
+
+@pytest.mark.django_db
+def test_trustmark_update(db, loadredis):
+    domain0 = "https://fakerp0.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+    # Add the first trustmark
+    data = {"tmt": 2, "domain": domain0}
+    response = client.post("/trustmarks", json=data)
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    update_data = {"autorenew": False, "active": False}
+    response = client.post(f"/trustmarks/{resp['id']}", json=update_data)
+    self.assertEqual(response.status_code, 200)
+    resp = response.json()
+    self.assertEqual(False, resp.get("autorenew"))
+    self.assertEqual(False, resp.get("active"))

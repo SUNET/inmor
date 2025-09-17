@@ -65,8 +65,9 @@ class TrustMarkOutSchema(Schema):
     mark: str | None = None
 
 
-class TrustMarkRenewSchema(Schema):
-    trustmark_id: int
+class TrustMarkUpdateSchema(Schema):
+    autorenew: bool | None = None
+    active: bool | None = None
 
 
 class Message(Schema):
@@ -254,7 +255,7 @@ def get_trustmark_list(request: HttpRequest):
 
 @router.post(
     "/trustmarks/{int:tmid}/renew",
-    response={200: TrustMarkOutSchema, 403: TrustMarkOutSchema, 404: Message, 500: Message},
+    response={200: TrustMarkOutSchema, 404: Message, 500: Message},
 )
 def renew_trustmark(request: HttpRequest, tmid: int):
     """Renews a TrustMark"""
@@ -267,6 +268,30 @@ def renew_trustmark(request: HttpRequest, tmid: int):
         expiry = datetime.fromtimestamp(get_expiry(mark))
         tm.expire_at = expiry
         tm.save()
+        return 200, tm
+    except TrustMark.DoesNotExist:
+        return 404, {"message": "TrustMark does not exist.", "id": tmid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Error while creating a new TrustMark."}
+
+
+@router.post(
+    "/trustmarks/{int:tmid}",
+    response={200: TrustMarkOutSchema, 404: Message, 500: Message},
+)
+def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchema):
+    """Update a TrustMark"""
+    try:
+        tm = TrustMark.objects.get(id=tmid)
+        if data.autorenew is not None:
+            tm.autorenew = data.autorenew
+        if data.active is not None:
+            tm.active = data.active
+            if not data.active:
+                tm.mark = None
+        tm.save()
+        # TODO: Should we remove the trustmark from redis in case it is not active?
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}
