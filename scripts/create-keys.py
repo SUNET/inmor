@@ -13,7 +13,7 @@ if os.path.exists("private.json"):
     print("private.json already exists.")
     sys.exit(0)
 
-key = jwk.JWK.generate(kty="RSA", size=2048, use="sig")
+key = jwk.JWK.generate(kty="RSA", size=2048, use="sig", alg="RS256")
 key.kid = key.thumbprint()
 data = key.export_public()
 with open("public.json", "w") as f:

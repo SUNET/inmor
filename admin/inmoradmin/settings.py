@@ -134,10 +134,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
+REDIS_LOCATION: str = os.environ.get("REDIS_LOCATION", "redis://redis:6379/0")
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/0",
+        "LOCATION": REDIS_LOCATION,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },

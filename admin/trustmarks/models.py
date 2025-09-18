@@ -29,6 +29,8 @@ class TrustMark(models.Model):
     autorenew = models.BooleanField()
     valid_for = models.IntegerField()
     renewal_time = models.IntegerField()
+    mark = models.CharField(null=True)
+    expire_at = models.DateTimeField(null=True)
 
     def __str__(self):
         return self.domain
@@ -39,4 +41,5 @@ class TrustMark(models.Model):
             models.Index(fields=["domain"]),
             models.Index(fields=["active"]),
             models.Index(fields=["tmt"]),
+            models.Index(fields=["expire_at"]),
         ]
