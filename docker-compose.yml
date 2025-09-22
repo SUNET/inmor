@@ -21,6 +21,8 @@ services:
       redis:
         condition: service_healthy
     command: ./inmor -c taconfig.toml
+    environment:
+      - 'RUST_LOG=debug'
     ports:
       - "8080:8080"
   db:
@@ -77,3 +79,4 @@ services:
 networks:
   inmor-net:
     driver: bridge
+
