@@ -1046,8 +1046,10 @@ pub async fn resolve_entity(
                         &val, metadata
                     );
 
-                    match apply_policy_on_metadata(val, metadata) {
-                        Ok(val) => Some(val),
+                    // Here the policy contains for every kind of entity.
+
+                    match apply_policy_document_on_metadata(val, metadata) {
+                        Ok(applied) => Some(applied),
                         Err(_) => {
                             return error_response_400(
                                 "invalid_trust_chain",
