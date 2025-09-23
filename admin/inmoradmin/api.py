@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 import pytz
 from django.conf import settings
@@ -7,6 +7,7 @@ from django.http import HttpRequest
 from django_redis import get_redis_connection
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
+from pydantic import Field
 from redis.client import Redis
 
 from trustmarks.lib import add_trustmark, get_expiry
@@ -23,7 +24,7 @@ class TrustMarkTypeGetSchema(Schema):
 
 
 class TrustMarkTypeSchema(Schema):
-    tmtype: str
+    tmtype: Annotated[str, Field(description="URL to describe the Trust Mark Type.")]
     autorenew: bool = DEFAULTS["trustmarktype"]["autorenew"]
     valid_for: int = DEFAULTS["trustmarktype"]["valid_for"]
     renewal_time: int = DEFAULTS["trustmarktype"]["renewal_time"]
