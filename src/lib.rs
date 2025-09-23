@@ -858,6 +858,8 @@ pub async fn resolve_entity_to_trustanchor(
         let vjwt = VerifiedJWT::new(original_ec, &opayload, false, false);
         result.push(vjwt);
     }
+    // FIXME: Store the singing KID from the header so that we can verify it below.
+
     // Now find the authority_hints
     let authority_hints = match opayload.claim("authority_hints") {
         Some(v) => v,
@@ -912,7 +914,11 @@ pub async fn resolve_entity_to_trustanchor(
             Ok(value) => value,
             Err(_) => continue,
         };
-        // The above function verify_jwt_with_jwks now has error handling part.
+        // FIXME: An Entity Statement is signed using a key from the jwks claim in the next.
+        // Restating this symbolically, for each j = 0,...,i-1, ES[j] is signed by
+        // a key in ES[j+1]["jwks"].
+        // Means now we should verify that the subject's signing key is one of the key in the JWKS
+        // of the subordinate statment.
         if ta_flag {
             // Means this is the end of resolving
             let vjwt = VerifiedJWT::new(sub_statement, &subs_payload, true, false);
@@ -1047,7 +1053,8 @@ pub async fn resolve_entity(
                     );
 
                     // Here the policy contains for every kind of entity.
-
+                    // FIXME: We should have the full policy document including
+                    // any forced metadata from the superior.
                     match apply_policy_document_on_metadata(val, metadata) {
                         Ok(applied) => Some(applied),
                         Err(_) => {
