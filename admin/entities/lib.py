@@ -6,11 +6,11 @@ from typing import Any, cast
 
 import httpx
 from django.conf import settings
-from jwcrypto import jwt
+from jwcrypto import jwk, jwt
 from jwcrypto.jwk import JWK, JWKSet
 from jwcrypto.jwt import JWT
+from oidfpolicy import apply_policy, merge_policies
 from pydantic import BaseModel
-
 from redis import Redis
 
 INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
@@ -20,6 +20,40 @@ logger = logging.getLogger(__name__)
 
 class SubordinateRequest(BaseModel):
     entity: str
+
+
+def fetch_entity_configuration(
+    entityid: str, official_metadata: dict[Any, Any], keys: dict[Any, Any] | None = None
+) -> JWT:
+    """Fetches the entity configuration and returns verified JWT.
+
+
+    :args entityid: str the entity_id
+
+    :returns: JWT representation
+    """
+    # Let us get the JWKS
+    if keys is not None:
+        keys_str = json.dumps(keys)
+        keyset = jwk.JWKSet.from_json(keys_str)
+    elif "openid_relying_party" in official_metadata:
+        keys_str = json.dumps(official_metadata["openid_relying_party"]["jwks"])
+        keyset = jwk.JWKSet.from_json(keys_str)
+    elif "openid_provider" in official_metadata:
+        keys_str = json.dumps(official_metadata["openid_provider"]["jwks"])
+        keyset = jwk.JWKSet.from_json(keys_str)
+    else:
+        raise ValueError("Missing JWKS")
+    resp = httpx.get(f"{entityid}/.well-known/openid-federation")
+    text = resp.text
+    jwt_net: JWT = jwt.JWT(jwt=text, key=keyset)
+    return jwt_net
+
+
+def apply_server_policy(metadata: str):
+    "Verifies that we can apply our policy on the metadata."
+    m = apply_policy(json.dumps(settings.POLICY_DOCUMENT), metadata)
+    return m
 
 
 def add_subordinate(entity_id: str, r: Redis) -> str:
