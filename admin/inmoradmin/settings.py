@@ -158,6 +158,8 @@ POLICY_DOCUMENT = {
     "metadata": {},
 }
 
+SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
+
 # The following are the default values the system will use while creating new entries via API.
 TA_DEFAULTS = {
     "trustmarktype": {
