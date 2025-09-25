@@ -11,13 +11,10 @@ from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import BaseModel, BeforeValidator, Field
 from redis.client import Redis
 
-from entities.lib import (
-    apply_server_policy,
-    create_subordinate_statement,
-    fetch_entity_configuration,
-    merge_our_policy_ontop_subpolicy,
-    update_redis_with_subordinate,
-)
+from entities.lib import (apply_server_policy, create_subordinate_statement,
+                          fetch_entity_configuration,
+                          merge_our_policy_ontop_subpolicy,
+                          update_redis_with_subordinate)
 from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
@@ -453,6 +450,14 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
         return 201, sub_statement
     else:
         return 403, sub_statement
+
+@router.get("/subordinates", response=list[EntityOutSchema])
+@paginate(LimitOffsetPagination)
+def list_trust_subordinates(
+    request: HttpRequest,
+):
+    """Lists all existing TrustMarkType(s) from database."""
+    return Subordinate.objects.all()
 
 
 api.add_router("", router)
