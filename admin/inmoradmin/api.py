@@ -1,6 +1,6 @@
 import json
-from datetime import datetime
-from typing import Annotated, Any
+from datetime import datetime, timedelta
+from typing import Annotated, Any, ClassVar
 
 import pytz
 from django.conf import settings
@@ -8,10 +8,13 @@ from django.http import HttpRequest
 from django_redis import get_redis_connection
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
-from pydantic import Field
+from pydantic import AnyUrl, BaseModel, BeforeValidator, ConfigDict, Field
 from redis.client import Redis
 
-from entities.lib import apply_server_policy, fetch_entity_configuration
+from entities.lib import (apply_server_policy, create_subordinate_statement,
+                          fetch_entity_configuration,
+                          update_redis_with_subordinate)
+from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
@@ -78,23 +81,48 @@ class TrustMarkListSchema(Schema):
     domain: str
 
 
+class JWKSType(BaseModel):
+    keys: Annotated[list[dict[str, Any]], Field(min_length=1)]
+
+
+# We need to deserialize from DB
+# class MyJWKSType(BaseModel):
+    # keys: Annotated[
+        # list[dict[str, Any]],
+        # BeforeValidator(lambda v: json.loads(v)),
+        # Field(min_length=1),
+    # ]
+
+def process_keys_fromdb(v: str | None) -> dict[str, Any]:
+    "For the InternalJWKS below"
+    if v:
+        return json.loads(v)
+    return {}
+
+MyDict = Annotated[dict[str, Any], BeforeValidator(lambda v: json.loads(v))]
+InternalJWKS = Annotated[dict[str, Any], BeforeValidator(lambda v: process_keys_fromdb(v))]
+
 class EntityTypeSchema(Schema):
     entityid: str
     metadata: dict[Any, Any]
-    keys: str | None = None
+    keys: dict[Any, Any] | None = None
     required_trustmarks: str | None = None
     valid_for: int | None = None
-    autorenew: bool | None = None
+    autorenew: bool | None = True
+    active: bool | None = True
+
+
 
 
 class EntityOutSchema(Schema):
     id: int = 0
     entityid: str
-    metadata: dict[Any, Any]
-    keys: str | None = None
+    metadata: MyDict
+    keys: InternalJWKS | None = None
     required_trustmarks: str | None = None
     valid_for: int | None = None
     autorenew: bool | None = None
+    active: bool | None = None
 
 
 class Message(Schema):
@@ -352,10 +380,11 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     official_metadata = data.metadata
     keys: dict[Any, Any] | None = None
     if data.keys:
-        keys = json.loads(data.keys)
+        keys = data.keys
 
-    print(type(official_metadata))
-    entity_jwt = fetch_entity_configuration(data.entityid, official_metadata, keys)
+    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(
+        data.entityid, official_metadata, keys
+    )
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
     metadata: dict[str, Any] = claims["metadata"]
     try:
@@ -364,8 +393,48 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     except Exception as e:
         print(e)
         return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}
+    if data.valid_for:
+        if data.valid_for > settings.SUBORDINATE_DEFAULT_VALID_FOR:  # Oops, we can not allow that.
+            return 400, {
+                "message": "valid_for is greater than allowed by system default.",
+                "id": 0,
+            }
+        expiry = data.valid_for
+    else:
+        expiry = settings.SUBORDINATE_DEFAULT_VALID_FOR
 
-    return 201, data
+    # Now we can build the sub ordinate statement first.
+    now = datetime.now()
+    exp = now + timedelta(hours=expiry)
+    # Next, we create the signed statement
+    signed_statement = create_subordinate_statement(data.entityid, keyset, now, exp)
+    # Next save the data in the database.
+    if keys:
+        keys_for_db = json.dumps(keys)
+    else:
+        keys_for_db = None
+    try:
+        sub_statement, created = Subordinate.objects.get_or_create(
+            entityid=data.entityid,
+            autorenew=data.autorenew,
+            metadata=json.dumps(data.metadata),
+            keys=keys_for_db,
+            valid_for=expiry,
+            active=data.active,
+            statement=signed_statement
+        )
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Error while creating a new TrustMarkType"}
+    # All good so far, we will update all related redis entries now.
+    con: Redis = get_redis_connection("default")
+    update_redis_with_subordinate(
+        data.entityid, entity_jwt_str, official_metadata, signed_statement, con
+    )
+    if created:
+        return 201, sub_statement
+    else:
+        return 403, sub_statement
 
 
 api.add_router("", router)
