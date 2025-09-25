@@ -379,6 +379,7 @@ dependencies = [
     { name = "httpx" },
     { name = "humanreadable" },
     { name = "jwcrypto" },
+    { name = "oidfpolicy" },
     { name = "port-for" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
@@ -409,6 +410,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "humanreadable" },
     { name = "jwcrypto" },
+    { name = "oidfpolicy" },
     { name = "port-for" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
@@ -469,6 +471,26 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558", size = 6343, upload-time = "2025-04-22T14:54:24.164Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963, upload-time = "2025-04-22T14:54:22.983Z" },
+]
+
+[[package]]
+name = "oidfpolicy"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/c9/47cb904761064fa48db1cf8858ae82419fc7e08f06634cbde320975847a3/oidfpolicy-0.1.0.tar.gz", hash = "sha256:2127bd254c2709c541f65d209c623f0bd89e2e5afba627a87f94010ae8689de4", size = 9426, upload-time = "2025-09-23T12:13:17.359Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/42/2f04872641edd174c84e2ddb7cefaba6fb846cfdd5edbc0861c677a1d559/oidfpolicy-0.1.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:bf00871f63b9a067ff6b6db0d4bff8654ae05730708cfb4359e63988c046db78", size = 870990, upload-time = "2025-09-23T12:13:08.609Z" },
+    { url = "https://files.pythonhosted.org/packages/99/c1/babd02d5593370930c1ea29eeba3622f2a7e57f3d864a7922fd545510073/oidfpolicy-0.1.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:50cfb556b3be350039d903f4ce727650560236feb9fd50dbe0e43dcdb08a2dea", size = 802588, upload-time = "2025-09-23T12:13:06.838Z" },
+    { url = "https://files.pythonhosted.org/packages/53/47/edc14b684f4b780528d36a6fc6a6d0761257883f4b92f1135834e19e3d35/oidfpolicy-0.1.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b5cc51dae4ca901077c62dc2e90503f2c70660d668ceff45d1e6dbb795e7d37f", size = 885767, upload-time = "2025-09-23T12:12:55.955Z" },
+    { url = "https://files.pythonhosted.org/packages/49/b8/90ae17e7ea9ae1853fb877a759b76afed8a939977bc1ba1c47f73b8b08db/oidfpolicy-0.1.0-cp310-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:947a79d2f82b21dd0665c1869ebb3b867aa07399ebed65b559a902ee6193e1f2", size = 872511, upload-time = "2025-09-23T12:12:57.714Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/25/e008c648a7c6b1f41c6705375d02ad7c9621b7e56d7983351a26a5e227da/oidfpolicy-0.1.0-cp310-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:8ccd55f0df63798743334a722cd5ef1444379373695cb66d0e6e8d05ef938389", size = 1124865, upload-time = "2025-09-23T12:12:59.433Z" },
+    { url = "https://files.pythonhosted.org/packages/70/d4/cd344b362e0a5b5c49ab6feb8c2d70a7bbda266394e15440442580435cb1/oidfpolicy-0.1.0-cp310-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:1fdeb357affa69ab80d2bbe8f542ff6a2b2dd848dbe21ffb11c527e6da6f1c49", size = 948076, upload-time = "2025-09-23T12:13:01.371Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/71/29f30b652b09f5206314c23e4da0017f3d1537908ba37be9576bed9d7b90/oidfpolicy-0.1.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:371749becd3d1a7c9f7e0b0e024ea0b3f389a9f1ed3d598df520b78c7f4442c9", size = 946985, upload-time = "2025-09-23T12:13:05.062Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/69/1d9aac1150f9b79817084e0b0194ac11bc378411a6369de6d7d0c24d4c2b/oidfpolicy-0.1.0-cp310-abi3-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:2b5f52f80a848271e81c435dbe79f76388a7925ed12355ef6cd42f8061182a1c", size = 967074, upload-time = "2025-09-23T12:13:03.113Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/f9/665cd526d8903d8991565811aed973efc9a98a27e48024d66b2e25d6eb0b/oidfpolicy-0.1.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:03704e6b267c035259ee73778a5276e620861cffd50209dfc618a79668a60e2f", size = 1066984, upload-time = "2025-09-23T12:13:10.142Z" },
+    { url = "https://files.pythonhosted.org/packages/33/ff/0f5200793ee92a0487ce4b2530532e233417b920f3d0984ab25a10cc280d/oidfpolicy-0.1.0-cp310-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:1faf74c4b768fc7b65ca3583babe941e52bc638a0b56dc1cd02e15ffa6cbf950", size = 1136363, upload-time = "2025-09-23T12:13:12.022Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/d5/e7f5010e6bfa4f6d7e093ed44554bb72304ecad22eba89ada74151277b62/oidfpolicy-0.1.0-cp310-abi3-musllinux_1_2_i686.whl", hash = "sha256:1d5bf2333a7f1e049042f71bea056b26a42a8cec5330d7ef894eff73288383f8", size = 1102334, upload-time = "2025-09-23T12:13:14.23Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/b0/70b82acb0a8aa9924e4c487069c8591eade22b5167f4ba88c470bf359242/oidfpolicy-0.1.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:8561e4a9f077b949bdfd10dd7cc378b01f994d04753b84f7595664c4252f12ba", size = 1115541, upload-time = "2025-09-23T12:13:16.171Z" },
 ]
 
 [[package]]

@@ -24,3 +24,4 @@ humanreadable
 pytest-django
 python-dotenv
 pytest-dotenv
+oidfpolicy
