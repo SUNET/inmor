@@ -1,6 +1,5 @@
 import json
 import os
-from typing import Any
 
 import pytest
 from django.test import TestCase
@@ -9,6 +8,9 @@ from jwcrypto.common import json_decode
 from ninja.testing import TestClient
 
 from inmoradmin.api import router
+
+# from pprint import pprint
+
 
 data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -324,3 +326,28 @@ def test_add_subordinate(db, loadredis, conf_settings):  # type: ignore
 
     response = client.post("/subordinates", json=data)
     self.assertEqual(response.status_code, 201)
+    d1 = response.json()
+    self.assertEqual(True, d1.get("active"))
+    # This is because the keys are inside the metadata of the client
+    self.assertIsNone(d1.get("jwks"))
+
+
+@pytest.mark.django_db
+def test_add_subordinate_with_key(db, loadredis, conf_settings):  # type: ignore
+    "Tests adding subordinate"
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+
+    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
+        metadata = json.load(fobj)
+
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata, "jwks": keys}
+
+    response = client.post("/subordinates", json=data)
+    self.assertEqual(response.status_code, 201)
+    d1 = response.json()
+    # This is because the keys are sent separately
+    self.assertEqual(keys, d1.get("jwks"))

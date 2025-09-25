@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timedelta
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any
 
 import pytz
 from django.conf import settings
@@ -8,12 +8,16 @@ from django.http import HttpRequest
 from django_redis import get_redis_connection
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
-from pydantic import AnyUrl, BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from redis.client import Redis
 
-from entities.lib import (apply_server_policy, create_subordinate_statement,
-                          fetch_entity_configuration,
-                          update_redis_with_subordinate)
+from entities.lib import (
+    apply_server_policy,
+    create_subordinate_statement,
+    fetch_entity_configuration,
+    merge_our_policy_ontop_subpolicy,
+    update_redis_with_subordinate,
+)
 from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
@@ -87,11 +91,12 @@ class JWKSType(BaseModel):
 
 # We need to deserialize from DB
 # class MyJWKSType(BaseModel):
-    # keys: Annotated[
-        # list[dict[str, Any]],
-        # BeforeValidator(lambda v: json.loads(v)),
-        # Field(min_length=1),
-    # ]
+# keys: Annotated[
+# list[dict[str, Any]],
+# BeforeValidator(lambda v: json.loads(v)),
+# Field(min_length=1),
+# ]
+
 
 def process_keys_fromdb(v: str | None) -> dict[str, Any]:
     "For the InternalJWKS below"
@@ -99,26 +104,26 @@ def process_keys_fromdb(v: str | None) -> dict[str, Any]:
         return json.loads(v)
     return {}
 
+
 MyDict = Annotated[dict[str, Any], BeforeValidator(lambda v: json.loads(v))]
 InternalJWKS = Annotated[dict[str, Any], BeforeValidator(lambda v: process_keys_fromdb(v))]
+
 
 class EntityTypeSchema(Schema):
     entityid: str
     metadata: dict[Any, Any]
-    keys: dict[Any, Any] | None = None
+    jwks: dict[Any, Any] | None = None
     required_trustmarks: str | None = None
     valid_for: int | None = None
     autorenew: bool | None = True
     active: bool | None = True
 
 
-
-
 class EntityOutSchema(Schema):
     id: int = 0
     entityid: str
     metadata: MyDict
-    keys: InternalJWKS | None = None
+    jwks: InternalJWKS | None = None
     required_trustmarks: str | None = None
     valid_for: int | None = None
     autorenew: bool | None = None
@@ -379,13 +384,26 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     # First get verified JWT from entity configuration with the keys we provided
     official_metadata = data.metadata
     keys: dict[Any, Any] | None = None
-    if data.keys:
-        keys = data.keys
+    if data.jwks:
+        keys = data.jwks
 
+    # This entity_jwt is verified with the key (signature verification)
     entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(
         data.entityid, official_metadata, keys
     )
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    # TODO: If the entity has policy, then we should try to merge to veirfy.
+    if "metadata_policy" in claims:
+        sub_policy = claims.get("metadata_policy", {})
+        try:
+            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
+
+        except Exception as e:
+            print(e)
+            return 400, {
+                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
+            }
+
     metadata: dict[str, Any] = claims["metadata"]
     try:
         _ = apply_server_policy(json.dumps(metadata))
@@ -396,14 +414,14 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     if data.valid_for:
         if data.valid_for > settings.SUBORDINATE_DEFAULT_VALID_FOR:  # Oops, we can not allow that.
             return 400, {
-                "message": "valid_for is greater than allowed by system default.",
+                "message": f"valid_for is greater than allowed by system default {settings.SUBORDINATE_DEFAULT_VALID_FOR}.",
                 "id": 0,
             }
         expiry = data.valid_for
     else:
         expiry = settings.SUBORDINATE_DEFAULT_VALID_FOR
 
-    # Now we can build the sub ordinate statement first.
+    # Now we can build the sub ordinate statement.
     now = datetime.now()
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
@@ -418,10 +436,10 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
             entityid=data.entityid,
             autorenew=data.autorenew,
             metadata=json.dumps(data.metadata),
-            keys=keys_for_db,
+            jwks=keys_for_db,
             valid_for=expiry,
             active=data.active,
-            statement=signed_statement
+            statement=signed_statement,
         )
     except Exception as e:
         print(e)
