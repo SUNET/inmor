@@ -9,8 +9,11 @@ class Subordinate(models.Model):
     entityid = models.CharField(unique=True)
     valid_for = models.IntegerField(default=8760)  # Means 365 days
     autorenew = models.BooleanField(default=False)
-    metadata_db = models.CharField()
+    metadata = models.CharField()
+    jwks = models.CharField(null=True)
     required_trustmarks = models.CharField(null=True)
+    active = models.BooleanField(default=True)
+    statement = models.CharField(null=True)
 
     def __str__(self):
         return self.entityid
