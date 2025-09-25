@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -10,6 +11,7 @@ from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import Field
 from redis.client import Redis
 
+from entities.lib import apply_server_policy, fetch_entity_configuration
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
@@ -74,6 +76,25 @@ class TrustMarkUpdateSchema(Schema):
 
 class TrustMarkListSchema(Schema):
     domain: str
+
+
+class EntityTypeSchema(Schema):
+    entityid: str
+    metadata: dict[Any, Any]
+    keys: str | None = None
+    required_trustmarks: str | None = None
+    valid_for: int | None = None
+    autorenew: bool | None = None
+
+
+class EntityOutSchema(Schema):
+    id: int = 0
+    entityid: str
+    metadata: dict[Any, Any]
+    keys: str | None = None
+    required_trustmarks: str | None = None
+    valid_for: int | None = None
+    autorenew: bool | None = None
 
 
 class Message(Schema):
@@ -316,6 +337,35 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
+
+
+# Subordinate API
+
+
+@router.post(
+    "/subordinates",
+    response={201: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
+)
+def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
+    "Adds a new subordinate."
+    # First get verified JWT from entity configuration with the keys we provided
+    official_metadata = data.metadata
+    keys: dict[Any, Any] | None = None
+    if data.keys:
+        keys = json.loads(data.keys)
+
+    print(type(official_metadata))
+    entity_jwt = fetch_entity_configuration(data.entityid, official_metadata, keys)
+    claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    metadata: dict[str, Any] = claims["metadata"]
+    try:
+        _ = apply_server_policy(json.dumps(metadata))
+
+    except Exception as e:
+        print(e)
+        return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}
+
+    return 201, data
 
 
 api.add_router("", router)
