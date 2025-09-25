@@ -459,5 +459,20 @@ def list_trust_subordinates(
     """Lists all existing TrustMarkType(s) from database."""
     return Subordinate.objects.all()
 
+@router.get(
+    "/subordinates/{int:subid}",
+    response={200: EntityOutSchema, 404: Message, 500: Message},
+)
+def get_trustmarktype_byid(request: HttpRequest, subid: int):
+    """Gets a TrustMarkType"""
+    try:
+        tmt = Subordinate.objects.get(id=subid)
+        return tmt
+    except Subordinate.DoesNotExist:
+        return 404, {"message": "Subordinate could not be found.", "id": subid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to get TrustMarkType.", "id": subid}
+
 
 api.add_router("", router)

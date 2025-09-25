@@ -375,4 +375,28 @@ def test_list_subordinates(db, loadredis):  # type: ignore
     marks = response.json()
     self.assertEqual(marks["count"], 1)
 
+@pytest.mark.django_db
+def test_get_subordinate_byid(db, loadredis):  # type: ignore
+    "Tests listing subordinates"
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+
+    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
+        metadata = json.load(fobj)
+
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata, "jwks": keys}
+
+    response = client.post("/subordinates", json=data)
+    self.assertEqual(response.status_code, 201)
+    original = response.json()
+
+    response = client.get(f"/subordinates/{original['id']}")
+    self.assertEqual(response.status_code, 200)
+
+
+    new = response.json()
+    self.assertEqual(original, new)
 
