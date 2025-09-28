@@ -1,6 +1,14 @@
 import * as v from 'valibot';
-import { TrustMarkTypeCreationOptionsSchema, TrustMarkTypesSchema, type HttpMethod, type TrustMarkTypeCreationOptions, type TrustMarkTypes } from './resources';
 import { FetchError, ValidationError } from './errors';
+import { 
+    TrustMarkTypeCreationOptionsSchema, 
+    TrustMarkTypeSchema, 
+    TrustMarkTypesSchema, 
+    type HttpMethod, 
+    type TrustMarkType, 
+    type TrustMarkTypeCreationOptions, 
+    type TrustMarkTypes 
+} from './resources';
 
 type Config = {
     apiUrl: URL;
@@ -35,6 +43,20 @@ export class AdminSDK {
         const res = await this.#fetch('GET', '/trustmarktypes');
 
         const data = v.safeParse(TrustMarkTypesSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
+     * Gets a TrustMarkType by ID.
+     */
+    async getTrustMarkTypeById(id: number): Promise<TrustMarkType> {
+        const res = await this.#fetch('GET', `/trustmarktypes/${id}`);
+
+        const data = v.safeParse(TrustMarkTypeSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
