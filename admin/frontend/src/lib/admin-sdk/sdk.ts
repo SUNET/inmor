@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { TrustMarkTypesSchema, type HttpMethod, type TrustMarkTypes } from './resources';
+import { TrustMarkTypeCreationOptionsSchema, TrustMarkTypesSchema, type HttpMethod, type TrustMarkTypeCreationOptions, type TrustMarkTypes } from './resources';
 import { FetchError, ValidationError } from './errors';
 
 type Config = {
@@ -15,10 +15,24 @@ export class AdminSDK {
     }
 
     /**
-     * List of trust marks
+     * Create Trust Mark Type.
      */
-    async getTrustMarkTypes(): Promise<TrustMarkTypes> {
-        const res = await this.#fetch('GET', '/trust_mark_type/list');
+    async createTrustMarkType(options: TrustMarkTypeCreationOptions): Promise<void> {
+        const body = v.safeParse(TrustMarkTypeCreationOptionsSchema, options);
+        if (!body.success) {
+            throw new ValidationError('Failed to validate trustmark type creation options');
+        }
+
+        await this.#fetch('POST', '/trustmarktypes', {
+            body: JSON.stringify(body.output),
+        });
+    }
+
+    /**
+     * Lists all existing TrustMarkType(s).
+     */
+    async listTrustMarkTypes(): Promise<TrustMarkTypes> {
+        const res = await this.#fetch('GET', '/trustmarktypes');
 
         const data = v.safeParse(TrustMarkTypesSchema, res);
         if (!data.success) {
