@@ -1,11 +1,13 @@
 import * as v from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import { 
+    TrustMarkCreateOptionsSchema,
     TrustMarkTypeCreateOptionsSchema, 
     TrustMarkTypeSchema, 
     TrustMarkTypesSchema, 
     TrustMarkTypeUpdateOptionsSchema, 
     type HttpMethod, 
+    type TrustMarkCreateOptions, 
     type TrustMarkType, 
     type TrustMarkTypeCreateOptions, 
     type TrustMarkTypes, 
@@ -85,6 +87,20 @@ export class AdminSDK {
         }
 
         return data.output;
+    }
+
+    /**
+     * Create Trust Mark.
+     */
+    async createTrustMark(options: TrustMarkCreateOptions): Promise<void> {
+        const body = v.safeParse(TrustMarkCreateOptionsSchema, options);
+        if (!body.success) {
+            throw new ValidationError('Failed to validate trustmark creation options');
+        }
+
+        await this.#fetch('POST', '/trustmarks', {
+            body: JSON.stringify(body.output),
+        });
     }
 
     /**
