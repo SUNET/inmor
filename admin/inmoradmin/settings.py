@@ -146,12 +146,19 @@ CACHES = {
     }
 }
 
+# TA/IA configuration
+
 SIGNING_PRIVATE_KEY = jwk.JWK.from_json(open("./private.json").read())
 SIGNING_PUBLIC_KEY = jwk.JWK.from_json(open("./public.json").read())
 TA_DOMAIN = "http://localhost:8080"
 TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay
-METADATA_POLICY = {}
+POLICY_DOCUMENT = {
+    "metadata_policy": {},
+    "metadata": {},
+}
+
+SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
 
 # The following are the default values the system will use while creating new entries via API.
 TA_DEFAULTS = {

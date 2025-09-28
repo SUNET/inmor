@@ -1,5 +1,6 @@
-from datetime import datetime
-from typing import Any
+import json
+from datetime import datetime, timedelta
+from typing import Annotated, Any
 
 import pytz
 from django.conf import settings
@@ -7,8 +8,14 @@ from django.http import HttpRequest
 from django_redis import get_redis_connection
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
+from pydantic import BaseModel, BeforeValidator, Field
 from redis.client import Redis
 
+from entities.lib import (apply_server_policy, create_subordinate_statement,
+                          fetch_entity_configuration,
+                          merge_our_policy_ontop_subpolicy,
+                          update_redis_with_subordinate)
+from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
@@ -23,7 +30,7 @@ class TrustMarkTypeGetSchema(Schema):
 
 
 class TrustMarkTypeSchema(Schema):
-    tmtype: str
+    tmtype: Annotated[str, Field(description="URL to describe the Trust Mark Type.")]
     autorenew: bool = DEFAULTS["trustmarktype"]["autorenew"]
     valid_for: int = DEFAULTS["trustmarktype"]["valid_for"]
     renewal_time: int = DEFAULTS["trustmarktype"]["renewal_time"]
@@ -73,6 +80,51 @@ class TrustMarkUpdateSchema(Schema):
 
 class TrustMarkListSchema(Schema):
     domain: str
+
+
+class JWKSType(BaseModel):
+    keys: Annotated[list[dict[str, Any]], Field(min_length=1)]
+
+
+# We need to deserialize from DB
+# class MyJWKSType(BaseModel):
+# keys: Annotated[
+# list[dict[str, Any]],
+# BeforeValidator(lambda v: json.loads(v)),
+# Field(min_length=1),
+# ]
+
+
+def process_keys_fromdb(v: str | None) -> dict[str, Any]:
+    "For the InternalJWKS below"
+    if v:
+        return json.loads(v)
+    return {}
+
+
+MyDict = Annotated[dict[str, Any], BeforeValidator(lambda v: json.loads(v))]
+InternalJWKS = Annotated[dict[str, Any], BeforeValidator(lambda v: process_keys_fromdb(v))]
+
+
+class EntityTypeSchema(Schema):
+    entityid: str
+    metadata: dict[Any, Any]
+    jwks: dict[Any, Any] | None = None
+    required_trustmarks: str | None = None
+    valid_for: int | None = None
+    autorenew: bool | None = True
+    active: bool | None = True
+
+
+class EntityOutSchema(Schema):
+    id: int = 0
+    entityid: str
+    metadata: MyDict
+    jwks: InternalJWKS | None = None
+    required_trustmarks: str | None = None
+    valid_for: int | None = None
+    autorenew: bool | None = None
+    active: bool | None = None
 
 
 class Message(Schema):
@@ -315,6 +367,112 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
+
+
+# Subordinate API
+
+
+@router.post(
+    "/subordinates",
+    response={201: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
+)
+def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
+    "Adds a new subordinate."
+    # First get verified JWT from entity configuration with the keys we provided
+    official_metadata = data.metadata
+    keys: dict[Any, Any] | None = None
+    if data.jwks:
+        keys = data.jwks
+
+    # This entity_jwt is verified with the key (signature verification)
+    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(
+        data.entityid, official_metadata, keys
+    )
+    claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    # TODO: If the entity has policy, then we should try to merge to veirfy.
+    if "metadata_policy" in claims:
+        sub_policy = claims.get("metadata_policy", {})
+        try:
+            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
+
+        except Exception as e:
+            print(e)
+            return 400, {
+                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
+            }
+
+    metadata: dict[str, Any] = claims["metadata"]
+    try:
+        _ = apply_server_policy(json.dumps(metadata))
+
+    except Exception as e:
+        print(e)
+        return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}
+    if data.valid_for:
+        if data.valid_for > settings.SUBORDINATE_DEFAULT_VALID_FOR:  # Oops, we can not allow that.
+            return 400, {
+                "message": f"valid_for is greater than allowed by system default {settings.SUBORDINATE_DEFAULT_VALID_FOR}.",
+                "id": 0,
+            }
+        expiry = data.valid_for
+    else:
+        expiry = settings.SUBORDINATE_DEFAULT_VALID_FOR
+
+    # Now we can build the sub ordinate statement.
+    now = datetime.now()
+    exp = now + timedelta(hours=expiry)
+    # Next, we create the signed statement
+    signed_statement = create_subordinate_statement(data.entityid, keyset, now, exp)
+    # Next save the data in the database.
+    if keys:
+        keys_for_db = json.dumps(keys)
+    else:
+        keys_for_db = None
+    try:
+        sub_statement, created = Subordinate.objects.get_or_create(
+            entityid=data.entityid,
+            autorenew=data.autorenew,
+            metadata=json.dumps(data.metadata),
+            jwks=keys_for_db,
+            valid_for=expiry,
+            active=data.active,
+            statement=signed_statement,
+        )
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Error while creating a new TrustMarkType"}
+    # All good so far, we will update all related redis entries now.
+    con: Redis = get_redis_connection("default")
+    update_redis_with_subordinate(
+        data.entityid, entity_jwt_str, official_metadata, signed_statement, con
+    )
+    if created:
+        return 201, sub_statement
+    else:
+        return 403, sub_statement
+
+@router.get("/subordinates", response=list[EntityOutSchema])
+@paginate(LimitOffsetPagination)
+def list_trust_subordinates(
+    request: HttpRequest,
+):
+    """Lists all existing TrustMarkType(s) from database."""
+    return Subordinate.objects.all()
+
+@router.get(
+    "/subordinates/{int:subid}",
+    response={200: EntityOutSchema, 404: Message, 500: Message},
+)
+def get_trustmarktype_byid(request: HttpRequest, subid: int):
+    """Gets a TrustMarkType"""
+    try:
+        tmt = Subordinate.objects.get(id=subid)
+        return tmt
+    except Subordinate.DoesNotExist:
+        return 404, {"message": "Subordinate could not be found.", "id": subid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to get TrustMarkType.", "id": subid}
 
 
 api.add_router("", router)

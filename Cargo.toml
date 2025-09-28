@@ -17,7 +17,7 @@ tokio = { version = "1", features = ["full"] }
 env_logger = "0.11.8"
 log = "0.4.27"
 base64 = "0.22"
-oidfed_metadata_policy = "0.3.0"
+oidfed_metadata_policy = { git = "https://github.com/SUNET/oidfed_metadata_policy", branch = "entity_policy"}
 anyhow = "1.0.98"
 toml = "0.9.0"
 clap = { version = "4.5.41", features = ["derive"] }

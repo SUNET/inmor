@@ -1,28 +1,30 @@
 ---
 services:
-  # ta:
-  #   restart: always
-  #   build: .
-  #   image: docker.sunet.se/inmor:v0.0.1
-  #   networks:
-  #     - inmor-net
-  #   healthcheck:
-  #     test: ['CMD', 'true']
-  #     interval: 30s
-  #     timeout: 60s
-  #     retries: 5
-  #     start_period: 80s
-  #   volumes:
-  #     - ./target/debug/:/code/
-  #     - ./taconfig.toml:/code/taconfig.toml
-  #     - ./private.json:/code/private.json
-  #     - ./public.json:/code/public.json
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   command: ./inmor -c taconfig.toml
-  #   ports:
-  #     - "8080:8080"
+  ta:
+    restart: always
+    build: .
+    image: docker.sunet.se/inmor:v0.0.1
+    networks:
+      - inmor-net
+    healthcheck:
+      test: ['CMD', 'true']
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 80s
+    volumes:
+      - ./target/debug/:/code/
+      - ./taconfig.toml:/code/taconfig.toml
+      - ./private.json:/code/private.json
+      - ./public.json:/code/public.json
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ./inmor -c taconfig.toml
+    environment:
+      - 'RUST_LOG=debug'
+    ports:
+      - "8080:8080"
   db:
     restart: always
     image: postgres:14-alpine
@@ -64,8 +66,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      # ta:
-      #   condition: service_healthy
+      ta:
+        condition: service_healthy
     command: ./docker-entrypoint.sh
     environment:
       - INSIDE_CONTAINER=true
@@ -74,17 +76,7 @@ services:
       - ./public.json:/code/public.json
     ports:
       - "8000:8000"
-  admin-frontend:
-    build: ./admin/frontend
-    volumes:
-      - ./admin/frontend:/app
-      - node_modules:/app/node_modules
-    ports:
-      - 5173:5173
-
-volumes:
-  node_modules:
-
 networks:
   inmor-net:
     driver: bridge
+

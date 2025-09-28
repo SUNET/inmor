@@ -32,6 +32,7 @@ def add_trustmark(entity: str, trustmarktype: str, expiry: int, r: redis.Redis) 
     sub_data = {"iss": settings.TRUSTMARK_PROVIDER}
     sub_data["sub"] = entity
     now = datetime.now()
+    # FIXME: timedelta should be in hours
     exp = now + timedelta(days=expiry)
     sub_data["iat"] = now.timestamp()
     sub_data["exp"] = exp.timestamp()
