@@ -2,8 +2,8 @@ import * as v from 'valibot';
 
 export type HttpMethod = 'GET'|'POST'|'DELETE'|'PATCH'|'PUT';
 
-export type TrustMarkTypeCreationOptions = v.InferOutput<typeof TrustMarkTypeCreationOptionsSchema>;
-export const TrustMarkTypeCreationOptionsSchema = v.object({
+export type TrustMarkTypeCreateOptions = v.InferOutput<typeof TrustMarkTypeCreateOptionsSchema>;
+export const TrustMarkTypeCreateOptionsSchema = v.object({
   tmtype: v.string(),
   autorenew: v.boolean(),
   valid_for: v.number(),
