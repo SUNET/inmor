@@ -68,3 +68,26 @@ export const TrustMarksSchema = v.object({
   items: v.array(TrustMarkSchema),
   count: v.number(),
 });
+
+export type SubordinateCreateOptions = v.InferOutput<typeof SubordinateCreateOptionsSchema>;
+export const SubordinateCreateOptionsSchema = v.object({
+  entityid: v.string(),
+  metadata: v.record(v.string(), v.unknown()),
+  jwks: v.record(v.string(), v.unknown()),
+  required_trustmarks: v.string(),
+  valid_for: v.number(),
+  autorenew: v.boolean(),
+  active: v.boolean(),
+});
+
+export type Subordinate = v.InferOutput<typeof SubordinateSchema>;
+export const SubordinateSchema = v.object({
+  id: v.number(),
+  entityid: v.string(),
+  metadata: v.record(v.string(), v.unknown()),
+  jwks: v.record(v.string(), v.unknown()), 
+  required_trustmarks: v.string(),
+  valid_for: v.number(), 
+  autorenew: v.boolean(),  
+  active: v.boolean(),  
+})
