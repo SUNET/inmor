@@ -1,13 +1,14 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
 import TrustMarkTypesList from '../components/TrustMarkTypesList.vue';
+import Heading from '../components/base/Heading.vue';
 
 export default defineComponent({
-    components: { TrustMarkTypesList }
+    components: { Heading, TrustMarkTypesList }
 });
 </script>
 
 <template>
-    <h1>TrustMarkTypes</h1>
+    <Heading level="h1">Trust mark types</Heading>
     <TrustMarkTypesList />
 </template>

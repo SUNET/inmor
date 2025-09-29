@@ -1,10 +1,12 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
+import Heading from '../components/base/Heading.vue';
 
 export default defineComponent({
+    components: { Heading }
 });
 </script>
 
 <template>
-    <h1>TrustMarks</h1>
+    <Heading level="h1">Trust marks</Heading>
 </template>

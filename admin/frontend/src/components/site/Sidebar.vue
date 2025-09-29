@@ -66,7 +66,7 @@ export default defineComponent({
             padding: min(.2em, var(--ir--space--1)) min(.4em, var(--ir--space--2));
             margin-bottom: var(--ir--space--2);
             font-family: monospace;
-            font-size: var(--ir--font-size--l);
+            font-size: var(--ir--font-size--m);
             font-weight: var(--ir--font-weight--bold);
             text-decoration: none;
             border-radius: var(--ir--space--1);
