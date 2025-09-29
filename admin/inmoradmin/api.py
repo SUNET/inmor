@@ -441,15 +441,15 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMarkType"}
+    # If we did not create a new subordinate, return now.
+    if not created:
+        return 403, sub_statement
     # All good so far, we will update all related redis entries now.
     con: Redis = get_redis_connection("default")
     update_redis_with_subordinate(
         data.entityid, entity_jwt_str, official_metadata, signed_statement, con
     )
-    if created:
-        return 201, sub_statement
-    else:
-        return 403, sub_statement
+    return 201, sub_statement
 
 @router.get("/subordinates", response=list[EntityOutSchema])
 @paginate(LimitOffsetPagination)
