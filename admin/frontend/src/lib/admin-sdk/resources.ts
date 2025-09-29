@@ -1,99 +1,108 @@
-import * as v from 'valibot';
+import { 
+  array, 
+  boolean, 
+  number, 
+  object, 
+  record, 
+  string, 
+  unknown, 
+  type InferOutput 
+} from 'valibot';
 
 export type HttpMethod = 'GET'|'POST'|'DELETE'|'PATCH'|'PUT';
 
-export type TrustMarkTypeCreateOptions = v.InferOutput<typeof TrustMarkTypeCreateOptionsSchema>;
-export const TrustMarkTypeCreateOptionsSchema = v.object({
-  tmtype: v.string(),
-  autorenew: v.boolean(),
-  valid_for: v.number(),
-  renewal_time: v.number(),
-  active: v.boolean(),
+export type TrustMarkTypeCreateOptions = InferOutput<typeof TrustMarkTypeCreateOptionsSchema>;
+export const TrustMarkTypeCreateOptionsSchema = object({
+  tmtype: string(),
+  autorenew: boolean(),
+  valid_for: number(),
+  renewal_time: number(),
+  active: boolean(),
 })
 
-export type TrustMarkTypeUpdateOptions = v.InferOutput<typeof TrustMarkTypeUpdateOptionsSchema>;
-export const TrustMarkTypeUpdateOptionsSchema = v.object({
-  autorenew: v.boolean(),
-  valid_for: v.number(),
-  renewal_time: v.number(),
-  active: v.boolean(),
+export type TrustMarkTypeUpdateOptions = InferOutput<typeof TrustMarkTypeUpdateOptionsSchema>;
+export const TrustMarkTypeUpdateOptionsSchema = object({
+  autorenew: boolean(),
+  valid_for: number(),
+  renewal_time: number(),
+  active: boolean(),
 });
 
-export type TrustMarkType = v.InferOutput<typeof TrustMarkTypeSchema>;
-export const TrustMarkTypeSchema = v.object({
-  id: v.number(),
-  tmtype: v.string(),
-  autorenew: v.boolean(),
-  valid_for: v.number(),
-  renewal_time: v.number(),
-  active: v.boolean(),
+export type TrustMarkType = InferOutput<typeof TrustMarkTypeSchema>;
+export const TrustMarkTypeSchema = object({
+  id: number(),
+  tmtype: string(),
+  autorenew: boolean(),
+  valid_for: number(),
+  renewal_time: number(),
+  active: boolean(),
 });
 
-export type TrustMarkTypes = v.InferOutput<typeof TrustMarkTypesSchema>;
-export const TrustMarkTypesSchema = v.object({
-  items: v.array(TrustMarkTypeSchema),
-  count: v.number(),
+export type TrustMarkTypes = InferOutput<typeof TrustMarkTypesSchema>;
+export const TrustMarkTypesSchema = object({
+  items: array(TrustMarkTypeSchema),
+  count: number(),
 });
 
-export type TrustMarkCreateOptions = v.InferOutput<typeof TrustMarkCreateOptionsSchema>;
-export const TrustMarkCreateOptionsSchema = v.object({
-  tmt: v.number(),
-  domain: v.string(),
-  autorenew: v.boolean(),
-  valid_for: v.number(),
-  renewal_time: v.number(),
-  active: v.boolean(),
+export type TrustMarkCreateOptions = InferOutput<typeof TrustMarkCreateOptionsSchema>;
+export const TrustMarkCreateOptionsSchema = object({
+  tmt: number(),
+  domain: string(),
+  autorenew: boolean(),
+  valid_for: number(),
+  renewal_time: number(),
+  active: boolean(),
 });
 
-export type TrustMarkUpdateOptions = v.InferOutput<typeof TrustMarkUpdateOptionsSchema>;
-export const TrustMarkUpdateOptionsSchema = v.object({
-  autorenew: v.boolean(),
-  active: v.boolean(),
+export type TrustMarkUpdateOptions = InferOutput<typeof TrustMarkUpdateOptionsSchema>;
+export const TrustMarkUpdateOptionsSchema = object({
+  autorenew: boolean(),
+  active: boolean(),
 })
 
-export type TrustMark = v.InferOutput<typeof TrustMarkSchema>;
-export const TrustMarkSchema = v.object({
-  id: v.number(),
-  domain: v.string(),
-  expire_at: v.string(),
-  autorenew: v.boolean(),
-  valid_for: v.number(),
-  renewal_time: v.number(),
-  active: v.boolean(),
-  mark: v.string(),
+export type TrustMark = InferOutput<typeof TrustMarkSchema>;
+export const TrustMarkSchema = object({
+  id: number(),
+  domain: string(),
+  expire_at: string(),
+  autorenew: boolean(),
+  valid_for: number(),
+  renewal_time: number(),
+  active: boolean(),
+  mark: string(),
 });
 
-export type TrustMarks = v.InferOutput<typeof TrustMarksSchema>;
-export const TrustMarksSchema = v.object({
-  items: v.array(TrustMarkSchema),
-  count: v.number(),
+export type TrustMarks = InferOutput<typeof TrustMarksSchema>;
+export const TrustMarksSchema = object({
+  items: array(TrustMarkSchema),
+  count: number(),
 });
 
-export type SubordinateCreateOptions = v.InferOutput<typeof SubordinateCreateOptionsSchema>;
-export const SubordinateCreateOptionsSchema = v.object({
-  entityid: v.string(),
-  metadata: v.record(v.string(), v.unknown()),
-  jwks: v.record(v.string(), v.unknown()),
-  required_trustmarks: v.string(),
-  valid_for: v.number(),
-  autorenew: v.boolean(),
-  active: v.boolean(),
+export type SubordinateCreateOptions = InferOutput<typeof SubordinateCreateOptionsSchema>;
+export const SubordinateCreateOptionsSchema = object({
+  entityid: string(),
+  metadata: record(string(), unknown()),
+  jwks: record(string(), unknown()),
+  required_trustmarks: string(),
+  valid_for: number(),
+  autorenew: boolean(),
+  active: boolean(),
 });
 
-export type Subordinate = v.InferOutput<typeof SubordinateSchema>;
-export const SubordinateSchema = v.object({
-  id: v.number(),
-  entityid: v.string(),
-  metadata: v.record(v.string(), v.unknown()),
-  jwks: v.record(v.string(), v.unknown()), 
-  required_trustmarks: v.string(),
-  valid_for: v.number(), 
-  autorenew: v.boolean(),  
-  active: v.boolean(),  
+export type Subordinate = InferOutput<typeof SubordinateSchema>;
+export const SubordinateSchema = object({
+  id: number(),
+  entityid: string(),
+  metadata: record(string(), unknown()),
+  jwks: record(string(), unknown()), 
+  required_trustmarks: string(),
+  valid_for: number(), 
+  autorenew: boolean(),  
+  active: boolean(),  
 })
 
-export type Subordinates = v.InferOutput<typeof SubordinatesSchema>;
-export const SubordinatesSchema = v.object({
-  items: v.array(SubordinateSchema),
-  count: v.number(),
+export type Subordinates = InferOutput<typeof SubordinatesSchema>;
+export const SubordinatesSchema = object({
+  items: array(SubordinateSchema),
+  count: number(),
 });
