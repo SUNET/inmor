@@ -221,6 +221,20 @@ export class AdminSDK {
     }
 
     /**
+     * Gets a subordinate by ID.
+     */
+    async getSubordinateById(id: number): Promise<Subordinate> {
+        const res = await this.#fetch('GET', `/subordinates/${id}`);
+
+        const data = v.safeParse(SubordinateSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
      * @throws {FetchError}
      */
     async #fetch(method: HttpMethod, path: string|URL, options: RequestInit & { filters?: Record<string, string|number|boolean> } = {}): Promise<unknown> {
