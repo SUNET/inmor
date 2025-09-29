@@ -1,19 +1,21 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
+import Layout from './components/site/Layout.vue';
 
 export default defineComponent({
   name: 'App',
+  components: { Layout },
   mounted() {
 
-    if (this.$route.fullPath !== 'trustmark-types') {
-        this.$router.push('/trustmark-types')
-    }
+    // if (this.$route.fullPath !== 'trustmark-types') {
+    //     this.$router.push('/trustmark-types')
+    // }
   },
 })
 </script>
 
 <template>
-    <main>
+    <Layout>
         <RouterView />
-    </main>
+    </Layout>
 </template>
