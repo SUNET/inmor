@@ -2,12 +2,14 @@ import * as v from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import { 
     TrustMarkCreateOptionsSchema,
+    TrustMarksSchema,
     TrustMarkTypeCreateOptionsSchema, 
     TrustMarkTypeSchema, 
     TrustMarkTypesSchema, 
     TrustMarkTypeUpdateOptionsSchema, 
     type HttpMethod, 
     type TrustMarkCreateOptions, 
+    type TrustMarks, 
     type TrustMarkType, 
     type TrustMarkTypeCreateOptions, 
     type TrustMarkTypes, 
@@ -101,6 +103,20 @@ export class AdminSDK {
         await this.#fetch('POST', '/trustmarks', {
             body: JSON.stringify(body.output),
         });
+    }
+
+    /**
+     * Lists all existing TrustMarks.
+     */
+    async listTrustMarks(): Promise<TrustMarks> {
+        const res = await this.#fetch('GET', '/trustmarkts');
+
+        const data = v.safeParse(TrustMarksSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
     }
 
     /**
