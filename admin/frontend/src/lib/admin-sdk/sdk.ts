@@ -45,8 +45,10 @@ export class AdminSDK {
     /**
      * Lists all existing TrustMarkType(s).
      */
-    async listTrustMarkTypes(): Promise<TrustMarkTypes> {
-        const res = await this.#fetch('GET', '/trustmarktypes');
+    async listTrustMarkTypes(filters?: { limit?: number; offset?: number; }): Promise<TrustMarkTypes> {
+        const res = await this.#fetch('GET', '/trustmarktypes', {
+            filters,
+        });
 
         const data = v.safeParse(TrustMarkTypesSchema, res);
         if (!data.success) {
@@ -108,8 +110,10 @@ export class AdminSDK {
     /**
      * Lists all existing TrustMarks.
      */
-    async listTrustMarks(): Promise<TrustMarks> {
-        const res = await this.#fetch('GET', '/trustmarkts');
+    async listTrustMarks(filters?: { limit?: number; offset?: number; }): Promise<TrustMarks> {
+        const res = await this.#fetch('GET', '/trustmarks', {
+            filters,
+        });
 
         const data = v.safeParse(TrustMarksSchema, res);
         if (!data.success) {
@@ -122,9 +126,19 @@ export class AdminSDK {
     /**
      * @throws {FetchError}
      */
-    async #fetch(method: HttpMethod, path: string|URL, options: RequestInit = {}): Promise<unknown> {
+    async #fetch(method: HttpMethod, path: string|URL, options: RequestInit & { filters?: Record<string, string|number|boolean> } = {}): Promise<unknown> {
         const input = new URL(path, this.#apiUrl);
         input.pathname = `/api/v1/${input.pathname.replace(/^\/|\/$/g, '')}`; // Prepend api base path.
+
+        if (options.filters) {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(options.filters)) {
+                params.append(key, String(value));
+            }
+
+            // We don't want to pass this along to the RequestInit.
+            delete options.filters;
+        }
 
         const init: RequestInit = {
             ...options,
