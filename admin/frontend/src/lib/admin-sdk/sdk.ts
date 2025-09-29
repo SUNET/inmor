@@ -1,6 +1,8 @@
 import * as v from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import { 
+    SubordinateCreateOptionsSchema,
+    SubordinateSchema,
     TrustMarkCreateOptionsSchema,
     TrustMarkSchema,
     TrustMarksSchema,
@@ -10,6 +12,8 @@ import {
     TrustMarkTypeUpdateOptionsSchema, 
     TrustMarkUpdateOptionsSchema, 
     type HttpMethod, 
+    type Subordinate, 
+    type SubordinateCreateOptions, 
     type TrustMark, 
     type TrustMarkCreateOptions, 
     type TrustMarks, 
@@ -151,6 +155,27 @@ export class AdminSDK {
         const res = await this.#fetch('POST', `/trustmarks/${id}/renew`);
 
         const data = v.safeParse(TrustMarkSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
+     * Create Subordinate.
+     */
+    async createSubordinate(options: SubordinateCreateOptions): Promise<Subordinate> {
+        const body = v.safeParse(SubordinateCreateOptionsSchema, options);
+        if (!body.success) {
+            throw new ValidationError('Failed to validate subordinate creation options');
+        }
+
+        const res = await this.#fetch('POST', '/subordinates', {
+            body: JSON.stringify(body.output),
+        });
+
+        const data = v.safeParse(SubordinateSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
