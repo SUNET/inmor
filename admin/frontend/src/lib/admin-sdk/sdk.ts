@@ -263,12 +263,13 @@ export class AdminSDK {
 
         try {
             const res = await fetch(input, init);
+            const data = await res.json();
 
             if (!res.ok) {
-                throw new FetchError({ status: res.status });
+                const message = 'message' in data && typeof data.message === 'string' ? data.message : undefined;
+                throw new FetchError({ status: res.status, message: message });
             }
 
-            const data = await res.json();
             return data;
         } catch (error) {
             if (error instanceof FetchError) throw error;
