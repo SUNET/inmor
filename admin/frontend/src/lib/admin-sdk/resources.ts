@@ -45,6 +45,12 @@ export const TrustMarkCreateOptionsSchema = v.object({
   active: v.boolean(),
 });
 
+export type TrustMarkUpdateOptions = v.InferOutput<typeof TrustMarkUpdateOptionsSchema>;
+export const TrustMarkUpdateOptionsSchema = v.object({
+  autorenew: v.boolean(),
+  active: v.boolean(),
+})
+
 export type TrustMark = v.InferOutput<typeof TrustMarkSchema>;
 export const TrustMarkSchema = v.object({
   id: v.number(),

@@ -8,6 +8,7 @@ import {
     TrustMarkTypeSchema, 
     TrustMarkTypesSchema, 
     TrustMarkTypeUpdateOptionsSchema, 
+    TrustMarkUpdateOptionsSchema, 
     type HttpMethod, 
     type TrustMark, 
     type TrustMarkCreateOptions, 
@@ -15,7 +16,8 @@ import {
     type TrustMarkType, 
     type TrustMarkTypeCreateOptions, 
     type TrustMarkTypes, 
-    type TrustMarkTypeUpdateOptions
+    type TrustMarkTypeUpdateOptions,
+    type TrustMarkUpdateOptions
 } from './resources';
 
 type Config = {
@@ -147,6 +149,25 @@ export class AdminSDK {
      */
     async renewTrustMark(id: number): Promise<TrustMark> {
         const res = await this.#fetch('POST', `/trustmarks/${id}/renew`);
+
+        const data = v.safeParse(TrustMarkSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
+     * Update a TrustMark.
+     */
+    async updateTrustMark(id: number, options: TrustMarkUpdateOptions): Promise<TrustMark> {
+        const body = v.safeParse(TrustMarkUpdateOptionsSchema, options);
+        if (!body.success) {
+            throw new ValidationError('Failed to validate trustmark update options');
+        }
+
+        const res = await this.#fetch('POST', `/trustmarks/${id}`);
 
         const data = v.safeParse(TrustMarkSchema, res);
         if (!data.success) {
