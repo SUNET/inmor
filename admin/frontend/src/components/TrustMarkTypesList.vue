@@ -13,7 +13,7 @@ export default defineComponent({
   },
   async mounted() {
     try {
-      this.trustMarkTypes = await this.$sdk.getTrustMarkTypes();
+      this.trustMarkTypes = await this.$sdk.listTrustMarkTypes();
     } catch (e) {
       this.error = 'Failed to load trust mark types. Please try again later.';
       console.error(e);
