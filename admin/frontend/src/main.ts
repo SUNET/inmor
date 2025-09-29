@@ -11,8 +11,8 @@ app.config.globalProperties.$sdk = new AdminSDK({
 });
 
 app.use(createRouter({
-  history: createWebHistory(),
-  routes,
+    history: createWebHistory(),
+    routes,
 }));
 
 app.mount('#app');

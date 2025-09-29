@@ -3,11 +3,11 @@ import { defineComponent } from 'vue';
 import TrustMarkTypesList from '../components/TrustMarkTypesList.vue';
 
 export default defineComponent({
-  components: { TrustMarkTypesList }
+    components: { TrustMarkTypesList }
 });
 </script>
 
 <template>
-  <h1>TrustMarkTypes</h1>
-  <TrustMarkTypesList />
+    <h1>TrustMarkTypes</h1>
+    <TrustMarkTypesList />
 </template>
