@@ -6,14 +6,14 @@ export default defineComponent({
   mounted() {
 
     if (this.$route.fullPath !== 'trustmark-types') {
-      this.$router.push('/trustmark-types')
+        this.$router.push('/trustmark-types')
     }
   },
 })
 </script>
 
 <template>
-  <main>
-    <RouterView />
-  </main>
+    <main>
+        <RouterView />
+    </main>
 </template>
