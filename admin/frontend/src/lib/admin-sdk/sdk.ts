@@ -124,6 +124,23 @@ export class AdminSDK {
     }
 
     /**
+     * Returns a list of existing TrustMarks for a given domain.
+     */
+    async listTrustMarksByDomain(domain: string, filters?: { limit?: number; offset?: number; }): Promise<TrustMarks> {
+        const res = await this.#fetch('POST', '/trustmarks/list', {
+            filters,
+            body: JSON.stringify({ domain })
+        });
+
+        const data = v.safeParse(TrustMarksSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
      * @throws {FetchError}
      */
     async #fetch(method: HttpMethod, path: string|URL, options: RequestInit & { filters?: Record<string, string|number|boolean> } = {}): Promise<unknown> {
