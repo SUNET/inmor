@@ -2,6 +2,8 @@ import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router';
 import { AdminSDK } from './lib/admin-sdk';
 import './styles/reset.css';
+import './styles/variables.css';
+import './styles/global.css';
 import { routes } from './routes';
 import App from './App.vue'
 
