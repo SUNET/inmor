@@ -3,6 +3,7 @@ import { FetchError, ValidationError } from './errors';
 import { 
     SubordinateCreateOptionsSchema,
     SubordinateSchema,
+    SubordinatesSchema,
     TrustMarkCreateOptionsSchema,
     TrustMarkSchema,
     TrustMarksSchema,
@@ -14,6 +15,7 @@ import {
     type HttpMethod, 
     type Subordinate, 
     type SubordinateCreateOptions, 
+    type Subordinates, 
     type TrustMark, 
     type TrustMarkCreateOptions, 
     type TrustMarks, 
@@ -195,6 +197,22 @@ export class AdminSDK {
         const res = await this.#fetch('POST', `/trustmarks/${id}`);
 
         const data = v.safeParse(TrustMarkSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
+     * Lists all existing subordinates.
+     */
+    async listSubordinates(filters?: { limit?: number; offset?: number; }): Promise<Subordinates> {
+        const res = await this.#fetch('GET', '/subordinates', {
+            filters,
+        });
+
+        const data = v.safeParse(SubordinatesSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
