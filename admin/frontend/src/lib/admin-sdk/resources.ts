@@ -91,3 +91,9 @@ export const SubordinateSchema = v.object({
   autorenew: v.boolean(),  
   active: v.boolean(),  
 })
+
+export type Subordinates = v.InferOutput<typeof SubordinatesSchema>;
+export const SubordinatesSchema = v.object({
+  items: v.array(SubordinateSchema),
+  count: v.number(),
+});
