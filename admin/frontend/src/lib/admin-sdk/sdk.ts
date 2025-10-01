@@ -256,9 +256,8 @@ export class AdminSDK {
         input.pathname = `/api/v1/${input.pathname.replace(/^\/|\/$/g, '')}`; // Prepend api base path.
 
         if (options.filters) {
-            const params = new URLSearchParams();
             for (const [key, value] of Object.entries(options.filters)) {
-                params.append(key, String(value));
+                input.searchParams.append(key, String(value));
             }
 
             // We don't want to pass this along to the RequestInit.
