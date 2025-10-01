@@ -1,7 +1,27 @@
+import type { BaseIssue, BaseSchema, SafeParseResult } from 'valibot';
+
 export class AdminSDKError extends Error {};
 
-export class ValidationError extends AdminSDKError {};
 
+type TSchema = BaseSchema<unknown, unknown, BaseIssue<unknown>>;
+
+type Issues<T extends TSchema> = SafeParseResult<T>['issues']
+
+type ValidationErrorProps<T extends TSchema> = {
+    message?: string;
+    issues?: Issues<T>;
+}
+
+export class ValidationError<const T extends TSchema> extends AdminSDKError {
+    readonly issues?: Issues<T>;
+    readonly message: string;
+
+    constructor({ message, issues }: ValidationErrorProps<T>){
+        super(`Validation error: ${message}`);
+        this.issues = issues;
+        this.message = message || 'An unexpected error occurred.';
+    }
+};
 
 type FetchErrorProps = {
     status?: number;
