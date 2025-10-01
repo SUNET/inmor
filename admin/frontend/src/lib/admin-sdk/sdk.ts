@@ -1,27 +1,27 @@
 import * as v from 'valibot';
 import { FetchError, ValidationError } from './errors';
-import { 
+import {
     SubordinateCreateOptionsSchema,
     SubordinateSchema,
     SubordinatesSchema,
     TrustMarkCreateOptionsSchema,
     TrustMarkSchema,
     TrustMarksSchema,
-    TrustMarkTypeCreateOptionsSchema, 
-    TrustMarkTypeSchema, 
-    TrustMarkTypesSchema, 
-    TrustMarkTypeUpdateOptionsSchema, 
-    TrustMarkUpdateOptionsSchema, 
-    type HttpMethod, 
-    type Subordinate, 
-    type SubordinateCreateOptions, 
-    type Subordinates, 
-    type TrustMark, 
-    type TrustMarkCreateOptions, 
-    type TrustMarks, 
-    type TrustMarkType, 
-    type TrustMarkTypeCreateOptions, 
-    type TrustMarkTypes, 
+    TrustMarkTypeCreateOptionsSchema,
+    TrustMarkTypeSchema,
+    TrustMarkTypesSchema,
+    TrustMarkTypeUpdateOptionsSchema,
+    TrustMarkUpdateOptionsSchema,
+    type HttpMethod,
+    type Subordinate,
+    type SubordinateCreateOptions,
+    type Subordinates,
+    type TrustMark,
+    type TrustMarkCreateOptions,
+    type TrustMarks,
+    type TrustMarkType,
+    type TrustMarkTypeCreateOptions,
+    type TrustMarkTypes,
     type TrustMarkTypeUpdateOptions,
     type TrustMarkUpdateOptions
 } from './resources';
@@ -41,15 +41,22 @@ export class AdminSDK {
     /**
      * Create Trust Mark Type.
      */
-    async createTrustMarkType(options: TrustMarkTypeCreateOptions): Promise<void> {
+    async createTrustMarkType(options: TrustMarkTypeCreateOptions): Promise<TrustMarkType> {
         const body = v.safeParse(TrustMarkTypeCreateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate trustmark type creation options');
         }
 
-        await this.#fetch('POST', '/trustmarktypes', {
+        const res = await this.#fetch('POST', '/trustmarktypes', {
             body: JSON.stringify(body.output),
         });
+
+        const data = v.safeParse(TrustMarkTypeSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
     }
 
     /**
@@ -106,15 +113,22 @@ export class AdminSDK {
     /**
      * Create Trust Mark.
      */
-    async createTrustMark(options: TrustMarkCreateOptions): Promise<void> {
+    async createTrustMark(options: TrustMarkCreateOptions): Promise<TrustMark> {
         const body = v.safeParse(TrustMarkCreateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate trustmark creation options');
         }
 
-        await this.#fetch('POST', '/trustmarks', {
+        const res = await this.#fetch('POST', '/trustmarks', {
             body: JSON.stringify(body.output),
         });
+
+        const data = v.safeParse(TrustMarkSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
     }
 
     /**
