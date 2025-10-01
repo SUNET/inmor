@@ -1,3 +1,4 @@
+import { safeParse } from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import {
     SubordinateCreateOptionsSchema,
@@ -41,7 +42,7 @@ export class AdminSDK {
      * Create Trust Mark Type.
      */
     async createTrustMarkType(options: TrustMarkTypeCreateOptions): Promise<TrustMarkType> {
-        const body = v.safeParse(TrustMarkTypeCreateOptionsSchema, options);
+        const body = safeParse(TrustMarkTypeCreateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate trustmark type creation options');
         }
@@ -50,7 +51,7 @@ export class AdminSDK {
             body: JSON.stringify(body.output),
         });
 
-        const data = v.safeParse(TrustMarkTypeSchema, res);
+        const data = safeParse(TrustMarkTypeSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -66,7 +67,7 @@ export class AdminSDK {
             filters,
         });
 
-        const data = v.safeParse(TrustMarkTypesSchema, res);
+        const data = safeParse(TrustMarkTypesSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -80,7 +81,7 @@ export class AdminSDK {
     async getTrustMarkTypeById(id: number): Promise<TrustMarkType> {
         const res = await this.#fetch('GET', `/trustmarktypes/${id}`);
 
-        const data = v.safeParse(TrustMarkTypeSchema, res);
+        const data = safeParse(TrustMarkTypeSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -92,7 +93,7 @@ export class AdminSDK {
      * Update a TrustMarkType by ID.
      */
     async updateTrustMarkType(id: number, options: TrustMarkTypeUpdateOptions): Promise<TrustMarkType> {
-        const body = v.safeParse(TrustMarkTypeUpdateOptionsSchema, options);
+        const body = safeParse(TrustMarkTypeUpdateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate trustmark type update options');
         }
@@ -101,7 +102,7 @@ export class AdminSDK {
             body: JSON.stringify(body.output)
         });
 
-        const data = v.safeParse(TrustMarkTypeSchema, res);
+        const data = safeParse(TrustMarkTypeSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -113,7 +114,7 @@ export class AdminSDK {
      * Create Trust Mark.
      */
     async createTrustMark(options: TrustMarkCreateOptions): Promise<TrustMark> {
-        const body = v.safeParse(TrustMarkCreateOptionsSchema, options);
+        const body = safeParse(TrustMarkCreateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate trustmark creation options');
         }
@@ -122,7 +123,7 @@ export class AdminSDK {
             body: JSON.stringify(body.output),
         });
 
-        const data = v.safeParse(TrustMarkSchema, res);
+        const data = safeParse(TrustMarkSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -138,7 +139,7 @@ export class AdminSDK {
             filters,
         });
 
-        const data = v.safeParse(TrustMarksSchema, res);
+        const data = safeParse(TrustMarksSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -155,7 +156,7 @@ export class AdminSDK {
             body: JSON.stringify({ domain })
         });
 
-        const data = v.safeParse(TrustMarksSchema, res);
+        const data = safeParse(TrustMarksSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -169,7 +170,7 @@ export class AdminSDK {
     async renewTrustMark(id: number): Promise<TrustMark> {
         const res = await this.#fetch('POST', `/trustmarks/${id}/renew`);
 
-        const data = v.safeParse(TrustMarkSchema, res);
+        const data = safeParse(TrustMarkSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -181,14 +182,14 @@ export class AdminSDK {
      * Update a TrustMark.
      */
     async updateTrustMark(id: number, options: TrustMarkUpdateOptions): Promise<TrustMark> {
-        const body = v.safeParse(TrustMarkUpdateOptionsSchema, options);
+        const body = safeParse(TrustMarkUpdateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate trustmark update options');
         }
 
         const res = await this.#fetch('POST', `/trustmarks/${id}`);
 
-        const data = v.safeParse(TrustMarkSchema, res);
+        const data = safeParse(TrustMarkSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -200,7 +201,7 @@ export class AdminSDK {
      * Create Subordinate.
      */
     async createSubordinate(options: SubordinateCreateOptions): Promise<Subordinate> {
-        const body = v.safeParse(SubordinateCreateOptionsSchema, options);
+        const body = safeParse(SubordinateCreateOptionsSchema, options);
         if (!body.success) {
             throw new ValidationError('Failed to validate subordinate creation options');
         }
@@ -209,7 +210,7 @@ export class AdminSDK {
             body: JSON.stringify(body.output),
         });
 
-        const data = v.safeParse(SubordinateSchema, res);
+        const data = safeParse(SubordinateSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -225,7 +226,7 @@ export class AdminSDK {
             filters,
         });
 
-        const data = v.safeParse(SubordinatesSchema, res);
+        const data = safeParse(SubordinatesSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
@@ -239,7 +240,7 @@ export class AdminSDK {
     async getSubordinateById(id: number): Promise<Subordinate> {
         const res = await this.#fetch('GET', `/subordinates/${id}`);
 
-        const data = v.safeParse(SubordinateSchema, res);
+        const data = safeParse(SubordinateSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
