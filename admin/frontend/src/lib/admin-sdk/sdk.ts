@@ -179,6 +179,25 @@ export class AdminSDK {
     }
 
     /**
+     * Update a TrustMark.
+     */
+    async updateTrustMark(id: number, options: TrustMarkUpdateOptions): Promise<TrustMark> {
+        const body = v.safeParse(TrustMarkUpdateOptionsSchema, options);
+        if (!body.success) {
+            throw new ValidationError('Failed to validate trustmark update options');
+        }
+
+        const res = await this.#fetch('POST', `/trustmarks/${id}`);
+
+        const data = v.safeParse(TrustMarkSchema, res);
+        if (!data.success) {
+            throw new ValidationError('Failed to validate data');
+        }
+
+        return data.output;
+    }
+
+    /**
      * Create Subordinate.
      */
     async createSubordinate(options: SubordinateCreateOptions): Promise<Subordinate> {
@@ -192,25 +211,6 @@ export class AdminSDK {
         });
 
         const data = v.safeParse(SubordinateSchema, res);
-        if (!data.success) {
-            throw new ValidationError('Failed to validate data');
-        }
-
-        return data.output;
-    }
-
-    /**
-     * Update a TrustMark.
-     */
-    async updateTrustMark(id: number, options: TrustMarkUpdateOptions): Promise<TrustMark> {
-        const body = v.safeParse(TrustMarkUpdateOptionsSchema, options);
-        if (!body.success) {
-            throw new ValidationError('Failed to validate trustmark update options');
-        }
-
-        const res = await this.#fetch('POST', `/trustmarks/${id}`);
-
-        const data = v.safeParse(TrustMarkSchema, res);
         if (!data.success) {
             throw new ValidationError('Failed to validate data');
         }
