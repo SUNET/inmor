@@ -1,4 +1,3 @@
-import * as v from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import {
     SubordinateCreateOptionsSchema,
