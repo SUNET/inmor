@@ -1,30 +1,30 @@
 <script lang="ts">
-import { defineComponent } from 'vue';
+import { defineComponent, type FunctionalComponent } from 'vue';
 import { RouterLink } from 'vue-router';
-import Icon, { type Icons } from '../base/Icon.vue';
+import { FileLock2, Files, Server } from 'lucide-vue-next';
 
 export default defineComponent({
     name: 'Sidebar',
-    components: { RouterLink, Icon },
+    components: { RouterLink },
     data() {
         return {
             nav: [
                 {
-                    icon: 'documents-outline',
-                    label: 'Trustmark types',
+                    icon: FileLock2,
+                    label: 'Trust mark types',
                     link: '/trustmark-types',
                 },
                 {
-                    icon: 'document-lock-outline',
-                    label: 'Trustmarks',
+                    icon: Files,
+                    label: 'Trust marks',
                     link: '/trustmarks',
                 },
                 {
-                    icon: 'server',
+                    icon: Server,
                     label: 'Subordinates',
                     link: '/subordinates',
                 },
-            ] satisfies Array<{ icon: Icons; label: string; link: string; }>
+            ] satisfies Array<{ icon: FunctionalComponent; label: string; link: string; }>
         };
     },
     async mounted() {
@@ -41,7 +41,7 @@ export default defineComponent({
             <ul class="menu">
                 <li v-for="item in nav" class="item">
                     <RouterLink :to="item.link" class="link">
-                        <span class="icon"><Icon :icon="item.icon" /></span>
+                        <span class="icon"><component :is="item.icon"></component></span>
                         {{ item.label }}
                     </RouterLink>
                 </li>
