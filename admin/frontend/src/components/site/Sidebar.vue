@@ -41,7 +41,7 @@ export default defineComponent({
             <ul class="menu">
                 <li v-for="item in nav" class="item">
                     <RouterLink :to="item.link" class="link">
-                        <span class="icon"><component :is="item.icon"></component></span>
+                        <component :is="item.icon" :size="18" />
                         {{ item.label }}
                     </RouterLink>
                 </li>
@@ -61,11 +61,9 @@ export default defineComponent({
         border: var(--ir--border);
         background-color: #f7f7f7;
 
-
         > .header > .title {
             padding: min(.2em, var(--ir--space--1)) min(.4em, var(--ir--space--2));
             margin-bottom: var(--ir--space--2);
-            font-family: monospace;
             font-size: var(--ir--font-size--m);
             font-weight: var(--ir--font-weight--bold);
             text-decoration: none;
@@ -83,6 +81,7 @@ export default defineComponent({
             padding: min(.2em, var(--ir--space--1)) min(.4em, var(--ir--space--2));
             display: inline-flex;
             align-items: center;
+            gap: var(--ir--space--2);
             border-radius: var(--ir--space--1);
             font-size: var(--ir--font-size);
             text-decoration: none;
@@ -91,11 +90,6 @@ export default defineComponent({
             &:hover {
                 background-color: rgba(0, 0, 0, 0.075);
             }
-        }
-
-        > .nav > .menu > .item > .link > .icon {
-            opacity: .75;
-            width: var(--ir--space--4);
         }
     }
 </style>
