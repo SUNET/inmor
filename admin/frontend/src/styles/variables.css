@@ -1,5 +1,5 @@
 :root {
-    --ir--font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    --ir--font-family: Cantarell, Roboto, sans-serif, system-ui;
 
     --ir--font-size--xs: .875rem; /* 14px */
     --ir--font-size--s: 1rem; /* 16px */
