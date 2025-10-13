@@ -31,3 +31,9 @@ def loadredis(rdb: Redis) -> Redis:
     # # Now redis-cli against this
     # _ = subprocess.run(["redis-cli", "-p", "6088", "--pipe"], input=data)
     return redis
+
+
+@pytest.fixture(autouse=True)
+def conf_settings(settings):
+    # The `settings` argument is a fixture provided by pytest-django.
+    settings.FOO = "bar"

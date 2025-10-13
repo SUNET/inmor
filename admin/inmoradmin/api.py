@@ -11,10 +11,13 @@ from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import BaseModel, BeforeValidator, Field
 from redis.client import Redis
 
-from entities.lib import (apply_server_policy, create_subordinate_statement,
-                          fetch_entity_configuration,
-                          merge_our_policy_ontop_subpolicy,
-                          update_redis_with_subordinate)
+from entities.lib import (
+    apply_server_policy,
+    create_subordinate_statement,
+    fetch_entity_configuration,
+    merge_our_policy_ontop_subpolicy,
+    update_redis_with_subordinate,
+)
 from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
@@ -108,6 +111,15 @@ InternalJWKS = Annotated[dict[str, Any], BeforeValidator(lambda v: process_keys_
 
 class EntityTypeSchema(Schema):
     entityid: str
+    metadata: dict[Any, Any]
+    jwks: dict[Any, Any] | None = None
+    required_trustmarks: str | None = None
+    valid_for: int | None = None
+    autorenew: bool | None = True
+    active: bool | None = True
+
+
+class EntityTypeUpdateSchema(Schema):
     metadata: dict[Any, Any]
     jwks: dict[Any, Any] | None = None
     required_trustmarks: str | None = None
@@ -451,6 +463,7 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     )
     return 201, sub_statement
 
+
 @router.get("/subordinates", response=list[EntityOutSchema])
 @paginate(LimitOffsetPagination)
 def list_trust_subordinates(
@@ -458,6 +471,7 @@ def list_trust_subordinates(
 ):
     """Lists all existing TrustMarkType(s) from database."""
     return Subordinate.objects.all()
+
 
 @router.get(
     "/subordinates/{int:subid}",
@@ -472,7 +486,91 @@ def get_trustmarktype_byid(request: HttpRequest, subid: int):
         return 404, {"message": "Subordinate could not be found.", "id": subid}
     except Exception as e:
         print(e)
-        return 500, {"message": "Failed to get TrustMarkType.", "id": subid}
+        return 500, {"message": "Failed to get Subordinate.", "id": subid}
+
+
+@router.post(
+    "/subordinates/{int:subid}",
+    response={201: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
+)
+def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateSchema):
+    "Updates a subordinate."
+
+    try:
+        sub = Subordinate.objects.get(id=subid)
+    except Subordinate.DoesNotExist:
+        return 404, {"message": "Subordinate could not be found.", "id": subid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to get Subordinate.", "id": subid}
+
+    # First get verified JWT from entity configuration with the keys we provided
+    official_metadata = data.metadata
+    keys: dict[Any, Any] | None = None
+    if data.jwks:
+        keys = data.jwks
+
+    # This entity_jwt is verified with the key (signature verification)
+    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(
+        sub.entityid, official_metadata, keys
+    )
+    claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    # TODO: If the entity has policy, then we should try to merge to veirfy.
+    if "metadata_policy" in claims:
+        sub_policy = claims.get("metadata_policy", {})
+        try:
+            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
+
+        except Exception as e:
+            print(e)
+            return 400, {
+                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
+            }
+
+    metadata: dict[str, Any] = claims["metadata"]
+    try:
+        _ = apply_server_policy(json.dumps(metadata))
+
+    except Exception as e:
+        print(e)
+        return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}
+    if data.valid_for:
+        if data.valid_for > settings.SUBORDINATE_DEFAULT_VALID_FOR:  # Oops, we can not allow that.
+            return 400, {
+                "message": f"valid_for is greater than allowed by system default {settings.SUBORDINATE_DEFAULT_VALID_FOR}.",
+                "id": 0,
+            }
+        expiry = data.valid_for
+    else:
+        expiry = settings.SUBORDINATE_DEFAULT_VALID_FOR
+
+    # Now we can build the sub ordinate statement.
+    now = datetime.now()
+    exp = now + timedelta(hours=expiry)
+    # Next, we create the signed statement
+    signed_statement = create_subordinate_statement(sub.entityid, keyset, now, exp)
+    # Next save the data in the database.
+    if keys:
+        keys_for_db = json.dumps(keys)
+    else:
+        keys_for_db = None
+    try:
+        # Set each value from the input
+        sub.autorenew = bool(data.autorenew)
+        sub.metadata = json.dumps(data.metadata)
+        sub.jwks = keys_for_db
+        sub.valid_for = expiry
+        sub.active = bool(data.active)
+        sub.save()
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Error while updating the subordinate", id: subid}
+    # All good so far, we will update all related redis entries now.
+    con: Redis = get_redis_connection("default")
+    update_redis_with_subordinate(
+        sub.entityid, entity_jwt_str, official_metadata, signed_statement, con
+    )
+    return 200, sub
 
 
 api.add_router("", router)

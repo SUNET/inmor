@@ -352,6 +352,7 @@ def test_add_subordinate_with_key(db, loadredis):  # type: ignore
     # This is because the keys are sent separately
     self.assertEqual(keys, d1.get("jwks"))
 
+
 @pytest.mark.django_db
 def test_list_subordinates(db, loadredis):  # type: ignore
     "Tests listing subordinates"
@@ -375,6 +376,7 @@ def test_list_subordinates(db, loadredis):  # type: ignore
     marks = response.json()
     self.assertEqual(marks["count"], 1)
 
+
 @pytest.mark.django_db
 def test_get_subordinate_byid(db, loadredis):  # type: ignore
     "Tests listing subordinates"
@@ -396,7 +398,5 @@ def test_get_subordinate_byid(db, loadredis):  # type: ignore
     response = client.get(f"/subordinates/{original['id']}")
     self.assertEqual(response.status_code, 200)
 
-
     new = response.json()
     self.assertEqual(original, new)
-
