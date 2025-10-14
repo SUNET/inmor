@@ -13,6 +13,7 @@ from redis.client import Redis
 
 from entities.lib import (
     apply_server_policy,
+    create_server_statement,
     create_subordinate_statement,
     fetch_entity_configuration,
     merge_our_policy_ontop_subpolicy,
@@ -87,6 +88,10 @@ class TrustMarkListSchema(Schema):
 
 class JWKSType(BaseModel):
     keys: Annotated[list[dict[str, Any]], Field(min_length=1)]
+
+
+class EntityStatement(BaseModel):
+    entity_statement: str
 
 
 # We need to deserialize from DB
@@ -571,6 +576,14 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
         sub.entityid, entity_jwt_str, official_metadata, signed_statement, con
     )
     return 200, sub
+
+
+@router.post("/server/entity", response={201: EntityStatement})
+def create_server_entity(request: HttpRequest):
+    token = create_server_statement()
+    con: Redis = get_redis_connection("default")
+    _ = con.set("inmor:entity_id", token)
+    return 201, {"entity_statement": token}
 
 
 api.add_router("", router)
