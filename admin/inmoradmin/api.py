@@ -477,7 +477,7 @@ def list_trust_subordinates(
     "/subordinates/{int:subid}",
     response={200: EntityOutSchema, 404: Message, 500: Message},
 )
-def get_trustmarktype_byid(request: HttpRequest, subid: int):
+def get_subordinate_byid(request: HttpRequest, subid: int):
     """Gets a TrustMarkType"""
     try:
         tmt = Subordinate.objects.get(id=subid)
