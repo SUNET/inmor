@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 import httpx
@@ -66,6 +66,38 @@ def apply_server_policy(metadata: str):
     return m
 
 
+def create_server_statement() -> str:
+    """Creates a signed server entity statement"""
+    # This is the data we care for now
+    sub_data = {"iss": settings.TA_DOMAIN}
+    sub_data["sub"] = settings.TA_DOMAIN
+    sub_data["metadata"] = {"federation_entity": settings.FEDERATION_ENTITY}
+    if len(settings.AUTHORITY_HINTS) > 0:
+        # Then it is IA not TA
+        sub_data["authority_hints"] = settings.AUTHORITY_HINTS
+
+    now = datetime.now()
+    exp = now + timedelta(hours=settings.SERVER_EXPIRY)
+    # creation time
+    sub_data["iat"] = now.timestamp()
+    # Expiry time of the server's entity statement
+    sub_data["exp"] = exp.timestamp()
+
+    # The is the server's keyset
+    keyset = JWKSet()
+    key = settings.SIGNING_PRIVATE_KEY
+    keyset.add(key)
+    sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
+
+    # TODO: fix the alg value for other types of keys of TA/I
+    token = jwt.JWT(
+        header={"alg": "RS256", "kid": key.kid, "typ": "entity-statement+jwt"}, claims=sub_data
+    )
+    token.make_signed_token(key)
+    token_data = token.serialize()
+    return token_data
+
+
 def create_subordinate_statement(
     entityid: str, keyset: JWKSet, now: datetime, exp: datetime
 ) -> str:
@@ -79,12 +111,13 @@ def create_subordinate_statement(
     # This is the metadata policy of TA defined in the settings.py
     if settings.POLICY_DOCUMENT.get("metadata_policy", {}):
         sub_data["metadata_policy"] = settings.POLICY_DOCUMENT.get("metadata_policy")
+
     # creation time
     sub_data["iat"] = now.timestamp()
     # Expiry time of the subordinate statement
     sub_data["exp"] = exp.timestamp()
     # The is the subordinate's keyset
-    sub_data["jwks"] = keyset.export(private_keys=False)
+    sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
 
     key = settings.SIGNING_PRIVATE_KEY
 
