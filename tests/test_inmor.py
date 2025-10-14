@@ -174,3 +174,6 @@ def test_ta_resolve_subordinate(loaddata: Redis, start_server: int):
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("sub") == "http://localhost:8080"
     assert payload.get("iss") == "http://localhost:8080"
+
+
+# TODO: Add test for enity_id of the server
