@@ -491,7 +491,7 @@ def get_trustmarktype_byid(request: HttpRequest, subid: int):
 
 @router.post(
     "/subordinates/{int:subid}",
-    response={201: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
+    response={200: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
 )
 def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateSchema):
     "Updates a subordinate."

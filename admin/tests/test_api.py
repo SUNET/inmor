@@ -401,6 +401,7 @@ def test_get_subordinate_byid(db, loadredis):  # type: ignore
     new = response.json()
     self.assertEqual(original, new)
 
+
 @pytest.mark.django_db
 def test_update_subordinate_autorenew(db, loadredis):
     """Test updating a subordinate's autorenew field to False and verify the update."""
