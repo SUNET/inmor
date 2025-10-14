@@ -444,5 +444,5 @@ def test_create_server_entity(db, loadredis):
 
     response = client.post("/server/entity")
     self.assertEqual(response.status_code, 201)
-    entity_statement = response.json()
+    _entity_statement = response.json()
     # TODO: Add the checks in the response
