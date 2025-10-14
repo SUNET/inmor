@@ -158,6 +158,19 @@ POLICY_DOCUMENT = {
     "metadata": {},
 }
 
+SERVER_EXPIRY = 8760  # A year in hours
+
+# Add authority_hints in case you are running Intermediate
+AUTHORITY_HINTS = []
+
+# TODO: make sure we have all the ones we need
+FEDERATION_ENTITY = {
+    "federation_fetch_endpoint": f"{TA_DOMAIN}/fetch",
+    "federation_list_endpoint": f"{TA_DOMAIN}/list",
+    "federation_resolve_endpoint": f"{TA_DOMAIN}/resolve",
+    "federation_collection_endpoint": f"{TA_DOMAIN}/collection",
+}
+
 SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
 
 # The following are the default values the system will use while creating new entries via API.
