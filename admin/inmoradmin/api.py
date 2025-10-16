@@ -30,31 +30,55 @@ DEFAULTS: dict[str, dict[str, Any]] = settings.TA_DEFAULTS
 
 
 class TrustMarkTypeGetSchema(Schema):
-    tmtype: str
+    tmtype: Annotated[str, Field(description="URL to describe the Trust Mark Type.")]
 
 
 class TrustMarkTypeSchema(Schema):
     tmtype: Annotated[str, Field(description="URL to describe the Trust Mark Type.")]
-    autorenew: bool = DEFAULTS["trustmarktype"]["autorenew"]
-    valid_for: int = DEFAULTS["trustmarktype"]["valid_for"]
-    renewal_time: int = DEFAULTS["trustmarktype"]["renewal_time"]
-    active: bool = DEFAULTS["trustmarktype"]["active"]
+    autorenew: Annotated[
+        bool,
+        Field(description="If this TrustMarkType based TrustMarks will be autorenewed or not."),
+    ] = DEFAULTS["trustmarktype"]["autorenew"]
+    valid_for: Annotated[
+        int, Field(description="How long the TrustMark from this type will be valid in hours.")
+    ] = DEFAULTS["trustmarktype"]["valid_for"]
+    renewal_time: Annotated[int, Field(description="Time after a TrustMark should be renewed.")] = (
+        DEFAULTS["trustmarktype"]["renewal_time"]
+    )
+    active: Annotated[bool, Field(description="If the TrustMarkType is active.")] = DEFAULTS[
+        "trustmarktype"
+    ]["active"]
 
 
 class TrustMarkTypeOutSchema(Schema):
     id: int
-    tmtype: str
-    autorenew: bool
-    valid_for: int
-    renewal_time: int
-    active: bool
+    tmtype: Annotated[str, Field(description="URL to describe the Trust Mark Type.")]
+    autorenew: Annotated[
+        bool,
+        Field(description="If this TrustMarkType based TrustMarks will be autorenewed or not."),
+    ]
+    valid_for: Annotated[
+        int, Field(description="How long the TrustMark from this type will be valid in hours.")
+    ]
+    renewal_time: Annotated[int, Field(description="Time after a TrustMark should be renewed.")]
+
+    active: Annotated[bool, Field(description="If the TrustMarkType is active.")]
 
 
 class TrustMarkTypeUpdateSchema(Schema):
-    autorenew: bool | None = None
-    valid_for: int | None = None
-    renewal_time: int | None = None
-    active: bool | None = None
+    autorenew: Annotated[
+        bool | None,
+        Field(description="If this TrustMarkType based TrustMarks will be autorenewed or not."),
+    ] = None
+    valid_for: Annotated[
+        int | None,
+        Field(description="How long the TrustMark from this type will be valid in hours."),
+    ] = None
+    renewal_time: Annotated[
+        int | None, Field(description="Time after a TrustMark should be renewed.")
+    ] = None
+
+    active: Annotated[bool | None, Field(description="If the TrustMarkType is active.")] = None
 
 
 class TrustMarkSchema(Schema):
@@ -68,22 +92,35 @@ class TrustMarkSchema(Schema):
 
 class TrustMarkOutSchema(Schema):
     id: int
-    domain: str
-    expire_at: datetime
-    autorenew: bool | None = None
-    valid_for: int | None = None
-    renewal_time: int | None = None
-    active: bool | None = None
-    mark: str | None = None
+    domain: Annotated[str, Field(description="Domain/entity_id the TrustMark was generated for.")]
+    expire_at: Annotated[
+        datetime, Field(description="Expiry date/time for the current TrustMark JWT.")
+    ]
+    autorenew: Annotated[
+        bool | None,
+        Field(description="If this TrustMarkType based TrustMarks will be autorenewed or not."),
+    ] = None
+    valid_for: Annotated[
+        int | None,
+        Field(description="How long the TrustMark from this type will be valid in hours."),
+    ] = None
+    renewal_time: Annotated[
+        int | None, Field(description="Time after a TrustMark should be renewed.")
+    ] = None
+    active: Annotated[bool | None, Field(description="If the TrustMarkType is active.")] = None
+    mark: Annotated[str | None, Field(description="The TrustMark JWT.")] = None
 
 
 class TrustMarkUpdateSchema(Schema):
-    autorenew: bool | None = None
-    active: bool | None = None
+    autorenew: Annotated[
+        bool | None,
+        Field(description="If this TrustMarkType based TrustMarks will be autorenewed or not."),
+    ] = None
+    active: Annotated[bool | None, Field(description="If the TrustMarkType is active.")] = None
 
 
 class TrustMarkListSchema(Schema):
-    domain: str
+    domain: Annotated[str, Field(description="Domain/entity_id the TrustMark was generated for.")]
 
 
 class JWKSType(BaseModel):
@@ -91,7 +128,7 @@ class JWKSType(BaseModel):
 
 
 class EntityStatement(BaseModel):
-    entity_statement: str
+    entity_statement: Annotated[str, Field(description="The entity statement as JWT.")]
 
 
 # We need to deserialize from DB
