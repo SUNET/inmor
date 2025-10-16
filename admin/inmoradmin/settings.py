@@ -155,6 +155,7 @@ TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay
 POLICY_DOCUMENT = {
     "metadata_policy": {},
+    # FIXME: This should be for each subordinate separately in database
     "metadata": {},
 }
 
