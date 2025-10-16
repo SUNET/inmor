@@ -155,6 +155,7 @@ class Message(Schema):
 @router.post(
     "/trustmarktypes",
     response={201: TrustMarkTypeOutSchema, 403: TrustMarkTypeOutSchema, 500: Message},
+    tags=["TrustMarkType"],
 )
 def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
     """Creates a new trust_mark_type"""
@@ -175,7 +176,7 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
         return 500, {"message": "Error while creating a new TrustMarkType"}
 
 
-@router.get("/trustmarktypes", response=list[TrustMarkTypeOutSchema])
+@router.get("/trustmarktypes", response=list[TrustMarkTypeOutSchema], tags=["TrustMarkType"])
 @paginate(LimitOffsetPagination)
 def list_trust_mark_type(
     request: HttpRequest,
@@ -187,6 +188,7 @@ def list_trust_mark_type(
 @router.get(
     "/trustmarktypes/{int:tmtid}",
     response={200: TrustMarkTypeOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarkType"],
 )
 def get_trustmarktype_byid(request: HttpRequest, tmtid: int):
     """Gets a TrustMarkType"""
@@ -203,6 +205,7 @@ def get_trustmarktype_byid(request: HttpRequest, tmtid: int):
 @router.get(
     "/trustmarktypes/",
     response={200: TrustMarkTypeOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarkType"],
 )
 def get_trustmarktype_bytype(request: HttpRequest, data: TrustMarkTypeGetSchema):
     """Gets a TrustMarkType"""
@@ -219,6 +222,7 @@ def get_trustmarktype_bytype(request: HttpRequest, data: TrustMarkTypeGetSchema)
 @router.put(
     "/trustmarktypes/{int:tmtid}",
     response={200: TrustMarkTypeOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarkType"],
 )
 def update_trust_mark_type(request: HttpRequest, tmtid: int, data: TrustMarkTypeUpdateSchema):
     """Updates TrustMarkType"""
@@ -254,6 +258,7 @@ def update_trust_mark_type(request: HttpRequest, tmtid: int, data: TrustMarkType
 @router.post(
     "/trustmarks",
     response={201: TrustMarkOutSchema, 403: TrustMarkOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarks"],
 )
 def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
     """Creates a new TrustMark for a given domain and TrustMarkType ID."""
@@ -320,6 +325,7 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
 @router.post(
     "/trustmarks/list",
     response={200: list[TrustMarkOutSchema], 403: TrustMarkOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarks"],
 )
 @paginate(LimitOffsetPagination)
 def get_trustmark_list_perdomain(request: HttpRequest, data: TrustMarkListSchema):
@@ -332,6 +338,7 @@ def get_trustmark_list_perdomain(request: HttpRequest, data: TrustMarkListSchema
 @router.get(
     "/trustmarks",
     response={200: list[TrustMarkOutSchema], 403: TrustMarkOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarks"],
 )
 @paginate(LimitOffsetPagination)
 def get_trustmark_list(request: HttpRequest):
@@ -342,6 +349,7 @@ def get_trustmark_list(request: HttpRequest):
 @router.post(
     "/trustmarks/{int:tmid}/renew",
     response={200: TrustMarkOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarks"],
 )
 def renew_trustmark(request: HttpRequest, tmid: int):
     """Renews a TrustMark"""
@@ -365,6 +373,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
 @router.put(
     "/trustmarks/{int:tmid}",
     response={200: TrustMarkOutSchema, 404: Message, 500: Message},
+    tags=["TrustMarks"],
 )
 def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchema):
     """Update a TrustMark"""
@@ -392,6 +401,7 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
 @router.post(
     "/subordinates",
     response={201: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
+    tags=["Subordinates"],
 )
 def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     "Adds a new subordinate."
@@ -469,7 +479,7 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     return 201, sub_statement
 
 
-@router.get("/subordinates", response=list[EntityOutSchema])
+@router.get("/subordinates", response=list[EntityOutSchema], tags=["Subordinates"])
 @paginate(LimitOffsetPagination)
 def list_trust_subordinates(
     request: HttpRequest,
@@ -481,6 +491,7 @@ def list_trust_subordinates(
 @router.get(
     "/subordinates/{int:subid}",
     response={200: EntityOutSchema, 404: Message, 500: Message},
+    tags=["Subordinates"],
 )
 def get_subordinate_byid(request: HttpRequest, subid: int):
     """Gets a TrustMarkType"""
@@ -497,6 +508,7 @@ def get_subordinate_byid(request: HttpRequest, subid: int):
 @router.post(
     "/subordinates/{int:subid}",
     response={200: EntityOutSchema, 403: EntityOutSchema, 400: Message, 500: Message},
+    tags=["Subordinates"],
 )
 def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateSchema):
     "Updates a subordinate."
@@ -580,6 +592,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
 
 @router.post("/server/entity", response={201: EntityStatement})
 def create_server_entity(request: HttpRequest):
+    "Creates server's entity configuration"
     token = create_server_statement()
     con: Redis = get_redis_connection("default")
     _ = con.set("inmor:entity_id", token)
