@@ -1045,6 +1045,7 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
+                    // FIXME: We need to apply any subordinate metadata on top of entity metadata
 
                     let metadata = res.payload.claim("metadata").unwrap().as_object().unwrap();
                     eprintln!(
