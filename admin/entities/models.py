@@ -10,6 +10,7 @@ class Subordinate(models.Model):
     valid_for = models.IntegerField(default=8760)  # Means 365 days
     autorenew = models.BooleanField(default=False)
     metadata = models.CharField()
+    forced_metadata = models.CharField()  # We don't query this, only store and use
     jwks = models.CharField(null=True)
     required_trustmarks = models.CharField(null=True)
     active = models.BooleanField(default=True)

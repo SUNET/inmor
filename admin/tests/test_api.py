@@ -322,7 +322,11 @@ def test_add_subordinate(db, loadredis, conf_settings):  # type: ignore
 
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
-    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata}
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "forced_metadata": {},
+    }
 
     response = client.post("/subordinates", json=data)
     self.assertEqual(response.status_code, 201)
@@ -344,7 +348,12 @@ def test_add_subordinate_with_key(db, loadredis):  # type: ignore
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
-    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata, "jwks": keys}
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
 
     response = client.post("/subordinates", json=data)
     self.assertEqual(response.status_code, 201)
@@ -365,7 +374,12 @@ def test_list_subordinates(db, loadredis):  # type: ignore
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
-    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata, "jwks": keys}
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
 
     response = client.post("/subordinates", json=data)
     self.assertEqual(response.status_code, 201)
@@ -389,7 +403,12 @@ def test_get_subordinate_byid(db, loadredis):  # type: ignore
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
-    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata, "jwks": keys}
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
 
     response = client.post("/subordinates", json=data)
     self.assertEqual(response.status_code, 201)
@@ -414,7 +433,12 @@ def test_update_subordinate_autorenew(db, loadredis):
         metadata = json.load(fobj)
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
-    data = {"entityid": "https://fakerp0.labb.sunet.se", "metadata": metadata, "jwks": keys}
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
     response = client.post("/subordinates", json=data)
     self.assertEqual(response.status_code, 201)
     original = response.json()
@@ -422,6 +446,7 @@ def test_update_subordinate_autorenew(db, loadredis):
     # Prepare full update data, flipping autorenew to False
     update_data = {
         "metadata": metadata,
+        "forced_metadata": {},
         "jwks": keys,
         "entityid": original["entityid"],
         "required_trustmarks": original.get("required_trustmarks"),
