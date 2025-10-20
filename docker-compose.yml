@@ -21,6 +21,8 @@ services:
       redis:
         condition: service_healthy
     command: ./inmor -c taconfig.toml
+    environment:
+      - 'RUST_LOG=debug'
     ports:
       - "8080:8080"
   db:
@@ -37,6 +39,8 @@ services:
       start_period: 80s
     volumes:
       - ./db:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     environment:
       - 'POSTGRES_HOST_AUTH_METHOD=trust'
   redis:
@@ -75,3 +79,4 @@ services:
 networks:
   inmor-net:
     driver: bridge
+

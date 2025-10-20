@@ -6,6 +6,7 @@ import builtins
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator
 from typing import Any, Optional, Union
+
 from django.core.cache.backends.base import BaseCache
 from redis import Redis
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT, KeyT
@@ -516,3 +517,14 @@ class DefaultClient:
         Return True if key exists in hash name, else False.
         """
         ...
+
+    def hget(
+        self,
+        name: str,
+        key: KeyT,
+    ) -> Any:
+        """
+        Returns the value
+        """
+        ...
+

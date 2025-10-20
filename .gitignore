@@ -1,5 +1,8 @@
 /target
 *.json
+!db.json
+!private.json
+!public.json
 
 
 # Byte-compiled / optimized / DLL files

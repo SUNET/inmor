@@ -12,5 +12,5 @@ def command():
     for tm in tms:
         if tm.active:
             # Means we can reissue this one
-            add_trustmark(tm.domain, tm.tmt.tmtype, con)
+            add_trustmark(tm.domain, tm.tmt.tmtype, tm.tmt.valid_for, con)
             click.secho(f"Reissued {tm.domain}")

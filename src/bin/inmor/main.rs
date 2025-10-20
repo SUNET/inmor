@@ -127,26 +127,27 @@ async fn main() -> io::Result<()> {
     });
 
     // Start of new signed entity_id for the application
-    let mut federation_entity = Map::new();
-    federation_entity.insert(
-        "federation_entity".to_string(),
-        server_config.endpoints.to_openid_metadata(),
-    );
-    let entity_data = compile_entityid(
-        &format!("{}", &server_config.domain),
-        &server_config.domain,
-        json!(federation_entity).into(),
-    )
-    .unwrap();
-    println!("{entity_data:?}");
+    //let mut federation_entity = Map::new();
+    //federation_entity.insert(
+    //"federation_entity".to_string(),
+    //server_config.endpoints.to_openid_metadata(),
+    //);
+    //let entity_data = compile_entityid(
+    //&format!("{}", &server_config.domain),
+    //&server_config.domain,
+    //json!(federation_entity).into(),
+    //)
+    //.unwrap();
+    //println!("{entity_data:?}");
 
     // Now the normal web app flow
     //
     //
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     let redis = redis::Client::open(server_config.redis_uri.as_str()).unwrap();
+    // TODO: remove the code below
     // Here first we set the new entity_id to redis
-    set_app_entity_data(&entity_data, &redis);
+    //set_app_entity_data(&entity_data, &redis);
 
     let mut federation = Federation {
         entities: Mutex::new(HashMap::new()),

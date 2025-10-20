@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 from typing import List
 
@@ -83,8 +84,8 @@ DATABASES = {
         "NAME": "postgres",
         "USER": "postgres",
         "PASSWORD": "",
-        "HOST": "db",
-        "PORT": 5432,
+        "HOST": os.environ.get("DB_HOST", "db"),
+        "PORT": os.environ.get("DB_PORT", 5432),
     }
 }
 
@@ -133,26 +134,58 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
+REDIS_LOCATION: str = os.environ.get("REDIS_LOCATION", "redis://redis:6379/0")
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/0",
+        "LOCATION": REDIS_LOCATION,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
     }
 }
 
+# TA/IA configuration
+
 SIGNING_PRIVATE_KEY = jwk.JWK.from_json(open("./private.json").read())
 SIGNING_PUBLIC_KEY = jwk.JWK.from_json(open("./public.json").read())
 TA_DOMAIN = "http://localhost:8080"
 TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay
-METADATA_POLICY = {}
+POLICY_DOCUMENT = {
+    "metadata_policy": {},
+    # FIXME: This should be for each subordinate separately in database
+    "metadata": {},
+}
 
-# DATABASES = {
-# "default": {
-# "ENGINE": "django.db.backends.sqlite3",
-# "NAME": BASE_DIR / "db.sqlite3",
-# }
-# }
+SERVER_EXPIRY = 8760  # A year in hours
+
+# Add authority_hints in case you are running Intermediate
+AUTHORITY_HINTS = []
+
+# TODO: make sure we have all the ones we need
+FEDERATION_ENTITY = {
+    "federation_fetch_endpoint": f"{TA_DOMAIN}/fetch",
+    "federation_list_endpoint": f"{TA_DOMAIN}/list",
+    "federation_resolve_endpoint": f"{TA_DOMAIN}/resolve",
+    "federation_collection_endpoint": f"{TA_DOMAIN}/collection",
+}
+
+SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
+
+# The following are the default values the system will use while creating new entries via API.
+TA_DEFAULTS = {
+    "trustmarktype": {
+        "autorenew": True,
+        "valid_for": 8760,
+        "renewal_time": 48,
+        "active": True,
+    },
+    "trustmark": {
+        "autorenew": True,
+        "valid_for": 8760,
+        "renewal_time": 48,
+        "active": True,
+    },
+}

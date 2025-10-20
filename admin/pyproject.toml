@@ -1,21 +1,42 @@
 [project]
-name = "pyinmor"
+name = "inmoradmin"
 authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
 version = "0.1.0"
-description = "Inmor Trust Anchor"
+description = "Inmor Trust Anchor Admin portal"
 license = { file="LICENSE" }
 requires-python = '>=3.13'
 
 dependencies = [
 	"jwcrypto",
+	"oidfpolicy",
 	"httpx",
 	"redis",
+	"django",
+	"django-types",
+	"black",
+	"ruff",
+	"redis",
+	"django-extensions",
+	"django-debug-toolbar",
+	"django-ninja",
+	"pytz",
+	"psycopg2-binary",
+	"pysaml2",
+	"djangosaml2",
+	"django-redis",
+	"jwcrypto",
+	"types-jwcrypto",
+	"httpx",
+	"django-click",
+	"pydantic",
+	"ty",
 	"port-for",
 	"pytest-redis",
 	"pytest",
+	"pytest-django",
+	"humanreadable",
 	"python-dotenv",
 	"pytest-dotenv",
-	"ruff",
 ]
 
 [project.urls]
@@ -73,3 +94,6 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = "tests"
 pythonpath = ["."]
+DJANGO_SETTINGS_MODULE = "inmoradmin.settings"
+env_files = [".env"]
+filterwarnings = ["ignore::DeprecationWarning"]

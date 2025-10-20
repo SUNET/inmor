@@ -1,6 +1,6 @@
 import djclick as click
 from django_redis import get_redis_connection
-from entities.lib import add_subordinate
+
 from entities.models import Subordinate
 
 
@@ -13,5 +13,5 @@ def command():
     subs = Subordinate.objects.all()
     for sub in subs:
         # Means we can reissue this one
-        add_subordinate(sub.entityid, con)
+        # TODO: reissue and save here
         click.secho(f"Reissued {sub.entityid}")

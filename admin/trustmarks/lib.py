@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta
 
+import redis
 from django.conf import settings
 from jwcrypto import jwt
+from jwcrypto.common import json_decode
 from pydantic import BaseModel
-
-import redis
 
 
 class TrustMarkRequest(BaseModel):
@@ -16,10 +16,15 @@ class TrustMarkTypeRequest(BaseModel):
     type: str
 
 
-def add_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str:
-    """Adds a new subordinate to the federation.
+def add_trustmark(entity: str, trustmarktype: str, expiry: int, r: redis.Redis) -> str:
+    """Adds a new TrustMark for a given entity for a given TrustMarkType.
 
-    :args entity_id: The entity_id to be added
+    :args entity: The entity_id to be added
+    :args trustmarktype: The TrustMarkType value in JWT
+    :args expiry: The JWT will be valid for the number of hours.
+    :args r: Redis client instance.
+
+    :returns: JWT as str.
     """
     # Based on https://openid.net/specs/openid-federation-1_0.html#name-trust-marks
 
@@ -27,7 +32,8 @@ def add_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str:
     sub_data = {"iss": settings.TRUSTMARK_PROVIDER}
     sub_data["sub"] = entity
     now = datetime.now()
-    exp = now + timedelta(days=365)
+    # FIXME: timedelta should be in hours
+    exp = now + timedelta(days=expiry)
     sub_data["iat"] = now.timestamp()
     sub_data["exp"] = exp.timestamp()
     # TODO: ref: we have to add this claim too in future
@@ -45,3 +51,25 @@ def add_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str:
     # second, add to the set of trust_mark_type
     _ = r.sadd(f"inmor:tmtype:{trustmarktype}", entity)
     return token_data
+
+
+def get_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str | None:
+    """Get a TrustMark for an entity from redis.
+
+    :args entity: The entity_id to be added
+    :args trustmarktype: The TrustMarkType value in JWT
+    :args r: Redis client instance.
+
+    :returns: JWT as str.
+    """
+    token = r.hget(f"inmor:tm:{entity}", trustmarktype)
+    if isinstance(token, bytes):
+        return token.decode("utf-8")
+    return
+
+
+def get_expiry(token_str: str) -> float:
+    """Extracts the expiry time as timestamp from JWT."""
+    jose = jwt.JWT.from_jose_token(token_str)
+    data = json_decode(jose.token.objects.get("payload", ""))
+    return data.get("exp")

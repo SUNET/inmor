@@ -1,16 +1,16 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 import httpx
 from django.conf import settings
-from jwcrypto import jwt
+from jwcrypto import jwk, jwt
 from jwcrypto.jwk import JWK, JWKSet
 from jwcrypto.jwt import JWT
+from oidfpolicy import apply_policy, merge_policies
 from pydantic import BaseModel
-
 from redis import Redis
 
 INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
@@ -22,63 +22,102 @@ class SubordinateRequest(BaseModel):
     entity: str
 
 
-def add_subordinate(entity_id: str, r: Redis) -> str:
-    """Adds a new subordinate to the federation.
+def fetch_entity_configuration(
+    entityid: str, official_metadata: dict[Any, Any], keys: dict[Any, Any] | None = None
+) -> tuple[JWT, JWKSet, str]:
+    """Fetches the entity configuration and returns verified JWT.
 
-    This creates a subordinate statement by the TA as iss and adds the metadata of the entity (subordinate).
-    https://openid.net/specs/openid-federation-1_0.html#name-fetch-subordinate-statement-
 
-    :args entity_id: The entity_id to be added
-    :args r: Redis class from Django
+    :args entityid: str the entity_id
 
-    :returns: String version of the signed JWT
+    :returns: Tuple of JWT representation and JWKSet, and jwt in str format
     """
-    resp = httpx.get(f"{entity_id}/.well-known/openid-federation")
+    # Let us get the JWKS
+    if keys is not None:
+        keys_str = json.dumps(keys)
+        keyset = jwk.JWKSet.from_json(keys_str)
+    elif "openid_relying_party" in official_metadata:
+        keys_str = json.dumps(official_metadata["openid_relying_party"]["jwks"])
+        keyset = jwk.JWKSet.from_json(keys_str)
+    elif "openid_provider" in official_metadata:
+        keys_str = json.dumps(official_metadata["openid_provider"]["jwks"])
+        keyset = jwk.JWKSet.from_json(keys_str)
+    else:
+        raise ValueError("Missing JWKS")
+    resp = httpx.get(f"{entityid}/.well-known/openid-federation")
     text = resp.text
-    jwt_net: JWT = jwt.JWT.from_jose_token(text)
-    # FIXME: In future we will need the proper key to verify the signature and use only
-    # validated contain.
-    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    jwt_net: JWT = jwt.JWT(jwt=text, key=keyset)
+    return jwt_net, keyset, text
 
-    # TODO: Verify that the authority_hints matches with the inmor's entity_id.
 
+def merge_our_policy_ontop_subpolicy(subpolicy: dict[Any, Any]) -> str | None:
+    "To verify that we can succesfully merge policies."
+    if settings.POLICY_DOCUMENT.get("metadata_policy", {}):
+        merged_policy = merge_policies(
+            json.dumps(settings.POLICY_DOCUMENT.get("metadata_policy", {})), json.dumps(subpolicy)
+        )
+        return merged_policy
+    return None
+
+
+def apply_server_policy(metadata: str):
+    "Verifies that we can apply our policy on the metadata."
+    m = apply_policy(json.dumps(settings.POLICY_DOCUMENT), metadata)
+    return m
+
+
+def create_server_statement() -> str:
+    """Creates a signed server entity statement"""
     # This is the data we care for now
     sub_data = {"iss": settings.TA_DOMAIN}
-    # We don't need this for subordinate statement
-    # sub_data["authority_hints"] = payload.get("authority_hints")
-    metadata = payload.get("metadata")
-    if metadata:
-        # We should mark what kind of entity it is, for the /list endpoint
-        # The treewalking code will visit the entity later, but this is to make sure
-        # that we have some information storied at the first check.
-        if "openid_relying_party" in metadata:
-            # Mweans RP
-            _ = r.sadd("inmor:rp", entity_id)
-            logger.info(f"{entity_id} added as RP to memory database.")
-        elif "openid_provider" in metadata:
-            # Means  OP
-            _ = r.sadd("inmor:op", entity_id)
-            logger.info(f"{entity_id} added as OP to memory database.")
-        else:  # means "federation_entity" in metadata:
-            # Means we have a TA/IA
-            _ = r.sadd("inmor:taia", entity_id)
+    sub_data["sub"] = settings.TA_DOMAIN
+    sub_data["metadata"] = {"federation_entity": settings.FEDERATION_ENTITY}
+    if len(settings.AUTHORITY_HINTS) > 0:
+        # Then it is IA not TA
+        sub_data["authority_hints"] = settings.AUTHORITY_HINTS
 
-        sub_data["metadata"] = metadata
-
-    # This is the metadata policy of TA defined in the settings.py
-    sub_data["metadata_policy "] = settings.METADATA_POLICY
-
-    # We don't need trustmarks for the subordinate statements.
-    # trust_marks = payload.get("trust_marks")
-    # if trust_marks:
-    # sub_data["trust_marks"] = trust_marks
-
-    # Default we keep the same expiry of the subordinate entity configuration
-    sub_data["exp"] = payload.get("exp")
-    sub_data["sub"] = payload.get("sub")
+    now = datetime.now()
+    exp = now + timedelta(hours=settings.SERVER_EXPIRY)
     # creation time
-    sub_data["iat"] = datetime.now().timestamp()
-    sub_data["jwks"] = [settings.SIGNING_PUBLIC_KEY]
+    sub_data["iat"] = now.timestamp()
+    # Expiry time of the server's entity statement
+    sub_data["exp"] = exp.timestamp()
+
+    # The is the server's keyset
+    keyset = JWKSet()
+    key = settings.SIGNING_PRIVATE_KEY
+    keyset.add(key)
+    sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
+
+    # TODO: fix the alg value for other types of keys of TA/I
+    token = jwt.JWT(
+        header={"alg": "RS256", "kid": key.kid, "typ": "entity-statement+jwt"}, claims=sub_data
+    )
+    token.make_signed_token(key)
+    token_data = token.serialize()
+    return token_data
+
+
+def create_subordinate_statement(
+    entityid: str, keyset: JWKSet, now: datetime, exp: datetime
+) -> str:
+    """Creates a signed Subordinate Statement"""
+    # This is the data we care for now
+    sub_data = {"iss": settings.TA_DOMAIN}
+    sub_data["sub"] = entityid
+    # Add any server metadata if available
+    if settings.POLICY_DOCUMENT.get("metadata", {}):
+        sub_data["metadata"] = settings.POLICY_DOCUMENT.get("metadata")
+    # This is the metadata policy of TA defined in the settings.py
+    if settings.POLICY_DOCUMENT.get("metadata_policy", {}):
+        sub_data["metadata_policy"] = settings.POLICY_DOCUMENT.get("metadata_policy")
+
+    # creation time
+    sub_data["iat"] = now.timestamp()
+    # Expiry time of the subordinate statement
+    sub_data["exp"] = exp.timestamp()
+    # The is the subordinate's keyset
+    sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
 
     key = settings.SIGNING_PRIVATE_KEY
 
@@ -88,12 +127,55 @@ def add_subordinate(entity_id: str, r: Redis) -> str:
     )
     token.make_signed_token(key)
     token_data = token.serialize()
+    return token_data
+
+
+def update_redis_with_subordinate(
+    entity_id: str, jwt_text: str, sub_metadata: dict[str, Any], signed_statement: str, r: Redis
+) -> None:
+    """Adds a new subordinate to the federation.
+
+    This creates a subordinate statement by the TA as iss and adds the metadata of the entity (subordinate).
+    https://openid.net/specs/openid-federation-1_0.html#name-fetch-subordinate-statement-
+
+    :args entity_id: The entity_id to be added
+    :args keyset: The keyset of the subordinate
+    :args jwt_text: The str version of the JWT of the subordinate.
+    :args sub_metadata: The subordinate's metadata
+    :args singed_statement: The signed subordinate statement.
+    :args r: Redis class from Django
+
+    """
+    # TODO: Verify that the authority_hints matches with the inmor's entity_id.
+
+    # We don't need this for subordinate statement
+    # sub_data["authority_hints"] = payload.get("authority_hints")
+    if sub_metadata:
+        # We should mark what kind of entity it is, for the /list endpoint
+        # The treewalking code will visit the entity later, but this is to make sure
+        # that we have some information storied at the first check.
+        if "openid_relying_party" in sub_metadata:
+            # Mweans RP
+            _ = r.sadd("inmor:rp", entity_id)
+            logger.info(f"{entity_id} added as RP to memory database.")
+        elif "openid_provider" in sub_metadata:
+            # Means  OP
+            _ = r.sadd("inmor:op", entity_id)
+            logger.info(f"{entity_id} added as OP to memory database.")
+        else:  # means "federation_entity" in metadata:
+            # Means we have a TA/IA
+            _ = r.sadd("inmor:taia", entity_id)
+
+        # We don't need trustmarks for the subordinate statements.
+    # trust_marks = payload.get("trust_marks")
+    # if trust_marks:
+    # sub_data["trust_marks"] = trust_marks
+
     # Now we should set it in the redis
-    _ = r.hset("inmor:subordinates", sub_data["sub"], token_data)
-    _ = r.hset("inmor:subordinates:jwt", sub_data["sub"], text)
+    _ = r.hset("inmor:subordinates", entity_id, signed_statement)
+    _ = r.hset("inmor:subordinates:jwt", entity_id, jwt_text)
     # Add the entity in the queue for walking the tree (if any)
     _ = r.lpush("inmor:newsubordinate", entity_id)
-    return token_data
 
 
 def self_validate(token: jwt.JWT) -> dict[str, Any]:
