@@ -280,7 +280,7 @@ class REPL(Cmd):
 
     def do_subordinate_list(self, line):
         "We will list all subordinates for our Trust Anchor."
-        print(s_y(f"We will list all subordinates for our Trust Anchor."))
+        print(s_y("We will list all subordinates for our Trust Anchor."))
         print(s_y("GET /api/v1/subordinates"))
         print("")
         _i()
@@ -292,7 +292,7 @@ class REPL(Cmd):
     def do_subordinate_update(self, line):
         "We will update a subordinate"
         domain = "https://fakerp0.labb.sunet.se"
-        print(s_y(f"We will update a given subordinate."))
+        print(s_y("We will update a given subordinate."))
         print(s_y("POST /api/v1/subordinates/1"))
         print("\n")
         with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
