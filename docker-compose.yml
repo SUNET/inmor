@@ -58,7 +58,7 @@ services:
       - ./redis:/data
   admin:
     build: ./admin/
-    image: docker.sunet.se/inmor-admin:v0.0.1
+    image: docker.sunet.se/inmor-admin:v0.1.1
     networks:
       - inmor-net
     depends_on:
@@ -68,12 +68,12 @@ services:
         condition: service_healthy
       ta:
         condition: service_healthy
-    command: ./docker-entrypoint.sh
+    command: /app/docker-entrypoint.sh
     environment:
       - INSIDE_CONTAINER=true
     volumes:
-      - ./admin/:/code
-      - ./public.json:/code/public.json
+      - ./admin/private.json:/app/private.json
+      - ./public.json:/app/public.json
     ports:
       - "8000:8000"
 networks:

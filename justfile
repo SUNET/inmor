@@ -20,9 +20,10 @@ lint-rust:
 [working-directory: 'admin']
 lint-python: venv
   # The Python code is not packaged, so imports are currently
-  # relative to the admin/ directory
+  # relative to the admin/ directory.
+  # We don't check api_demo directory.
   . .venv/bin/activate && \
-  ty check .  && \
+  ty check .  --exclude api_demo && \
   ruff format --check && \
   ruff check .
 
