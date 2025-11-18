@@ -23,7 +23,7 @@ class SubordinateRequest(BaseModel):
 
 
 def fetch_entity_configuration(
-    entityid: str, official_metadata: dict[Any, Any], keys: dict[Any, Any] | None = None
+    entityid: str, keys: dict[Any, Any] | None = None
 ) -> tuple[JWT, JWKSet, str]:
     """Fetches the entity configuration and returns verified JWT.
 
@@ -35,12 +35,6 @@ def fetch_entity_configuration(
     # Let us get the JWKS
     if keys is not None:
         keys_str = json.dumps(keys)
-        keyset = jwk.JWKSet.from_json(keys_str)
-    elif "openid_relying_party" in official_metadata:
-        keys_str = json.dumps(official_metadata["openid_relying_party"]["jwks"])
-        keyset = jwk.JWKSet.from_json(keys_str)
-    elif "openid_provider" in official_metadata:
-        keys_str = json.dumps(official_metadata["openid_provider"]["jwks"])
         keyset = jwk.JWKSet.from_json(keys_str)
     else:
         raise ValueError("Missing JWKS")
