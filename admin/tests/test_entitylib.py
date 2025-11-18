@@ -2,7 +2,6 @@ import json
 import os
 from typing import Any
 
-import pytest
 from django.test import TestCase
 from jwcrypto import jwt
 from jwcrypto.common import json_decode
