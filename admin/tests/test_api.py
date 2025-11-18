@@ -315,7 +315,7 @@ def test_trustmark_update(db, loadredis):
 
 @pytest.mark.django_db
 def test_add_subordinate(db, loadredis, conf_settings):  # type: ignore
-    "Tests adding subordinate"
+    "Tests adding subordinate without passing any JWKS"
     self = TestCase()
     self.maxDiff = None
     client: TestClient = TestClient(router)
@@ -329,11 +329,7 @@ def test_add_subordinate(db, loadredis, conf_settings):  # type: ignore
     }
 
     response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
-    d1 = response.json()
-    self.assertEqual(True, d1.get("active"))
-    # This is because the keys are inside the metadata of the client
-    self.assertIsNone(d1.get("jwks"))
+    self.assertEqual(response.status_code, 422)
 
 
 @pytest.mark.django_db
@@ -360,6 +356,35 @@ def test_add_subordinate_with_key(db, loadredis):  # type: ignore
     d1 = response.json()
     # This is because the keys are sent separately
     self.assertEqual(keys, d1.get("jwks"))
+
+
+@pytest.mark.django_db
+def test_add_subordinate_with_key_twice(db, loadredis):  # type: ignore
+    "Tests adding subordinate"
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+
+    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
+        metadata = json.load(fobj)
+
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
+
+    response = client.post("/subordinates", json=data)
+    self.assertEqual(response.status_code, 201)
+    d1 = response.json()
+    # This is because the keys are sent separately
+    self.assertEqual(keys, d1.get("jwks"))
+
+    response = client.post("/subordinates", json=data)
+    self.assertEqual(response.status_code, 403)
 
 
 @pytest.mark.django_db

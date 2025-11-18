@@ -155,7 +155,7 @@ class EntityTypeSchema(Schema):
     entityid: str
     metadata: dict[Any, Any]
     forced_metadata: dict[Any, Any]
-    jwks: dict[Any, Any] | None = None
+    jwks: dict[Any, Any]
     required_trustmarks: str | None = None
     valid_for: int | None = None
     autorenew: bool | None = True
@@ -165,7 +165,7 @@ class EntityTypeSchema(Schema):
 class EntityTypeUpdateSchema(Schema):
     metadata: dict[Any, Any]
     forced_metadata: dict[Any, Any]
-    jwks: dict[Any, Any] | None = None
+    jwks: dict[Any, Any]
     required_trustmarks: str | None = None
     valid_for: int | None = None
     autorenew: bool | None = True
@@ -177,7 +177,7 @@ class EntityOutSchema(Schema):
     entityid: str
     metadata: MyDict
     forced_metadata: MyDict
-    jwks: InternalJWKS | None = None
+    jwks: InternalJWKS
     required_trustmarks: str | None = None
     valid_for: int | None = None
     autorenew: bool | None = None
@@ -447,14 +447,10 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     "Adds a new subordinate."
     # First get verified JWT from entity configuration with the keys we provided
     official_metadata = data.metadata
-    keys: dict[Any, Any] | None = None
-    if data.jwks:
-        keys = data.jwks
+    keys = data.jwks
 
     # This entity_jwt is verified with the key (signature verification)
-    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(
-        data.entityid, official_metadata, keys
-    )
+    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(data.entityid, keys)
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
     # TODO: If the entity has policy, then we should try to merge to veirfy.
     if "metadata_policy" in claims:
@@ -508,7 +504,10 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
         )
     except Exception as e:
         print(e)
-        return 500, {"message": "Error while creating a new TrustMarkType"}
+        if "unique constraint" in e.args[0]:
+            sub_statement = Subordinate.objects.get(entityid=data.entityid)
+            return 403, sub_statement
+        return 500, {"message": "Error while adding a new subordinate."}
     # If we did not create a new subordinate, return now.
     if not created:
         return 403, sub_statement
@@ -569,9 +568,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
         keys = data.jwks
 
     # This entity_jwt is verified with the key (signature verification)
-    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(
-        sub.entityid, official_metadata, keys
-    )
+    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(sub.entityid, keys)
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
     # TODO: If the entity has policy, then we should try to merge to veirfy.
     if "metadata_policy" in claims:
