@@ -43,7 +43,6 @@ COPY --from=build --chown=app:app /app /app
 COPY ./inmoradmin /app/inmoradmin
 COPY ./entities /app/entities
 COPY ./trustmarks /app/trustmarks
-COPY ./static /app/static
 COPY ./docker-entrypoint.sh /app/
 COPY ./manage.py /app/
 
