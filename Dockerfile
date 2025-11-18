@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/root/.cargo \
 
 
 ##### Production image
-FROM debian:12
+FROM debian:12-slim
 RUN <<EOT
 groupadd -r app
 useradd -r -d /app -g app -N app
