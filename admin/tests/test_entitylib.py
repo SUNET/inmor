@@ -2,6 +2,7 @@ import json
 import os
 from typing import Any
 
+import pytest
 from django.test import TestCase
 from jwcrypto import jwt
 from jwcrypto.common import json_decode
@@ -17,15 +18,6 @@ def get_payload(token_str: str):
     return json_decode(jose.token.objects.get("payload", ""))
 
 
-def test_fetch_entity_configuration():
-    "Tests fetching entity configuration and verification."
-    self = TestCase()
-    self.maxDiff = None
-    with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
-        metadata = json.load(fobj)
-    _ = lib.fetch_entity_configuration("https://fakerp0.labb.sunet.se", metadata)
-
-
 def test_fetch_entity_configuration_with_keys():
     "Tests fetching entity configuration and verification."
     self = TestCase()
@@ -34,4 +26,4 @@ def test_fetch_entity_configuration_with_keys():
         metadata: dict[Any, Any] = json.load(fobj)
     keys = metadata["openid_relying_party"]["jwks"]
     metadata.pop("openid_relying_party")
-    _ = lib.fetch_entity_configuration("https://fakerp0.labb.sunet.se", metadata, keys)
+    _ = lib.fetch_entity_configuration("https://fakerp0.labb.sunet.se", keys)
