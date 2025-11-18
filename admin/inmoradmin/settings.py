@@ -12,9 +12,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
-from typing import List
 
 from jwcrypto import jwk
+
+from . import localsettings
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,7 +30,7 @@ SECRET_KEY = "django-insecure-28am!-fa@e-j@#9*=a^$=60oc7o5!ggp=r-(+5zs_u*4ebe2k4
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS: List[str] = []
+ALLOWED_HOSTS: list[str] = []
 
 
 # Application definition
@@ -169,7 +170,6 @@ FEDERATION_ENTITY = {
     "federation_fetch_endpoint": f"{TA_DOMAIN}/fetch",
     "federation_list_endpoint": f"{TA_DOMAIN}/list",
     "federation_resolve_endpoint": f"{TA_DOMAIN}/resolve",
-    "federation_collection_endpoint": f"{TA_DOMAIN}/collection",
 }
 
 SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
@@ -189,3 +189,9 @@ TA_DEFAULTS = {
         "active": True,
     },
 }
+
+# now see if we need to override any settings
+for variable in dir(localsettings):
+    if not variable.startswith("__"):
+        # Then we set it
+        globals()[variable] = getattr(localsettings, variable)
