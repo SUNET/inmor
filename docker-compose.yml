@@ -21,7 +21,7 @@ services:
         condition: service_healthy
     command: ./inmor -c taconfig.toml
     environment:
-      - 'RUST_LOG=debug'
+      - 'RUST_LOG=debug' # If you want see debug logs (too many)
     ports:
       - "8080:8080"
   db:
@@ -73,6 +73,7 @@ services:
     volumes:
       - ./admin/private.json:/app/private.json
       - ./public.json:/app/public.json
+    # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
     ports:
       - "8000:8000"
 networks:

@@ -1,7 +1,7 @@
 [project]
 name = "pyinmor"
 authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
-version = "0.1.0"
+version = "0.1.2"
 description = "Inmor Trust Anchor"
 license = { file="LICENSE" }
 requires-python = '>=3.13'
@@ -16,6 +16,7 @@ dependencies = [
 	"python-dotenv",
 	"pytest-dotenv",
 	"ruff",
+	"scriv",
 ]
 
 [project.urls]
@@ -73,3 +74,7 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = "tests"
 pythonpath = ["."]
+
+[tool.scriv]
+version = "literal: pyproject.toml: project.version"
+format = "md"
