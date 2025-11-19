@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow, bail};
 
 use lazy_static::lazy_static;
 use log::{debug, info};
+use redis::AsyncCommands;
 use redis::Client;
 use reqwest::blocking;
 use std::fmt::{Display, format};
@@ -423,7 +424,7 @@ pub async fn get_entitycollectionresponse(
 #[get("/list")]
 async fn list_subordinates(
     info: Query<SubListingParams>,
-    data: web::Data<Federation>,
+    redis: web::Data<redis::Client>,
 ) -> actix_web::Result<impl Responder> {
     let SubListingParams {
         entity_type,
@@ -435,9 +436,40 @@ async fn list_subordinates(
     // This will contain all subordinates without filtering
     let mut results: Vec<EntityDetails> = Vec::new();
     {
-        let fed = data.entities.lock().unwrap();
-        for (key, val) in fed.iter() {
-            results.push(val.clone());
+        let mut conn = redis
+            .get_connection_manager()
+            .await
+            .map_err(error::ErrorInternalServerError)?;
+
+        let entities = (redis::Cmd::hgetall("inmor:subordinates:jwt")
+            .query_async::<HashMap<String, String>>(&mut conn)
+            .await)
+            .unwrap_or_default();
+        // One can say that we are doing extra loops, which is true,
+        // but that will keep the code simple for now.
+        for (key, val) in entities.iter() {
+            // Let us get the metadata
+            let (payload, _) = match get_unverified_payload_header(val) {
+                Ok(d) => d,
+                Err(_) => panic!("Error in parsing the JWT for suboridnate"),
+            };
+            let metadata = payload.claim("metadata").unwrap();
+            let trustmarks = payload.claim("trust_marks");
+            let x = metadata.as_object().unwrap();
+            if x.contains_key("openid_provider") {
+                // Means OP
+                let entity = EntityDetails::new(key, "openid_provider", trustmarks);
+                results.push(entity);
+            } else if x.contains_key("openid_relying_party") {
+                // Means RP
+                let entity = EntityDetails::new(key, "openid_relying_party", trustmarks);
+
+                results.push(entity);
+            } else {
+                // Means TA/IA
+                let entity = EntityDetails::new(key, "taia", trustmarks);
+                results.push(entity);
+            }
         }
     }
     // Now let us go through the list if we need to filter based on the query parameter.

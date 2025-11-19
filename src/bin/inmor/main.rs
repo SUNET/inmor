@@ -153,43 +153,6 @@ async fn main() -> io::Result<()> {
         entities: Mutex::new(HashMap::new()),
     };
 
-    // Now we will go through all the subordinates from admin application
-    //let file_data = fs::read_to_string("subordinates.json").expect("Cound not read.");
-    //let new_skolor: Federation =
-    //serde_json::from_str(&file_data).expect("JSON is not well formatted");
-
-    let mut con = redis.get_connection().unwrap();
-    let entities: HashMap<String, String> = con.hgetall("inmor:subordinates:jwt").unwrap();
-    {
-        let mut fe = federation.entities.lock().unwrap();
-        for (key, val) in entities.iter() {
-            // Let us get the metadata
-            let (payload, _) = match get_unverified_payload_header(val) {
-                Ok(d) => d,
-                Err(_) => panic!("Error in parsing the JWT for suboridnate"),
-            };
-            let metadata = payload.claim("metadata").unwrap();
-            let trustmarks = payload.claim("trust_marks");
-            let x = metadata.as_object().unwrap();
-            if x.contains_key("openid_provider") {
-                // Means OP
-                let entity = EntityDetails::new(key, "openid_provider", trustmarks);
-                fe.insert(key.clone(), entity);
-            } else if x.contains_key("openid_relying_party") {
-                // Means RP
-                let entity = EntityDetails::new(key, "openid_relying_party", trustmarks);
-
-                fe.insert(key.clone(), entity);
-            } else {
-                // Means TA/IA
-                let entity = EntityDetails::new(key, "taia", trustmarks);
-                fe.insert(key.clone(), entity);
-            }
-        }
-    }
-
-    // End of loop for finding all subordinates
-    //
     let fed_app_data = web::Data::new(federation);
 
     HttpServer::new(move || {
