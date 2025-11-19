@@ -45,41 +45,9 @@ pub struct MyParams {
     name: String,
 }
 
-async fn cache_stuff(
-    req: HttpRequest,
-    params: web::Form<MyParams>,
-    redis: web::Data<redis::Client>,
-) -> actix_web::Result<impl Responder> {
-    let mut conn = redis
-        .get_connection_manager()
-        .await
-        .map_err(error::ErrorInternalServerError)?;
-
-    let res = redis::Cmd::set("name", params.name.clone())
-        .query_async::<String>(&mut conn)
-        .await
-        .map_err(error::ErrorInternalServerError)?;
-
-    // not strictly necessary, but successful SET operations return "OK"
-    if res == "OK" {
-        Ok(HttpResponse::Ok().body("successfully cached values"))
-    } else {
-        Ok(HttpResponse::InternalServerError().finish())
-    }
-}
-
 #[get("/")]
 async fn index() -> impl Responder {
     "Index page."
-}
-
-/// Sets the given entity_id of the application to the redis server.
-/// Thus in future we can return the same entity_id details without creating the JWT again & again.
-fn set_app_entity_data(entity_data: &str, redis: &Client) {
-    let mut conn = redis.get_connection().unwrap();
-    let res = redis::Cmd::set("inmor:entity_id", entity_data)
-        .query::<String>(&mut conn)
-        .unwrap();
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#name-entity-statement
@@ -126,28 +94,11 @@ async fn main() -> io::Result<()> {
         )
     });
 
-    // Start of new signed entity_id for the application
-    //let mut federation_entity = Map::new();
-    //federation_entity.insert(
-    //"federation_entity".to_string(),
-    //server_config.endpoints.to_openid_metadata(),
-    //);
-    //let entity_data = compile_entityid(
-    //&format!("{}", &server_config.domain),
-    //&server_config.domain,
-    //json!(federation_entity).into(),
-    //)
-    //.unwrap();
-    //println!("{entity_data:?}");
-
     // Now the normal web app flow
     //
     //
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     let redis = redis::Client::open(server_config.redis_uri.as_str()).unwrap();
-    // TODO: remove the code below
-    // Here first we set the new entity_id to redis
-    //set_app_entity_data(&entity_data, &redis);
 
     let mut federation = Federation {
         entities: Mutex::new(HashMap::new()),
@@ -166,11 +117,6 @@ async fn main() -> io::Result<()> {
             }))
             .app_data(web::Data::new(redis.clone()))
             .app_data(fed_app_data.clone())
-            .service(
-                web::resource("/stuff")
-                    .route(web::get().to(get_from_cache))
-                    .route(web::post().to(cache_stuff)),
-            )
             .service(index)
             .service(openid_federation)
             .service(list_subordinates)
