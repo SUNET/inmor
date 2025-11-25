@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 
@@ -187,7 +188,7 @@ def test_trustmark_create(db, loadredis):
 
     self = TestCase()
     self.maxDiff = None
-    data = {"tmt": 2, "domain": domain}
+    data = {"tmt": 2, "domain": domain, "valid_for": 24}
     client: TestClient = TestClient(router)
     response = client.post("/trustmarks", json=data)
 
@@ -197,6 +198,11 @@ def test_trustmark_create(db, loadredis):
     payload = get_payload(jwt_token)
     self.assertEqual(domain, payload.get("sub"))
     self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    # The following is to test #51
+    iat = datetime.datetime.fromtimestamp(payload.get("iat"), datetime.timezone.utc)
+    exp = datetime.datetime.fromtimestamp(payload.get("exp"), datetime.timezone.utc)
+    diff = exp - iat
+    self.assertEqual(diff.days, 1)
 
 
 @pytest.mark.django_db
