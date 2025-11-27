@@ -1,5 +1,10 @@
+from typing import TYPE_CHECKING, Any
+
 from django.db import models
 from django.db.models.functions import Now
+
+if TYPE_CHECKING:
+    from django.db.models.manager import RelatedManager
 
 
 # Create your models here.
@@ -31,6 +36,11 @@ class TrustMark(models.Model):
     renewal_time = models.IntegerField()
     mark = models.CharField(null=True)
     expire_at = models.DateTimeField(null=True)
+
+    if TYPE_CHECKING:
+        additional_claims: dict[str, Any] | None
+    else:
+        additional_claims = models.JSONField(default=None, null=True)
 
     def __str__(self):
         return self.domain

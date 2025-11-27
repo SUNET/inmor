@@ -206,6 +206,28 @@ def test_trustmark_create(db, loadredis):
 
 
 @pytest.mark.django_db
+def test_trustmark_create_with_additional_claims(db, loadredis):
+    """Test creating a trustmark with additional_claims and verify they appear in the JWT payload."""
+    domain = "https://fakerp0.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+    additional_claims = {"ref": "https://github.com/SUNET/inmor"}
+    data = {"tmt": 2, "domain": domain, "valid_for": 24, "additional_claims": additional_claims}
+    client: TestClient = TestClient(router)
+    response = client.post("/trustmarks", json=data)
+
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    self.assertEqual(domain, payload.get("sub"))
+    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    # Verify the additional claim is present in the JWT payload
+    self.assertEqual("https://github.com/SUNET/inmor", payload.get("ref"))
+
+
+@pytest.mark.django_db
 def test_trustmark_create_twice(db, loadredis):
     domain = "https://fakerp0.labb.sunet.se"
 

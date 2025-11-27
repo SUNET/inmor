@@ -5,6 +5,7 @@ from django.conf import settings
 from jwcrypto import jwt
 from jwcrypto.common import json_decode
 from pydantic import BaseModel
+from typing import Any, Optional
 
 
 class TrustMarkRequest(BaseModel):
@@ -16,7 +17,13 @@ class TrustMarkTypeRequest(BaseModel):
     type: str
 
 
-def add_trustmark(entity: str, trustmarktype: str, expiry: int, r: redis.Redis) -> str:
+def add_trustmark(
+    entity: str,
+    trustmarktype: str,
+    expiry: int,
+    additional_claims: Optional[dict["str", Any]],
+    r: redis.Redis,
+) -> str:
     """Adds a new TrustMark for a given entity for a given TrustMarkType.
 
     :args entity: The entity_id to be added
@@ -35,7 +42,8 @@ def add_trustmark(entity: str, trustmarktype: str, expiry: int, r: redis.Redis) 
     exp = now + timedelta(hours=expiry)
     sub_data["iat"] = now.timestamp()
     sub_data["exp"] = exp.timestamp()
-    # TODO: ref: we have to add this claim too in future
+    if additional_claims:
+        sub_data.update(additional_claims)
     sub_data["trust_mark_type"] = trustmarktype
 
     key = settings.SIGNING_PRIVATE_KEY
