@@ -3,9 +3,6 @@ from typing import TYPE_CHECKING, Any
 from django.db import models
 from django.db.models.functions import Now
 
-if TYPE_CHECKING:
-    from django.db.models.manager import RelatedManager
-
 
 # Create your models here.
 class TrustMarkType(models.Model):
