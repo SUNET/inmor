@@ -437,8 +437,14 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             if not data.active:
                 tm.mark = None
         # Now also save any updated additional claims
-        if data.additional_claims is not None:
-            tm.additional_claims = data.additional_claims
+        if data.additional_claims != tm.additional_claims:
+            tm.additional_claims = data.additional_claims  # type: ignore
+            con: Redis = get_redis_connection("default")
+            # Now we should create the signed JWT and store in redis
+            mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con)
+            tm.mark = mark
+            expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
+            tm.expire_at = expiry
         tm.save()
         # TODO: Should we remove the trustmark from redis in case it is not active?
         return 200, tm

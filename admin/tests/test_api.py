@@ -228,6 +228,48 @@ def test_trustmark_create_with_additional_claims(db, loadredis):
 
 
 @pytest.mark.django_db
+def test_trustmark_update_additional_claims(db, loadredis):
+    """Test updating a trustmark's additional_claims and verify changes in JWT payload."""
+    domain = "https://fakerp2.labb.sunet.se"
+
+    self = TestCase()
+    self.maxDiff = None
+
+    # Step 1: Create trustmark with initial additional_claims
+    additional_claims = {"ref": "https://github.com/SUNET/inmor"}
+    data = {"tmt": 2, "domain": domain, "valid_for": 24, "additional_claims": additional_claims}
+    client: TestClient = TestClient(router)
+    response = client.post("/trustmarks", json=data)
+
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    trustmark_id = resp["id"]
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    self.assertEqual("https://github.com/SUNET/inmor", payload.get("ref"))
+
+    # Step 2: Update additional_claims with different value
+    update_data = {"additional_claims": {"ref": "https://python.org"}}
+    response = client.put(f"/trustmarks/{trustmark_id}", json=update_data)
+    self.assertEqual(response.status_code, 200)
+    resp = response.json()
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    # Verify the updated claim is present in the JWT payload
+    self.assertEqual("https://python.org", payload.get("ref"))
+
+    # Step 3: Update additional_claims to None
+    update_data = {"additional_claims": None}
+    response = client.put(f"/trustmarks/{trustmark_id}", json=update_data)
+    self.assertEqual(response.status_code, 200)
+    resp = response.json()
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    # Verify the claim is removed from the JWT payload
+    self.assertIsNone(payload.get("ref"))
+
+
+@pytest.mark.django_db
 def test_trustmark_create_twice(db, loadredis):
     domain = "https://fakerp0.labb.sunet.se"
 
