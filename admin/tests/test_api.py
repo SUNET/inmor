@@ -394,7 +394,7 @@ def test_trustmark_update(db, loadredis):
     self.assertFalse(resp["mark"])
     # Here data is signed JWT
     data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
-    self.assertIsNone(data)
+    self.assertEqual(data, b"revoked")
     self.assertEqual(False, resp.get("autorenew"))
     self.assertEqual(False, resp.get("active"))
 

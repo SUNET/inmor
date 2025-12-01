@@ -20,7 +20,7 @@ use josekit::{
     jwk::{Jwk, JwkSet},
     jws::alg::rsassa::RsassaJwsAlgorithm,
     jws::{ES256, ES384, ES512, JwsAlgorithm, JwsHeader, JwsVerifier, PS256, RS256},
-    jwt::{self, JwtPayload},
+    jwt::{self, JwtPayload, JwtPayloadValidator},
     util,
 };
 use oidfed_metadata_policy::*;
@@ -445,8 +445,7 @@ async fn list_subordinates(
             .query_async::<HashMap<String, String>>(&mut conn)
             .await)
             .unwrap_or_default();
-        // One can say that we are doing extra loops, which is true,
-        // but that will keep the code simple for now.
+
         for (key, val) in entities.iter() {
             // Let us get the metadata
             let (payload, _) = match get_unverified_payload_header(val) {
@@ -687,6 +686,11 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
     };
     let verifier = &*boxed_verifier;
     let (payload, header) = jwt::decode_with_verifier(data, verifier)?;
+    // Now we should also validate the JWT
+    // See more https://github.com/SUNET/inmor/issues/79
+    let mut validator = JwtPayloadValidator::new();
+    validator.set_base_time(SystemTime::now());
+    validator.validate(&payload)?;
     Ok((payload, header))
 }
 
@@ -922,8 +926,12 @@ pub async fn resolve_entity_to_trustanchor(
         };
 
         // Verify and get the payload
-        let (ah_payload, _) = self_verify_jwt(&ah_jwt).unwrap();
-        // Now find the fetch endpoint
+        let jwt_result = self_verify_jwt(&ah_jwt);
+        if jwt_result.is_err() {
+            continue;
+        }
+
+        let (ah_payload, _) = jwt_result.expect("This can not be error here.");
         let ah_metadata = ah_payload.claim("metadata").unwrap();
         let fetch_endpoint = ah_metadata
             .get("federation_entity")
@@ -1144,6 +1152,39 @@ pub async fn resolve_entity(
         .body(resp))
 }
 
+/// To create the signed JWT for resolve response
+fn create_trustmark_status_response_jwt(
+    state: &web::Data<AppState>,
+    trustmark: &str,
+    status: &str,
+) -> Result<String, JoseError> {
+    let mut header = JwsHeader::new();
+    header.set_token_type("JWT");
+    header.set_claim("typ", Some(json!("trust-mark-status-response+jwt")));
+    header.set_claim("alg", Some(json!("RS256")));
+
+    let mut payload = JwtPayload::new();
+    let iss = state.entity_id.clone();
+    payload.set_issuer(iss);
+    payload.set_issued_at(&SystemTime::now());
+
+    // Set expiry after 24 horus
+    let exp = SystemTime::now() + Duration::from_secs(86400);
+    payload.set_expires_at(&exp);
+    payload.set_claim("trustmark", Some(json!(trustmark)));
+    payload.set_claim("status", Some(json!(status)));
+
+    // Signing JWT
+    let keydata = &*PRIVATE_KEY.clone();
+    let key = Jwk::from_bytes(keydata).unwrap();
+    // kid MUST be set
+    header.set_key_id(key.key_id().unwrap_or("missing_key_id"));
+
+    let signer = RS256.signer_from_jwk(&key)?;
+    let jwt = jwt::encode_with_signer(&payload, &header, &signer)?;
+    Ok(jwt)
+}
+
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.4.1
 #[get("/trust_mark_status")]
 pub async fn trust_mark_status(
@@ -1153,24 +1194,62 @@ pub async fn trust_mark_status(
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkStatusParams { trust_mark } = info.into_inner();
 
+    let mut invalid = false;
+    let mut expired = false;
+
     let jwks = state.public_keyset.clone();
     let (payload, _) = match verify_jwt_with_jwks(&trust_mark, Some(jwks)) {
-        Ok(d) => d,
+        Ok((payload, header)) => (payload, header),
         Err(err) => {
-            return error_response_400("invalid_request", "Could not verify the request");
+            if err
+                .to_string()
+                .contains("Invalid claim: The token has expired")
+            {
+                expired = true;
+            } else {
+                invalid = true;
+            }
+            (JwtPayload::new(), JwsHeader::new())
+        }
+    };
+    let mut status = "";
+    if invalid {
+        status = "invalid";
+    } else if expired {
+        status = "expired";
+    } else {
+        let v = json!("");
+        let hkey = "inmor:tm:".to_string() + payload.subject().unwrap_or("");
+        let claims = payload.claims_set();
+        let trustmarktype = claims
+            .get("trust_mark_type")
+            .unwrap_or(&v)
+            .as_str()
+            .unwrap_or("");
+        let mut conn = redis.get_connection_manager().await.unwrap();
+        let mark = redis::Cmd::hget(hkey, trustmarktype)
+            .query_async::<String>(&mut conn)
+            .await
+            .map_err(error::ErrorInternalServerError)?;
+
+        if mark != "revoked" {
+            status = "active";
+        } else {
+            status = "revoked";
+        }
+    }
+
+    let resp = match create_trustmark_status_response_jwt(&state, &trust_mark, status) {
+        Ok(r) => r,
+        Err(err) => {
+            // Log here about the failure
+            return Err(error::ErrorInternalServerError(err));
         }
     };
 
-    //
-    let mut result = HashMap::new();
-    result.insert("active", true);
-    let body = match serde_json::to_string(&result) {
-        Ok(d) => d,
-        Err(_) => return Err(error::ErrorInternalServerError("JSON error")),
-    };
     Ok(HttpResponse::Ok()
-        .insert_header(("content-type", "application/json"))
-        .body(body))
+        .insert_header(("content-type", "application/trust-mark-status-response+jwt"))
+        .body(resp))
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.5.1

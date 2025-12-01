@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta
+from typing import Any, Optional
 
 import redis
 from django.conf import settings
 from jwcrypto import jwt
 from jwcrypto.common import json_decode
 from pydantic import BaseModel
-from typing import Any, Optional
 
 
 class TrustMarkRequest(BaseModel):

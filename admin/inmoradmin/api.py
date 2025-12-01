@@ -428,7 +428,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
 )
 def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchema):
     """Update a TrustMark"""
-    should_remove_from_redis = False
+    should_mark_redis_revoked = False
     try:
         tm = TrustMark.objects.get(id=tmid)
         if data.autorenew is not None:
@@ -437,8 +437,7 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             tm.active = data.active
             if not data.active:
                 tm.mark = None
-                # Also mark it to remove from redis
-                should_remove_from_redis = True
+                should_mark_redis_revoked = True
         # Now also save any updated additional claims
         con: Redis = get_redis_connection("default")
         if data.additional_claims != tm.additional_claims:
@@ -449,8 +448,8 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
             tm.expire_at = expiry
         tm.save()
-        if should_remove_from_redis:
-            _ = con.hdel(f"inmor:tm:{tm.domain}", tm.tmt.tmtype)
+        if should_mark_redis_revoked:
+            _ = con.hset(f"inmor:tm:{tm.domain}", tm.tmt.tmtype, "revoked")
             _ = con.srem(f"inmor:tmtype:{tm.tmt.tmtype}", tm.domain)
         return 200, tm
     except TrustMark.DoesNotExist:
