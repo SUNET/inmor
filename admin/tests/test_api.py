@@ -198,6 +198,11 @@ def test_trustmark_create(db, loadredis):
     payload = get_payload(jwt_token)
     self.assertEqual(domain, payload.get("sub"))
     self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    # Here data is signed JWT
+    data = loadredis.hget(f"inmor:tm:{domain}", payload["trust_mark_type"])
+    self.assertIsNotNone(data)
+    # Also this should be the same we received via response
+    self.assertEqual(data.decode("utf-8"), jwt_token)
     # The following is to test #51
     iat = datetime.datetime.fromtimestamp(payload.get("iat"), datetime.timezone.utc)
     exp = datetime.datetime.fromtimestamp(payload.get("exp"), datetime.timezone.utc)
@@ -375,10 +380,21 @@ def test_trustmark_update(db, loadredis):
     response = client.post("/trustmarks", json=data)
     self.assertEqual(response.status_code, 201)
     resp = response.json()
+    # At this moment redis MUST have the data related to the trustmark
+    jwt_token = resp["mark"]
+    payload = get_payload(jwt_token)
+    # Here data is signed JWT
+    data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
+    self.assertIsNotNone(data)
     update_data = {"autorenew": False, "active": False}
     response = client.put(f"/trustmarks/{resp['id']}", json=update_data)
     self.assertEqual(response.status_code, 200)
     resp = response.json()
+    # The response itself should have JWT anymore.
+    self.assertFalse(resp["mark"])
+    # Here data is signed JWT
+    data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
+    self.assertIsNone(data)
     self.assertEqual(False, resp.get("autorenew"))
     self.assertEqual(False, resp.get("active"))
 
