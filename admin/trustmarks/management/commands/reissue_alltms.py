@@ -1,5 +1,6 @@
 import djclick as click
 from django_redis import get_redis_connection
+
 from trustmarks.lib import add_trustmark
 from trustmarks.models import TrustMark
 
@@ -12,5 +13,5 @@ def command():
     for tm in tms:
         if tm.active:
             # Means we can reissue this one
-            add_trustmark(tm.domain, tm.tmt.tmtype, tm.tmt.valid_for, con)
+            _ = add_trustmark(tm.domain, tm.tmt.tmtype, tm.tmt.valid_for, tm.additional_claims, con)
             click.secho(f"Reissued {tm.domain}")

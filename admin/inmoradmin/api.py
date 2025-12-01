@@ -88,6 +88,7 @@ class TrustMarkSchema(Schema):
     valid_for: int | None = None
     renewal_time: int | None = None
     active: bool | None = None
+    additional_claims: dict[str, Any] | None = None
 
 
 class TrustMarkOutSchema(Schema):
@@ -109,6 +110,9 @@ class TrustMarkOutSchema(Schema):
     ] = None
     active: Annotated[bool | None, Field(description="If the TrustMarkType is active.")] = None
     mark: Annotated[str | None, Field(description="The TrustMark JWT.")] = None
+    additional_claims: Annotated[
+        dict[str, Any] | None, Field(description="Additional claims for the TrustMark JWT.")
+    ] = None
 
 
 class TrustMarkUpdateSchema(Schema):
@@ -117,6 +121,9 @@ class TrustMarkUpdateSchema(Schema):
         Field(description="If this TrustMarkType based TrustMarks will be autorenewed or not."),
     ] = None
     active: Annotated[bool | None, Field(description="If the TrustMarkType is active.")] = None
+    additional_claims: Annotated[
+        dict[str, Any] | None, Field(description="Current additional claims for the TrustMark.")
+    ] = None
 
 
 class TrustMarkListSchema(Schema):
@@ -336,27 +343,31 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
                 "id": data.tmt,
             }
     try:
-        tm, created = TrustMark.objects.get_or_create(
-            tmt=tmt,
-            domain=data.domain,
-            autorenew=data.autorenew,
-            valid_for=data.valid_for,
-            renewal_time=data.renewal_time,
-            active=data.active,
-        )
-        con: Redis = get_redis_connection("default")
-        if created:
+        # Task 1: First check if a TrustMark for the given domain and TrustMarkType exists.
+        try:
+            tm = TrustMark.objects.get(tmt=tmt, domain=data.domain)
+            # TrustMark already exists, return 403
+            return 403, tm
+        except TrustMark.DoesNotExist:
+            # Task 2: TrustMark does not exist, create a new TrustMark entry in DB.
+            tm = TrustMark.objects.create(
+                tmt=tmt,
+                domain=data.domain,
+                autorenew=data.autorenew,
+                valid_for=data.valid_for,
+                renewal_time=data.renewal_time,
+                active=data.active,
+                additional_claims=data.additional_claims,
+            )
+            con: Redis = get_redis_connection("default")
             # Now we should create the signed JWT and store in redis
-
-            mark = add_trustmark(tm.domain, tmt.tmtype, tm.valid_for, con)
+            mark = add_trustmark(tm.domain, tmt.tmtype, tm.valid_for, tm.additional_claims, con)
             # Adds the newly created JWT in the response
             tm.mark = mark
             expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
             tm.expire_at = expiry
             tm.save()
             return 201, tm
-        else:
-            return 403, tm
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
@@ -396,7 +407,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
     try:
         tm = TrustMark.objects.get(id=tmid)
         con: Redis = get_redis_connection("default")
-        mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, con)
+        mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con)
         # Adds the newly created JWT in the response
         tm.mark = mark
         expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
@@ -425,6 +436,15 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             tm.active = data.active
             if not data.active:
                 tm.mark = None
+        # Now also save any updated additional claims
+        if data.additional_claims != tm.additional_claims:
+            tm.additional_claims = data.additional_claims  # type: ignore
+            con: Redis = get_redis_connection("default")
+            # Now we should create the signed JWT and store in redis
+            mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con)
+            tm.mark = mark
+            expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
+            tm.expire_at = expiry
         tm.save()
         # TODO: Should we remove the trustmark from redis in case it is not active?
         return 200, tm
