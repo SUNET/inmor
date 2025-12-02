@@ -195,4 +195,35 @@ def test_ta_resolve_subordinate(loaddata: Redis, start_server: int):
     assert payload.get("iss") == "http://localhost:8080"
 
 
-# TODO: Add test for enity_id of the server
+def test_ta_entity_configuration(loaddata: Redis, start_server: int):
+    "Tests /resolve endpoint"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/.well-known/openid-federation"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "http://localhost:8080"
+    assert payload.get("iss") == "http://localhost:8080"
+
+    # Check that metadata contains federation_entity with correct endpoints
+    metadata = payload.get("metadata")
+    assert metadata is not None, "metadata missing from payload"
+    federation_entity = metadata.get("federation_entity")
+    assert federation_entity is not None, "federation_entity missing from metadata"
+
+    # Verify all FEDERATION_ENTITY endpoints are present and have expected values
+    base_url = "http://localhost:8080"
+    assert federation_entity.get("federation_fetch_endpoint") == f"{base_url}/fetch"
+    assert federation_entity.get("federation_list_endpoint") == f"{base_url}/list"
+    assert federation_entity.get("federation_resolve_endpoint") == f"{base_url}/resolve"
+    assert (
+        federation_entity.get("federation_trust_mark_status_endpoint")
+        == f"{base_url}/trust_mark_status"
+    )
+    assert (
+        federation_entity.get("federation_trust_mark_list_endpoint")
+        == f"{base_url}/trust_mark_list"
+    )
+    assert federation_entity.get("federation_trust_mark_endpoint") == f"{base_url}/trust_mark"
