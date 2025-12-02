@@ -1269,8 +1269,8 @@ pub async fn trust_mark_status(
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.5.1
-#[get("/trust_marked_list")]
-pub async fn trust_marked_list(
+#[get("/trust_mark_list")]
+pub async fn trust_mark_list(
     info: Query<TrustMarkListParams>,
     redis: web::Data<redis::Client>,
     state: web::Data<AppState>,

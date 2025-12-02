@@ -170,6 +170,9 @@ FEDERATION_ENTITY = {
     "federation_fetch_endpoint": f"{TA_DOMAIN}/fetch",
     "federation_list_endpoint": f"{TA_DOMAIN}/list",
     "federation_resolve_endpoint": f"{TA_DOMAIN}/resolve",
+    "federation_trust_mark_status_endpoint": f"{TA_DOMAIN}/trust_mark_status",
+    "federation_trust_mark_list_endpoint": f"{TA_DOMAIN}/trust_mark_list",
+    "federation_trust_mark_endpoint": f"{TA_DOMAIN}/trust_mark",
 }
 
 SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
