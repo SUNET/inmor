@@ -6,6 +6,7 @@ use log::{debug, info};
 use redis::AsyncCommands;
 use redis::Client;
 use reqwest::blocking;
+use sha2::{Digest, Sha256};
 use std::fmt::{Display, format};
 
 use actix_web::{
@@ -1193,6 +1194,21 @@ pub async fn trust_mark_status(
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkStatusParams { trust_mark } = info.into_inner();
+    let mut conn = redis.get_connection_manager().await.unwrap();
+
+    // Create sha256sum of the trust_mark and see if it exists in `inmor:tm:alltime` set.
+    let mut hasher = Sha256::new();
+    hasher.update(trust_mark.as_bytes());
+    let trust_mark_hash = format!("{:x}", hasher.finalize());
+
+    let exists: bool = redis::Cmd::sismember("inmor:tm:alltime", &trust_mark_hash)
+        .query_async::<bool>(&mut conn)
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
+    if !exists {
+        return error_response_404("not_found", "Trust mark not found.");
+    }
 
     let mut invalid = false;
     let mut expired = false;
@@ -1226,7 +1242,7 @@ pub async fn trust_mark_status(
             .unwrap_or(&v)
             .as_str()
             .unwrap_or("");
-        let mut conn = redis.get_connection_manager().await.unwrap();
+
         let mark = redis::Cmd::hget(hkey, trustmarktype)
             .query_async::<String>(&mut conn)
             .await

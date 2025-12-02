@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 
@@ -88,11 +89,16 @@ def test_trust_mark_status(loaddata: Redis, start_server: int):
 
 def test_trust_mark_status_invalid(loaddata: Redis, start_server: int):
     "Tests /trust_mark_status for invalid input"
-    _rdb = loaddata
+    rdb = loaddata
     port = start_server
     with open(os.path.join(file_dir, "data/invalid_for_trust_mark.txt")) as fobj:
         jwt_text = fobj.read()
     jwt_text = jwt_text.strip()
+    # First we will load that on redis to simulate that is from us.
+    h = hashlib.new("sha256")
+    h.update(jwt_text.encode("utf-8"))
+    _ = rdb.sadd("inmor:tm:alltime", h.hexdigest())
+    # now normal flow
     url = f"http://localhost:{port}/trust_mark_status?trust_mark={jwt_text}"
     resp = httpx.get(url)
     assert resp.status_code == 200
@@ -104,9 +110,14 @@ def test_trust_mark_status_invalid(loaddata: Redis, start_server: int):
 
 def test_trust_mark_status_invalid_jwt(loaddata: Redis, start_server: int):
     "Tests /trust_mark_status for invalid input"
-    _rdb = loaddata
+    rdb = loaddata
     port = start_server
     jwt_text = "hello_this_is_invalid_jwt"
+    # First we will load that on redis to simulate that is from us.
+    h = hashlib.new("sha256")
+    h.update(jwt_text.encode("utf-8"))
+    _ = rdb.sadd("inmor:tm:alltime", h.hexdigest())
+    # now normal flow
     url = f"http://localhost:{port}/trust_mark_status?trust_mark={jwt_text}"
     resp = httpx.get(url)
     jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
