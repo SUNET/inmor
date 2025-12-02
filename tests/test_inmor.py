@@ -26,11 +26,11 @@ def test_index_view(loaddata: Redis, start_server: int):
     assert resp.text == "Index page."
 
 
-def test_trust_marked_list(loaddata: Redis, start_server: int):
-    "Tests /trust_marked_list"
+def test_trust_mark_list(loaddata: Redis, start_server: int):
+    "Tests /trust_mark_list"
     _rdb = loaddata
     port = start_server
-    url = f"http://localhost:{port}/trust_marked_list?trust_mark_type=https://sunet.se/does_not_exist_trustmark"
+    url = f"http://localhost:{port}/trust_mark_list?trust_mark_type=https://sunet.se/does_not_exist_trustmark"
     resp = httpx.get(url)
     assert resp.status_code == 200
     data = resp.json()
