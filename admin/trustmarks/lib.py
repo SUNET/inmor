@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import hashlib
 from typing import Any, Optional
 
 import redis
@@ -57,6 +58,10 @@ def add_trustmark(
     _ = r.hset(f"inmor:tm:{entity}", trustmarktype, token_data)
     # second, add to the set of trust_mark_type
     _ = r.sadd(f"inmor:tmtype:{trustmarktype}", entity)
+    # third, add to the list of all trustmarks generated
+    h = hashlib.new("sha256")
+    h.update(token_data.encode("utf-8"))
+    _ = r.sadd("inmor:tm:alltime", h.hexdigest())
     return token_data
 
 
