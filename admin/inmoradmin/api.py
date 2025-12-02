@@ -428,6 +428,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
 )
 def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchema):
     """Update a TrustMark"""
+    should_mark_redis_revoked = False
     try:
         tm = TrustMark.objects.get(id=tmid)
         if data.autorenew is not None:
@@ -436,17 +437,20 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             tm.active = data.active
             if not data.active:
                 tm.mark = None
+                should_mark_redis_revoked = True
         # Now also save any updated additional claims
+        con: Redis = get_redis_connection("default")
         if data.additional_claims != tm.additional_claims:
             tm.additional_claims = data.additional_claims  # type: ignore
-            con: Redis = get_redis_connection("default")
             # Now we should create the signed JWT and store in redis
             mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con)
             tm.mark = mark
             expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
             tm.expire_at = expiry
         tm.save()
-        # TODO: Should we remove the trustmark from redis in case it is not active?
+        if should_mark_redis_revoked:
+            _ = con.hset(f"inmor:tm:{tm.domain}", tm.tmt.tmtype, "revoked")
+            _ = con.srem(f"inmor:tmtype:{tm.tmt.tmtype}", tm.domain)
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}

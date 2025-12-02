@@ -37,8 +37,8 @@ test-ta:
 
 # To run django tests for admin
 [working-directory: 'admin']
-test-admin:
-  uv run pytest -vvv -s
+test-admin *ARGS:
+  uv run pytest -vvv -s {{ARGS}}
 
 # Test target for both rust and django code
 test: test-ta test-admin
@@ -86,7 +86,20 @@ clean:
   rm -f public.json private.json admin/private.json
 
 # To recreate db/redis on Fedora
-recreate-fedora:
+recreate-fedora: down
   sudo rm -rf ./db ./redis
   mkdir db redis
   sudo chcon -Rt container_file_t ./db ./redis
+
+
+# To recreate the db and redis data for tests
+recreate-data: recreate-fedora up
+  echo "Sleeping for 5 seconds"
+  sleep 5
+  python scripts/create_redis_db_data.py
+
+# To dump the redis data locally
+dump-redis:
+  docker compose exec redis redis-cli save
+  docker cp inmor_redis_1:/data/dump.rdb .
+

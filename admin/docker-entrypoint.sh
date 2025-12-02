@@ -1,9 +1,12 @@
 #!/bin/bash
 
-sleep 2
+sleep 1
 # Apply database migrations
 echo "Apply database migrations"
 python manage.py migrate
+
+# Reload any already issued trustmarks
+python manage.py reload_issued_tms
 
 # Initial CSS build
 #echo "Building styles"
