@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+from typing import Any
 
 import pytest
 from django.test import TestCase
@@ -8,6 +9,7 @@ from jwcrypto import jwt
 from jwcrypto.common import json_decode
 from ninja.testing import TestClient
 
+from entities.lib import self_validate
 from inmoradmin.api import router
 
 # from pprint import pprint
@@ -580,5 +582,35 @@ def test_create_server_entity(db, loadredis):
 
     response = client.post("/server/entity")
     self.assertEqual(response.status_code, 201)
-    _entity_statement = response.json()
-    # TODO: Add the checks in the response
+    entity_statement = response.json().get("entity_statement")
+    self.assertIsNotNone(entity_statement)
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(entity_statement)
+    payload = self_validate(jwt_net)
+
+    # Verify sub and iss claims
+    base_url = "http://localhost:8080"
+    self.assertEqual(payload.get("sub"), base_url)
+    self.assertEqual(payload.get("iss"), base_url)
+
+    # Check that metadata contains federation_entity with correct endpoints
+    metadata: dict[str, Any] = payload.get("metadata", {})
+
+    self.assertIsNotNone(metadata, "metadata missing from payload")
+    federation_entity = metadata.get("federation_entity", {})
+    self.assertIsNotNone(federation_entity, "federation_entity missing from metadata")
+
+    # Verify all FEDERATION_ENTITY endpoints are present and have expected values
+    self.assertEqual(federation_entity.get("federation_fetch_endpoint"), f"{base_url}/fetch")
+    self.assertEqual(federation_entity.get("federation_list_endpoint"), f"{base_url}/list")
+    self.assertEqual(federation_entity.get("federation_resolve_endpoint"), f"{base_url}/resolve")
+    self.assertEqual(
+        federation_entity.get("federation_trust_mark_status_endpoint"),
+        f"{base_url}/trust_mark_status",
+    )
+    self.assertEqual(
+        federation_entity.get("federation_trust_mark_list_endpoint"),
+        f"{base_url}/trust_mark_list",
+    )
+    self.assertEqual(
+        federation_entity.get("federation_trust_mark_endpoint"), f"{base_url}/trust_mark"
+    )
