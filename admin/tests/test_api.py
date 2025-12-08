@@ -365,9 +365,30 @@ def test_trustmark_renew(db, loadredis):
     response = client.post("/trustmarks", json=data)
     self.assertEqual(response.status_code, 201)
     resp = response.json()
-    response = client.post(f"/trustmarks/{resp['id']}/renew")
+    original_mark = resp["mark"]
+    original_payload = get_payload(original_mark)
+    original_exp = original_payload.get("exp")
+    trustmark_id = resp["id"]
+
+    # Renew the trustmark
+    response = client.post(f"/trustmarks/{trustmark_id}/renew")
     self.assertEqual(response.status_code, 200)
-    # TODO: Now verify the rewnewd trustmark
+    renewed_resp = response.json()
+    renewed_mark = renewed_resp["mark"]
+    renewed_payload = get_payload(renewed_mark)
+    renewed_exp = renewed_payload.get("exp")
+
+    # Verify expiry date is higher after renewal
+    self.assertGreater(renewed_exp, original_exp)
+
+    # Verify other attributes remain the same
+    self.assertEqual(renewed_payload.get("sub"), original_payload.get("sub"))
+    self.assertEqual(renewed_payload.get("iss"), original_payload.get("iss"))
+    self.assertEqual(
+        renewed_payload.get("trust_mark_type"), original_payload.get("trust_mark_type")
+    )
+    self.assertEqual(renewed_resp.get("domain"), domain0)
+    self.assertEqual(renewed_resp.get("id"), trustmark_id)
 
 
 @pytest.mark.django_db
