@@ -3,7 +3,7 @@ services:
   ta:
     restart: always
     build: .
-    image: docker.sunet.se/inmor:0.1.2
+    image: docker.sunet.se/inmor:0.1.3
     networks:
       - inmor-net
     healthcheck:
@@ -57,7 +57,7 @@ services:
       - ./redis:/data
   admin:
     build: ./admin/
-    image: docker.sunet.se/inmor-admin:0.1.2
+    image: docker.sunet.se/inmor-admin:0.1.3
     networks:
       - inmor-net
     depends_on:
