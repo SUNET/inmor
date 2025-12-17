@@ -150,7 +150,7 @@ CACHES = {
 # TA/IA configuration
 
 SIGNING_PRIVATE_KEY = jwk.JWK.from_json(open("./private.json").read())
-SIGNING_PUBLIC_KEYS =  [ ] 
+SIGNING_PUBLIC_KEYS = []
 
 for pubkey in os.listdir("./publickeys"):
     if pubkey.endswith(".json") or pubkey.endswith(".pub"):

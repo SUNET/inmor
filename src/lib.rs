@@ -41,14 +41,12 @@ lazy_static! {
         if let Ok(entries) = fs::read_dir("./publickeys") {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_file() {
-                    if let Some(ext) = path.extension() {
-                        if ext == "json" || ext == "pub" {
-                            if let Ok(data) = fs::read(&path) {
-                                keys.push(data);
-                            }
-                        }
-                    }
+                if path.is_file()
+                    && let Some(ext) = path.extension()
+                    && (ext == "json" || ext == "pub")
+                    && let Ok(data) = fs::read(&path)
+                {
+                    keys.push(data);
                 }
             }
         }
