@@ -199,6 +199,8 @@ TA_DEFAULTS = {
     },
 }
 
+# The following are the trustmarks given to TA by an external entity
+TA_TRUSTMARKS = []
 # now see if we need to override any settings
 for variable in dir(localsettings):
     if not variable.startswith("__"):
