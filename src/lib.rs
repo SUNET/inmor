@@ -341,14 +341,14 @@ async fn list_subordinates(
         intermediate,
     } = info.into_inner();
 
+    let mut conn = redis
+        .get_connection_manager()
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
     // This will contain all subordinates without filtering
     let mut results: Vec<EntityDetails> = Vec::new();
     {
-        let mut conn = redis
-            .get_connection_manager()
-            .await
-            .map_err(error::ErrorInternalServerError)?;
-
         let entities = (redis::Cmd::hgetall("inmor:subordinates:jwt")
             .query_async::<HashMap<String, String>>(&mut conn)
             .await)
@@ -396,6 +396,16 @@ async fn list_subordinates(
     if let Some(trust_marked) = trust_marked {
         // Means check if at least one trustmark exists
         results.retain(|x| x.has_trustmark);
+    }
+    if let Some(trust_mark_type) = trust_mark_type {
+        // Means filter based on trustmark type
+
+        let query = format!("inmor:tmtype:{trust_mark_type}");
+        let valid_entities: HashSet<String> = redis::Cmd::smembers(query)
+            .query_async::<HashSet<String>>(&mut conn)
+            .await
+            .unwrap_or_default();
+        results.retain(|x| valid_entities.contains(&x.entity_id));
     }
 
     let res: Vec<String> = results.iter().map(|x| x.entity_id.clone()).collect();

@@ -146,6 +146,23 @@ def test_ta_list_subordinates(loaddata: Redis, start_server: int):
     assert set(data) == subs
 
 
+def test_ta_list_subordinates_bytrustmark(loaddata: Redis, start_server: int):
+    "Tests /list endpoint for given trust_mark_type"
+    _rdb = loaddata
+    port = start_server
+    url = f"http://localhost:{port}/list?trust_mark_type=https://example.com/trust_mark_type"
+    resp = httpx.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    subs = {
+        "https://fakerp0.labb.sunet.se",
+        "https://fakerp1.labb.sunet.se",
+    }
+    # make sure that the list of subordinates matches
+    assert set(data) == subs
+
+
 def test_ta_fetch_subordinate(loaddata: Redis, start_server: int):
     "Tests /fetch endpoint"
     _rdb = loaddata

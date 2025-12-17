@@ -47,6 +47,16 @@ for tm in tms:
     resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data)
     pprint(resp.json())
 
+
+print("--" * 30)
+print("Extra trustmarks for RPs")
+# One extra trustmark for only RPs
+for tm in ["https://fakerp0.labb.sunet.se", "https://fakerp1.labb.sunet.se"]:
+    data = {"tmt": 2, "domain": tm}
+    resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data)
+    pprint(resp.json())
+print("--" * 30)
+
 print("Now we will add the subordinates.")
 for tm in subs:
     well_known = f"{tm}/.well-known/openid-federation"
