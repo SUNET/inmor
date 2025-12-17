@@ -150,7 +150,13 @@ CACHES = {
 # TA/IA configuration
 
 SIGNING_PRIVATE_KEY = jwk.JWK.from_json(open("./private.json").read())
-SIGNING_PUBLIC_KEY = jwk.JWK.from_json(open("./public.json").read())
+SIGNING_PUBLIC_KEYS = []
+
+for pubkey in os.listdir("./publickeys"):
+    if pubkey.endswith(".json") or pubkey.endswith(".pub"):
+        pkey = jwk.JWK.from_json(open(os.path.join("./publickeys", pubkey)).read())
+        SIGNING_PUBLIC_KEYS.append(pkey)
+
 TA_DOMAIN = "http://localhost:8080"
 TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay

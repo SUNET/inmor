@@ -36,7 +36,22 @@ use std::time::{Duration, SystemTime};
 use std::{env, fs};
 
 lazy_static! {
-    static ref PUBLIEC_KEY: Vec<u8> = std::fs::read("./public.json").unwrap();
+    static ref PUBLIC_KEYS: Vec<Vec<u8>> = {
+        let mut keys = Vec::new();
+        if let Ok(entries) = fs::read_dir("./publickeys") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && let Some(ext) = path.extension()
+                    && (ext == "json" || ext == "pub")
+                    && let Ok(data) = fs::read(&path)
+                {
+                    keys.push(data);
+                }
+            }
+        }
+        keys
+    };
     static ref PRIVATE_KEY: Vec<u8> = std::fs::read("./private.json").unwrap();
 }
 pub const WELL_KNOWN: &str = ".well-known/openid-federation";
@@ -207,78 +222,16 @@ impl Clone for URL {
     }
 }
 
-// TODO: encode the OpenID spec's requirements into the type system. Not to do runtime validation (primarily)
-//      but to ensure that developers pass the correct properties to the correct places.
-//      For now everything is just URL but the specs allows different things for different endpoints.
-//      See e.g. https://openid.net/specs/openid-federation-1_0.html#section-5.1.1-4.2
-
-#[derive(Debug, Deserialize)]
-pub struct Endpoints {
-    fetch: URL,
-    list: URL,
-    resolve: URL,
-    collection: URL,
-    // trust_mark_status: URL,
-    // trust_mark_list: URL,
-    // trust_mark: URL,
-    // historical_keys: URL,
-    // auth_signing_alg_values_supported: URL,
-    // signed_jwks_uri: URL,
-}
-
-impl Endpoints {
-    pub fn to_openid_metadata(&self) -> Value {
-        let mut ret = Map::new();
-        ret.insert("federation_fetch_endpoint".to_string(), json!(self.fetch));
-        ret.insert("federation_list_endpoint".to_string(), json!(self.list));
-        ret.insert(
-            "federation_resolve_endpoint".to_string(),
-            json!(self.resolve),
-        );
-
-        ret.insert(
-            "federation_collection_endpoint".to_string(),
-            json!(self.collection),
-        );
-        json!(ret)
-    }
-
-    pub fn from_domain(domain: &str) -> Self {
-        Self {
-            fetch: URL(format!("{domain}/fetch")),
-            list: URL(format!("{domain}/list")),
-            resolve: URL(format!("{domain}/resolve")),
-            collection: URL(format!("{domain}/collection")),
-        }
-    }
-}
-
-impl Default for Endpoints {
-    fn default() -> Self {
-        Self::from_domain("0.0.0.0")
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ServerConfiguration {
     pub domain: URL,
     pub redis_uri: String,
-
-    #[serde(skip)]
-    pub endpoints: Endpoints,
 }
 
 impl ServerConfiguration {
     pub fn new(domain: String, redis_uri: String) -> ServerConfiguration {
-        let endpoints = Endpoints {
-            fetch: URL(format!("{domain}/fetch")),
-            list: URL(format!("{domain}/list")),
-            resolve: URL(format!("{domain}/resolve")),
-            collection: URL(format!("{domain}/collection")),
-        };
         ServerConfiguration {
             domain: URL(domain),
-            endpoints,
             redis_uri,
         }
     }
@@ -286,11 +239,7 @@ impl ServerConfiguration {
     pub fn from_toml(toml_path: &str) -> Result<Self, Box<dyn StdError>> {
         let config_string = fs::read_to_string(toml_path)?;
         let intermediate: ServerConfiguration = toml::from_str(config_string.as_str())?;
-        let endpoints = Endpoints::from_domain(&intermediate.domain);
-        Ok(Self {
-            endpoints,
-            ..intermediate
-        })
+        Ok(Self { ..intermediate })
     }
 
     // Constructs an instance of ServerConfiguration by fetching required values from env vars
@@ -301,62 +250,20 @@ impl ServerConfiguration {
     }
 }
 
-// TODO: There is only key here, in future we will need
-// to handle multiple keys so that we have a proper keyset.
-/// To create a JwkSet for the public keys of the TA
+/// Creates a JWK Set from the public keys stored in the ./publickeys directory
 pub fn get_ta_jwks_public_keyset() -> JwkSet {
     let mut keymap = Map::new();
-    let public_keydata = &*PUBLIEC_KEY.clone();
-    let publickey = Jwk::from_bytes(public_keydata).unwrap();
     let mut keys: Vec<Value> = Vec::new();
-    let map: Map<String, Value> = publickey.as_ref().clone();
-    keys.push(json!(map));
+
+    for public_keydata in PUBLIC_KEYS.iter() {
+        let publickey = Jwk::from_bytes(public_keydata).unwrap();
+        let map: Map<String, Value> = publickey.as_ref().clone();
+        keys.push(json!(map));
+    }
     // Now outer map
     keymap.insert("keys".to_string(), json!(keys));
 
     JwkSet::from_map(keymap).unwrap()
-}
-
-pub fn compile_entityid(
-    iss: &str,
-    sub: &str,
-    metadata: Option<Value>,
-) -> Result<String, JoseError> {
-    let mut header = JwsHeader::new();
-    header.set_token_type("JWT");
-
-    let mut payload = JwtPayload::new();
-    payload.set_issuer(iss);
-    payload.set_subject(sub);
-    payload.set_issued_at(&SystemTime::now());
-
-    // Set expiry after 24 horus
-    let exp = SystemTime::now() + Duration::from_secs(86400);
-    payload.set_expires_at(&exp);
-
-    // TODO: This should become a function in futrue
-    // Let us create the JWKS
-    let mut keymap = Map::new();
-    let public_keydata = &*PUBLIEC_KEY.clone();
-    let publickey = Jwk::from_bytes(public_keydata).unwrap();
-    let mut keys: Vec<Value> = Vec::new();
-    let map: Map<String, Value> = publickey.as_ref().clone();
-    keys.push(json!(map));
-    // Now outer map
-    keymap.insert("keys".to_string(), json!(keys));
-    let _ = payload.set_claim("jwks", Some(json!(keymap)));
-    // End of JSON manipulation
-
-    // Set the metadata
-    let _ = payload.set_claim("metadata", metadata);
-
-    // Signing JWT
-    let keydata = &*PRIVATE_KEY.clone();
-    let key = Jwk::from_bytes(keydata).unwrap();
-
-    let signer = RS256.signer_from_jwk(&key)?;
-    let jwt = jwt::encode_with_signer(&payload, &header, &signer)?;
-    Ok(jwt)
 }
 
 /// This method returns the corresponding entitys based on given
