@@ -31,9 +31,9 @@ lint-python: venv
 lint: lint-rust lint-python
 
 # To run inmor tests
-test-ta:
+test-ta *ARGS:
   # We have integration tests for the inmor rust binary
-  uv run pytest -vvv
+  uv run pytest -vvv {{ARGS}}
 
 # To run django tests for admin
 [working-directory: 'admin']
