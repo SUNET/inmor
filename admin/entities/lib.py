@@ -70,6 +70,10 @@ def create_server_statement() -> str:
         # Then it is IA not TA
         sub_data["authority_hints"] = settings.AUTHORITY_HINTS
 
+    # Any trust_marks which are issued to TA itself
+    tms = settings.TA_TRUSTMARKS
+    if len(tms) > 0:
+        sub_data["trust_marks"] = tms
     now = datetime.now()
     exp = now + timedelta(hours=settings.SERVER_EXPIRY)
     # creation time

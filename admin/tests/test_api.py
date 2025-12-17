@@ -635,3 +635,8 @@ def test_create_server_entity(db, loadredis):
     self.assertEqual(
         federation_entity.get("federation_trust_mark_endpoint"), f"{base_url}/trust_mark"
     )
+
+    # Verify we have our own Trustmark for TA
+    tms = payload.get("trust_marks", [])
+    self.assertEqual(len(tms), 1)
+    self.assertEqual(tms[0].get("trust_mark_type", ""), "https://sunet.se/does_not_exist_trustmark")

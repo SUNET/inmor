@@ -34,11 +34,12 @@ def test_trust_mark_list(loaddata: Redis, start_server: int):
     resp = httpx.get(url)
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 3
+    assert len(data) == 4
     subs = {
         "https://fakerp0.labb.sunet.se",
         "https://fakeop0.labb.sunet.se",
         "https://fakerp1.labb.sunet.se",
+        "http://localhost:8080",
     }
 
     # make sure that the list of subordinates matches
@@ -101,6 +102,7 @@ def test_trust_mark_status_invalid(loaddata: Redis, start_server: int):
     # now normal flow
     url = f"http://localhost:{port}/trust_mark_status?trust_mark={jwt_text}"
     resp = httpx.get(url)
+    print(resp.text)
     assert resp.status_code == 200
     jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))

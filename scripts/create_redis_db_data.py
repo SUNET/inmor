@@ -37,15 +37,18 @@ tms = [
     "https://fakerp0.labb.sunet.se",
     "https://fakeop0.labb.sunet.se",
     "https://fakerp1.labb.sunet.se",
+    "http://localhost:8080",
 ]
 
+# Because we need to skip the TA itself
+subs = tms[:3]
 for tm in tms:
     data = {"tmt": 1, "domain": tm}
     resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data)
     pprint(resp.json())
 
 print("Now we will add the subordinates.")
-for tm in tms:
+for tm in subs:
     well_known = f"{tm}/.well-known/openid-federation"
     resp = httpx.get(well_known)
     jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
