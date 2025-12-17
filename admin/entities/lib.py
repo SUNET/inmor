@@ -77,12 +77,13 @@ def create_server_statement() -> str:
     # Expiry time of the server's entity statement
     sub_data["exp"] = exp.timestamp()
 
-    # The is the server's keyset
+    # The is the server's public keyset
     keyset = JWKSet()
-    key = settings.SIGNING_PRIVATE_KEY
-    keyset.add(key)
+    for key in settings.SIGNING_PUBLIC_KEYS:
+        keyset.add(key)
     sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
 
+    key = settings.SIGNING_PRIVATE_KEY
     # TODO: fix the alg value for other types of keys of TA/I
     token = jwt.JWT(
         header={"alg": "RS256", "kid": key.kid, "typ": "entity-statement+jwt"}, claims=sub_data

@@ -15,7 +15,7 @@ services:
     volumes:
       - ./taconfig.toml:/app/taconfig.toml
       - ./private.json:/app/private.json
-      - ./public.json:/app/public.json
+      - ./publickeys:/app/publickeys
     depends_on:
       redis:
         condition: service_healthy
@@ -72,7 +72,7 @@ services:
       - INSIDE_CONTAINER=true
     volumes:
       - ./admin/private.json:/app/private.json
-      - ./public.json:/app/public.json
+      - ./publickeys:/app/publickeys
     # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
     ports:
       - "8000:8000"
