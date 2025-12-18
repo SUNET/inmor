@@ -497,6 +497,32 @@ def test_add_subordinate_with_key_twice(db, loadredis):  # type: ignore
 
 
 @pytest.mark.django_db
+def test_add_subordinate_with_forced_metadata(db, loadredis):  # type: ignore
+    "Tests listing subordinates"
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+
+    with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
+        metadata = json.load(fobj)
+
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {"openid_relying_party": {"application_type": "mutant"}},
+    }
+
+    response = client.post("/subordinates", json=data)
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    self.assertEqual(resp["forced_metadata"], data["forced_metadata"])
+
+
+@pytest.mark.django_db
 def test_list_subordinates(db, loadredis):  # type: ignore
     "Tests listing subordinates"
     self = TestCase()

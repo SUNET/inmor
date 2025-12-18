@@ -98,15 +98,20 @@ def create_server_statement() -> str:
 
 
 def create_subordinate_statement(
-    entityid: str, keyset: JWKSet, now: datetime, exp: datetime
+    entityid: str,
+    keyset: JWKSet,
+    now: datetime,
+    exp: datetime,
+    forced_metadata: dict[str, Any] | None,
 ) -> str:
     """Creates a signed Subordinate Statement"""
     # This is the data we care for now
     sub_data = {"iss": settings.TA_DOMAIN}
     sub_data["sub"] = entityid
-    # Add any server metadata if available
-    if settings.POLICY_DOCUMENT.get("metadata", {}):
-        sub_data["metadata"] = settings.POLICY_DOCUMENT.get("metadata")
+    # Add any forced metadata if available
+    if forced_metadata is not None:
+        sub_data["metadata"] = forced_metadata
+
     # This is the metadata policy of TA defined in the settings.py
     if settings.POLICY_DOCUMENT.get("metadata_policy", {}):
         sub_data["metadata_policy"] = settings.POLICY_DOCUMENT.get("metadata_policy")

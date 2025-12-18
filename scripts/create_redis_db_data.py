@@ -1,5 +1,6 @@
 import json
 from pprint import pprint
+from typing import Any
 
 import httpx
 from jwcrypto import jwt
@@ -43,7 +44,7 @@ tms = [
 # Because we need to skip the TA itself
 subs = tms[:3]
 for tm in tms:
-    data = {"tmt": 1, "domain": tm}
+    data: dict[str, Any] = {"tmt": 1, "domain": tm}
     resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data)
     pprint(resp.json())
 
@@ -65,14 +66,28 @@ for tm in subs:
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
 
     metadata = payload.get("metadata")
+    if tm == "https://fakeop0.labb.sunet.se":
+        # Only for fakerp0 we add forced_metadata
+        forced_metadata = {
+            "openid_provider": {
+                "application_type": "mutant",
+                "system": ["py", "rust"],
+                "subject_types_supported": ["pairwise", "public", "e2e"],
+            },
+            "extra_field": "extra_value",
+        }
+    else:
+        forced_metadata = {}
+
     resp = httpx.post(
         "http://localhost:8000/api/v1/subordinates",
         json={
             "entityid": tm,
             "metadata": payload["metadata"],
-            "forced_metadata": {},
+            "forced_metadata": forced_metadata,
             "jwks": payload["jwks"],
         },
         headers={"Content-Type": "application/json", "accept": "application/json"},
     )
+    print("--" * 30)
     pprint(resp.json())
