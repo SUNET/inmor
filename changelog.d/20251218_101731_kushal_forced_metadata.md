@@ -11,7 +11,8 @@ For top level release notes, leave all the headers commented out.
 
 ### Added
 
-- Applying any forced metadata in subordinate statement #95
+- Applying any forced metadata in subordinate statement #95.
+- TA now applies metadata from authoriy in resolve endpoint #96.
 
 <!--
 ### Changed

@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 actix-web = "4.10.2"
-#josekit = { git = "https://github.com/kushaldas/josekit-rs", branch = "number"  }
 josekit = "0.10.3"
 redis = { version = "0.30.0",  features = ["tokio-comp", "connection-manager"] }
 serde = "1.0.219"
@@ -18,7 +17,7 @@ tokio = { version = "1", features = ["full"] }
 env_logger = "0.11.8"
 log = "0.4.27"
 base64 = "0.22"
-oidfed_metadata_policy = { git = "https://github.com/SUNET/oidfed_metadata_policy", branch = "entity_policy"}
+oidfed_metadata_policy = "0.7.0"
 anyhow = "1.0.98"
 toml = "0.9.0"
 clap = { version = "4.5.41", features = ["derive"] }

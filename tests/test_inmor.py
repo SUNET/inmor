@@ -195,6 +195,14 @@ def test_ta_resolve_subordinate(loaddata: Redis, start_server: int):
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
     assert payload.get("iss") == f"http://localhost:{port}"
+    # We have forced metadata from authority
+    metadata = payload.get("metadata")
+    assert metadata is not None, "metadata missing from payload"
+    openid_provider = metadata.get("openid_provider")
+    assert openid_provider is not None, "openid_provider missing from metadata"
+    assert set(openid_provider.get("subject_types_supported")) == {"public", "pairwise", "e2e"}
+    assert openid_provider.get("application_type") == "mutant"
+    # forced metadata are valid
     trust_chain = payload.get("trust_chain", [])
     assert len(trust_chain) == 3
     # 0th position is the fakeop0
