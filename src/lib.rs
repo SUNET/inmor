@@ -86,9 +86,11 @@ impl EntityDetails {
             // Means we have some trustmarks hopefully
             if let Some(trustmark_array) = trustms.as_array() {
                 for one_tm in trustmark_array.iter() {
-                    let one_tm_obj = one_tm.as_object().unwrap();
-                    if let Some(tm_type) = one_tm_obj.get("trust_mark_type") {
-                        tms.insert(tm_type.as_str().unwrap().to_owned());
+                    if let Some(one_tm_obj) = one_tm.as_object()
+                        && let Some(tm_type) = one_tm_obj.get("trust_mark_type")
+                        && let Some(tm_str) = tm_type.as_str()
+                    {
+                        tms.insert(tm_str.to_owned());
                     }
                 }
             }
@@ -258,14 +260,15 @@ pub fn get_ta_jwks_public_keyset() -> JwkSet {
     let mut keys: Vec<Value> = Vec::new();
 
     for public_keydata in PUBLIC_KEYS.iter() {
-        let publickey = Jwk::from_bytes(public_keydata).unwrap();
-        let map: Map<String, Value> = publickey.as_ref().clone();
-        keys.push(json!(map));
+        if let Ok(publickey) = Jwk::from_bytes(public_keydata) {
+            let map: Map<String, Value> = publickey.as_ref().clone();
+            keys.push(json!(map));
+        }
     }
     // Now outer map
     keymap.insert("keys".to_string(), json!(keys));
 
-    JwkSet::from_map(keymap).unwrap()
+    JwkSet::from_map(keymap).expect("Failed to create JwkSet from public keys")
 }
 
 /// Generic function to create a signed JWT with the given payload, key, and optional token type.
@@ -344,8 +347,10 @@ pub async fn get_entitycollectionresponse(
     entity_type: &str,
     redis: web::Data<redis::Client>,
 ) -> Result<Vec<EntityCollectionResponse>> {
-    // FIXME: take care of the unwrap here
-    let mut conn = redis.get_connection_manager().await.unwrap();
+    let mut conn = redis
+        .get_connection_manager()
+        .await
+        .map_err(|e| anyhow::Error::msg(format!("Failed to get Redis connection: {}", e)))?;
     let mut result: Vec<EntityCollectionResponse> = Vec::new();
     match entity_type {
         "openid_provider" => {
@@ -430,11 +435,20 @@ async fn list_subordinates(
             // Let us get the metadata
             let (payload, _) = match get_unverified_payload_header(val) {
                 Ok(d) => d,
-                Err(_) => panic!("Error in parsing the JWT for suboridnate"),
+                Err(e) => {
+                    eprintln!("Failed to parse JWT for entity {}: {}", key, e);
+                    continue; // Skip invalid JWTs instead of panicking
+                }
             };
-            let metadata = payload.claim("metadata").unwrap();
+            let Some(metadata) = payload.claim("metadata") else {
+                eprintln!("Missing metadata claim for entity: {}", key);
+                continue; // Skip if no metadata
+            };
             let trustmarks = payload.claim("trust_marks");
-            let x = metadata.as_object().unwrap();
+            let Some(x) = metadata.as_object() else {
+                eprintln!("Metadata is not an object for entity: {}", key);
+                continue; // Skip if metadata is not an object
+            };
             if x.contains_key("openid_provider") {
                 // Means OP
                 let entity = EntityDetails::new(key, "openid_provider", trustmarks);
@@ -530,6 +544,7 @@ pub async fn fetch_collections(
             // We don't support the other query parameters yet.
             // https://zachmann.github.io/openid-federation-entity-collection/main.html#section-2.2.1 has all
             // the details.
+            eprintln!("Unsupported query parameter in /collection: {}", q);
             return error_response_400("unsupported_parameter", "{q}");
         }
     }
@@ -583,7 +598,10 @@ pub async fn fetch_subordinates(
         .await
     {
         Ok(data) => data,
-        Err(_) => return error_response_404("not_found", "Subordinate not found."),
+        Err(e) => {
+            eprintln!("Subordinate not found in Redis for sub={}: {}", sub, e);
+            return error_response_404("not_found", "Subordinate not found.");
+        }
     };
 
     Ok(HttpResponse::Ok()
@@ -595,11 +613,15 @@ pub async fn fetch_subordinates(
 pub fn get_jwks_from_payload(payload: &JwtPayload) -> Result<JwkSet> {
     let jwks_data = match payload.claim("jwks") {
         Some(data) => data,
-        None => return Err(anyhow::Error::msg("No jwks was found in the payload")),
+        None => {
+            eprintln!("No jwks claim found in payload");
+            return Err(anyhow::Error::msg("No jwks was found in the payload"));
+        }
     };
     let keys = match jwks_data.get("keys") {
         Some(data) => data,
         None => {
+            eprintln!("No keys field found in jwks claim");
             return Err(anyhow::Error::msg(
                 "No keys was found in jwks in the payload",
             ));
@@ -634,14 +656,18 @@ pub fn get_unverified_payload_header(data: &str) -> Result<(JwtPayload, JwsHeade
     let payload = &input[(indexies[0] + 1)..(indexies[1])];
     let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(header)
-        .unwrap();
-    let header: Map<String, Value> = serde_json::from_slice(&header).unwrap();
-    let header = JwsHeader::from_map(header).unwrap();
+        .map_err(|e| anyhow::Error::msg(format!("Failed to decode header: {}", e)))?;
+    let header: Map<String, Value> = serde_json::from_slice(&header)
+        .map_err(|e| anyhow::Error::msg(format!("Failed to parse header JSON: {}", e)))?;
+    let header = JwsHeader::from_map(header)
+        .map_err(|e| anyhow::Error::msg(format!("Failed to create JwsHeader: {}", e)))?;
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
-        .unwrap();
-    let map: Map<String, Value> = serde_json::from_slice(&payload).unwrap();
-    let payload = JwtPayload::from_map(map).unwrap();
+        .map_err(|e| anyhow::Error::msg(format!("Failed to decode payload: {}", e)))?;
+    let map: Map<String, Value> = serde_json::from_slice(&payload)
+        .map_err(|e| anyhow::Error::msg(format!("Failed to parse payload JSON: {}", e)))?;
+    let payload = JwtPayload::from_map(map)
+        .map_err(|e| anyhow::Error::msg(format!("Failed to create JwtPayload: {}", e)))?;
     // End of stupid unverified code
     Ok((payload, header))
 }
@@ -654,8 +680,9 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
         Some(d) => d,
         None => get_jwks_from_payload(&payload)?,
     };
-    // FIXME: veify it exits
-    let kid = header.key_id().unwrap();
+    let kid = header
+        .key_id()
+        .ok_or_else(|| anyhow::Error::msg("Missing key ID in JWT header"))?;
     // Let us find the key used to sign the JWT
     let keys = jwks.get(kid);
     if keys.is_empty() {
@@ -664,7 +691,10 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
     }
     let key = keys[0];
     // Create the appropriate verifier based on the algorithm
-    let boxed_verifier: Box<dyn JwsVerifier> = match header.algorithm().unwrap() {
+    let algorithm = header
+        .algorithm()
+        .ok_or_else(|| anyhow::Error::msg("Missing algorithm in JWT header"))?;
+    let boxed_verifier: Box<dyn JwsVerifier> = match algorithm {
         "RS256" => Box::new(RS256.verifier_from_jwk(key)?),
         "PS256" => Box::new(PS256.verifier_from_jwk(key)?),
         "ES256" => Box::new(ES256.verifier_from_jwk(key)?),
@@ -674,7 +704,7 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
         _ => {
             return Err(anyhow::Error::msg(format!(
                 "Unsupported algorithm: {}",
-                header.algorithm().unwrap()
+                algorithm
             )));
         }
     };
@@ -703,13 +733,25 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
     // First let us get the entity configuration
     let jwt_net = match get_jwt_sync(entity_id) {
         Ok(res) => res,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!(
+                "Failed to fetch entity configuration for {}: {}",
+                entity_id, e
+            );
+            return;
+        }
     };
 
     // Verify and get the payload
     let (entity_payload, _) = match self_verify_jwt(&jwt_net) {
         Ok(data) => data,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!(
+                "Failed to verify entity configuration for {}: {}",
+                entity_id, e
+            );
+            return;
+        }
     };
 
     // Add to the visisted list
@@ -731,7 +773,10 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
 
     // Now the actual discovery
     let metadata = match entity_payload.claim("metadata") {
-        Some(value) => value.as_object().unwrap(),
+        Some(value) => match value.as_object() {
+            Some(obj) => obj,
+            None => return,
+        },
         None => return,
     };
 
@@ -759,23 +804,29 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
             // TODO: add debug point here
             return;
         }
-        if let Ok(resp) = get_query_sync(list_endpoint.unwrap().as_str().unwrap()) {
+        if let Some(endpoint) = list_endpoint.and_then(|e| e.as_str())
+            && let Ok(resp) = get_query_sync(endpoint)
+        {
             // Here we will loop through the subordinates
-            let subs: Value = serde_json::from_str(&resp).unwrap();
-            for sub in subs.as_array().unwrap() {
-                let sub_str = sub.as_str().unwrap();
-                let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
-                    .query::<bool>(conn)
-                    .unwrap_or_default();
-                if ismember {
-                    // Means we already visited it, it is a loop
-                    // We should skip it.
-                    info!("We have a loop: {sub_str}");
-                    continue;
+            if let Ok(subs) = serde_json::from_str::<Value>(&resp)
+                && let Some(sub_array) = subs.as_array()
+            {
+                for sub in sub_array {
+                    if let Some(sub_str) = sub.as_str() {
+                        let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
+                            .query::<bool>(conn)
+                            .unwrap_or_default();
+                        if ismember {
+                            // Means we already visited it, it is a loop
+                            // We should skip it.
+                            info!("We have a loop: {sub_str}");
+                            continue;
+                        }
+                        // Means we have a new subordinate
+                        info!("Found new subordinate: {sub_str}");
+                        queue_lpush(sub_str, conn);
+                    }
                 }
-                // Means we have a new subordinate
-                info!("Found new subordinate: {sub_str}");
-                queue_lpush(sub_str, conn);
             }
         }
     }
@@ -808,32 +859,63 @@ pub fn fetch_all_subordinate_statements(
     entity_id: &str,
     conn: &mut redis::Connection,
 ) {
-    let ahints = authority_hints.as_array().unwrap();
+    let Some(ahints) = authority_hints.as_array() else {
+        return; // Skip if not an array
+    };
     for ahint in ahints.iter() {
-        let ahint_str = ahint.as_str().unwrap();
+        let Some(ahint_str) = ahint.as_str() else {
+            continue; // Skip if not a string
+        };
         // HACK: Enable TA hack here
         // TODO: ^^
         println!("Fetching {ahint_str:?}");
         let jwt_net = match get_jwt_sync(ahint_str) {
             Ok(res) => res,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!("Failed to fetch authority hint {}: {}", ahint_str, e);
+                return;
+            }
         };
 
         // Verify and get the payload
         let (entity_payload, _) = match self_verify_jwt(&jwt_net) {
             Ok(data) => data,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!(
+                    "Failed to verify authority hint JWT for {}: {}",
+                    ahint_str, e
+                );
+                return;
+            }
         };
 
         let metadata = match entity_payload.claim("metadata") {
-            Some(value) => value.as_object().unwrap(),
-            None => continue,
+            Some(value) => match value.as_object() {
+                Some(obj) => obj,
+                None => {
+                    eprintln!("Metadata is not an object for authority: {}", ahint_str);
+                    continue;
+                }
+            },
+            None => {
+                eprintln!("Missing metadata claim for authority: {}", ahint_str);
+                continue;
+            }
         };
 
         // First get the federation_entity map inside of the JSOn
         let fed_entity = match metadata.get("federation_entity") {
-            Some(value) => value.as_object().unwrap(),
-            None => continue,
+            Some(value) => match value.as_object() {
+                Some(obj) => obj,
+                None => {
+                    eprintln!("federation_entity is not an object for: {}", ahint_str);
+                    continue;
+                }
+            },
+            None => {
+                eprintln!("Missing federation_entity in metadata for: {}", ahint_str);
+                continue;
+            }
         };
         // Then the fetch_end_point
         let fetch_endpoint = fed_entity.get("federation_fetch_endpoint");
@@ -876,8 +958,11 @@ pub async fn resolve_entity_to_trustanchor(
     // First get the entity configuration and self verify
     let original_ec = match get_entity_configruation_as_jwt(sub).await {
         Ok(res) => res,
-        Err(_) => return Ok(result), // Read FOUND_TA section in code to find why it is okay to
-                                     // result a half done list back.
+        Err(e) => {
+            eprintln!("Failed to fetch entity configuration for {}: {}", sub, e);
+            return Ok(result); // Read FOUND_TA section in code to find why it is okay to
+            // result a half done list back.
+        }
     };
     // Add it already visited
     visited.insert(sub.to_string());
@@ -898,11 +983,16 @@ pub async fn resolve_entity_to_trustanchor(
     };
     println!("\nAuthority hints: {authority_hints:?}\n");
     // Loop over the authority hints
-    for ah in authority_hints.as_array().unwrap() {
+    let Some(ah_array) = authority_hints.as_array() else {
+        return Ok(result); // Return if not an array
+    };
+    for ah in ah_array {
         // Flag to mark if we found the trust anchor
         let mut ta_flag = false;
         // Get the str from the JSON value
-        let ah_entity: &str = ah.as_str().unwrap();
+        let Some(ah_entity) = ah.as_str() else {
+            continue; // Skip if not a string
+        };
         // If we already visited the authority then continue
         if visited.contains(ah_entity) {
             continue;
@@ -915,38 +1005,79 @@ pub async fn resolve_entity_to_trustanchor(
         // Fetch the authority's entity configuration
         let ah_jwt = match get_entity_configruation_as_jwt(ah_entity).await {
             Ok(res) => res,
-            Err(_) => return Ok(result), // Read FOUND_TA section in code to find why it is okay to
-                                         // result a half done list back.
+            Err(e) => {
+                eprintln!(
+                    "Failed to fetch authority entity configuration for {}: {}",
+                    ah_entity, e
+                );
+                return Ok(result); // Read FOUND_TA section in code to find why it is okay to
+                // result a half done list back.
+            }
         };
 
         // Verify and get the payload
         let jwt_result = self_verify_jwt(&ah_jwt);
         if jwt_result.is_err() {
+            eprintln!(
+                "Failed to verify authority JWT for {}: {:?}",
+                ah_entity,
+                jwt_result.err()
+            );
             continue;
         }
 
         let (ah_payload, _) = jwt_result.expect("This can not be error here.");
-        let ah_metadata = ah_payload.claim("metadata").unwrap();
-        let fetch_endpoint = ah_metadata
-            .get("federation_entity")
-            .unwrap()
-            .get("federation_fetch_endpoint")
-            .unwrap();
+        let Some(ah_metadata) = ah_payload.claim("metadata") else {
+            eprintln!("Missing metadata in authority payload for: {}", ah_entity);
+            continue;
+        };
+        let Some(federation_entity) = ah_metadata.get("federation_entity") else {
+            eprintln!("Missing federation_entity in metadata for: {}", ah_entity);
+            continue;
+        };
+        let Some(fetch_endpoint) = federation_entity.get("federation_fetch_endpoint") else {
+            eprintln!("Missing federation_fetch_endpoint for: {}", ah_entity);
+            continue;
+        };
+        let Some(fetch_endpoint_str) = fetch_endpoint.as_str() else {
+            eprintln!(
+                "federation_fetch_endpoint is not a string for: {}",
+                ah_entity
+            );
+            continue;
+        };
         // Fetch the entity statement/ subordinate statement
-        let sub_statement =
-            match fetch_subordinate_statement(fetch_endpoint.as_str().unwrap(), sub).await {
-                Ok(res) => res,
-                Err(_) => return Ok(result), // Read FOUND_TA section in code to find why it is okay to
-                                             // result a half done list back.
-            };
+        let sub_statement = match fetch_subordinate_statement(fetch_endpoint_str, sub).await {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!(
+                    "Failed to fetch subordinate statement for {} from {}: {}",
+                    sub, ah_entity, e
+                );
+                return Ok(result); // Read FOUND_TA section in code to find why it is okay to
+                // result a half done list back.
+            }
+        };
         // Get the authority's JWKS and then verify the subordinate statement against them.
         let ah_jwks = match get_jwks_from_payload(&ah_payload) {
             Ok(result) => result,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!(
+                    "Failed to get JWKS from authority payload for {}: {}",
+                    ah_entity, e
+                );
+                continue;
+            }
         };
         let (subs_payload, _) = match verify_jwt_with_jwks(&sub_statement, Some(ah_jwks)) {
             Ok(value) => value,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!(
+                    "Failed to verify subordinate statement for {} from {}: {}",
+                    sub, ah_entity, e
+                );
+                continue;
+            }
         };
         // FIXME: An Entity Statement is signed using a key from the jwks claim in the next.
         // Restating this symbolically, for each j = 0,...,i-1, ES[j] is signed by
@@ -998,13 +1129,15 @@ fn create_resolve_response_jwt(
     // Set expiry after 24 horus
     let exp = SystemTime::now() + Duration::from_secs(86400);
     payload.set_expires_at(&exp);
-    payload.set_claim("metadata", Some(json!(metadata.unwrap())));
+    if let Some(metadata_val) = metadata {
+        payload.set_claim("metadata", Some(json!(metadata_val)));
+    }
     let trust_chain: Vec<String> = result.iter().map(|x| x.jwt.clone()).collect();
     let _ = payload.set_claim("trust_chain", Some(json!(trust_chain)));
 
     // Signing JWT
     let keydata = &*PRIVATE_KEY.clone();
-    let key = Jwk::from_bytes(keydata).unwrap();
+    let key = Jwk::from_bytes(keydata)?;
 
     create_signed_jwt(&payload, &key, Some("resolve-response+jwt"))
 }
@@ -1023,13 +1156,15 @@ pub async fn resolve_entity(
     // Now loop over the trust_anchors
     let result = match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted).await {
         Ok(res) => res,
-        Err(_) => {
+        Err(e) => {
+            eprintln!("Error resolving entity {} to trust anchors: {}", sub, e);
             return error_response_400("invalid_trust_chain", "Failed to find trust chain");
         }
     };
 
     // Verify that the result is not empty and we actually found a TA
     if result.is_empty() {
+        eprintln!("Empty trust chain result for entity: {}", sub);
         return error_response_400("invalid_trust_chain", "Failed to find trust chain");
     }
     if result.iter().any(|i| i.taresult) {
@@ -1038,6 +1173,7 @@ pub async fn resolve_entity(
         found_ta = true;
     }
     if !found_ta {
+        eprintln!("No trust anchor found in chain for entity: {}", sub);
         return error_response_400("invalid_trust_chain", "Failed to find trust chain");
     }
 
@@ -1074,7 +1210,12 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
-                    let mut metadata = res.payload.claim("metadata").unwrap().clone();
+                    let Some(mut metadata) = res.payload.claim("metadata").cloned() else {
+                        return error_response_400(
+                            "invalid_trust_chain",
+                            "missing metadata in entity statement",
+                        );
+                    };
                     eprintln!(
                         "\nFinal policy checking: val= {:?}\n\n metadata= {:?}\n\n",
                         &val, metadata
@@ -1085,9 +1226,19 @@ pub async fn resolve_entity(
                         let last_sub_statement = reversed[i - 1];
                         forced_metadata = last_sub_statement.payload.claim("metadata");
                     }
-                    let metadata_obj = metadata.as_object().unwrap();
+                    let Some(metadata_obj) = metadata.as_object() else {
+                        return error_response_400(
+                            "invalid_trust_chain",
+                            "metadata is not an object",
+                        );
+                    };
                     let full_policy = json!({"metadata_policy": val.clone(), "metadata": forced_metadata.clone()});
-                    let full_policy_document = full_policy.as_object().unwrap();
+                    let Some(full_policy_document) = full_policy.as_object() else {
+                        return error_response_400(
+                            "invalid_trust_chain",
+                            "failed to create policy document",
+                        );
+                    };
                     // Here the policy contains for every kind of entity.
                     // In the full_policy_document we have any forced metadata from the authority.
                     match apply_policy_document_on_metadata(full_policy_document, metadata_obj) {
@@ -1117,8 +1268,11 @@ pub async fn resolve_entity(
                     let new_policy = res.payload.claim("metadata_policy");
                     match new_policy {
                         Some(p) => {
-                            let data = p.as_object().unwrap().clone();
-                            Some(data)
+                            if let Some(data) = p.as_object() {
+                                Some(data.clone())
+                            } else {
+                                Some(Map::new())
+                            }
                         }
 
                         // Even the subordinate statement does not have any policy
@@ -1131,14 +1285,10 @@ pub async fn resolve_entity(
                     // Return the original metadata here
                     //None
                     //Some(Map::new())
-                    Some(
-                        res.payload
-                            .claim("metadata")
-                            .unwrap()
-                            .as_object()
-                            .unwrap()
-                            .clone(),
-                    )
+                    res.payload
+                        .claim("metadata")
+                        .and_then(|m| m.as_object())
+                        .cloned()
                 }
             }
         };
@@ -1146,8 +1296,8 @@ pub async fn resolve_entity(
     // HACK:
     eprintln!("After the whole call: {mpolicy:?}\n");
     // If we reach here means we have a list of JWTs and also verified metadata.
-    // TODO: deal with the signing error here.
-    let resp = create_resolve_response_jwt(&state, &sub, &result, mpolicy).unwrap();
+    let resp = create_resolve_response_jwt(&state, &sub, &result, mpolicy)
+        .map_err(error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok()
         .insert_header(("content-type", "application/resolve-response+jwt"))
         .body(resp))
@@ -1182,7 +1332,7 @@ fn create_trustmark_status_response_jwt(
 
     // Signing JWT
     let keydata = &*PRIVATE_KEY.clone();
-    let key = Jwk::from_bytes(keydata).unwrap();
+    let key = Jwk::from_bytes(keydata)?;
 
     create_signed_jwt(&payload, &key, Some("trust-mark-status-response+jwt"))
 }
@@ -1195,7 +1345,10 @@ pub async fn trust_mark_status(
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkStatusParams { trust_mark } = info.into_inner();
-    let mut conn = redis.get_connection_manager().await.unwrap();
+    let mut conn = redis
+        .get_connection_manager()
+        .await
+        .map_err(error::ErrorInternalServerError)?;
 
     // Create sha256sum of the trust_mark and see if it exists in `inmor:tm:alltime` set.
     let mut hasher = Sha256::new();
@@ -1208,6 +1361,7 @@ pub async fn trust_mark_status(
         .map_err(error::ErrorInternalServerError)?;
 
     if !exists {
+        eprintln!("Trust mark not found in Redis: hash={}", trust_mark_hash);
         return error_response_404("not_found", "Trust mark not found.");
     }
 
@@ -1338,7 +1492,7 @@ pub async fn trust_mark_query(
 
     let query = format!("inmor:tm:{sub}");
 
-    let res = redis::Cmd::hget(query, trust_mark_type)
+    let res = redis::Cmd::hget(query, &trust_mark_type)
         .query_async::<String>(&mut conn)
         .await
         .map_err(error::ErrorInternalServerError);
@@ -1346,7 +1500,13 @@ pub async fn trust_mark_query(
         Ok(result) => Ok(HttpResponse::Ok()
             .insert_header(("content-type", "application/trust-mark+jwt"))
             .body(result)),
-        Err(_) => error_response_404("not_found", "Trust mark not found."),
+        Err(e) => {
+            eprintln!(
+                "Trust mark not found for sub={}, type={}: {:?}",
+                sub, trust_mark_type, e
+            );
+            error_response_404("not_found", "Trust mark not found.")
+        }
     }
 }
 
@@ -1459,7 +1619,7 @@ mod tests {
             payload.set_expires_at(&exp);
             payload
                 .set_claim("test_claim", Some(json!("test_value")))
-                .unwrap();
+                .expect("Failed to set test claim in test_create_signed_jwt_with_all_key_types");
 
             // Sign the JWT
             let token_str = create_signed_jwt(&payload, &key, Some("test+jwt"))
@@ -1524,13 +1684,15 @@ mod tests {
             if let Some(kid_value) = key.key_id() {
                 let mut pub_key_map = public_key_json.as_ref().clone();
                 pub_key_map.insert("kid".to_string(), json!(kid_value));
-                public_key_json = Jwk::from_map(pub_key_map).unwrap();
+                public_key_json =
+                    Jwk::from_map(pub_key_map).expect("Failed to create public key JWK with kid");
             }
 
             // Verify the JWT using the existing verify_jwt_with_jwks function
             let mut keymap = Map::new();
             keymap.insert("keys".to_string(), json!([public_key_json.as_ref()]));
-            let keyset = JwkSet::from_map(keymap).unwrap();
+            let keyset =
+                JwkSet::from_map(keymap).expect("Failed to create JwkSet for verification");
 
             let result = verify_jwt_with_jwks(&token_str, Some(keyset));
             match &result {
