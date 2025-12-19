@@ -1,2 +1,4 @@
 domain = "http://localhost:8080"
 redis_uri = "redis://redis:6379"
+tls_cert = "localhost+2.pem"
+tls_key = "localhost+2-key.pem"

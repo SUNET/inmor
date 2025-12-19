@@ -230,13 +230,22 @@ impl Clone for URL {
 pub struct ServerConfiguration {
     pub domain: URL,
     pub redis_uri: String,
+    pub tls_cert: Option<String>,
+    pub tls_key: Option<String>,
 }
 
 impl ServerConfiguration {
-    pub fn new(domain: String, redis_uri: String) -> ServerConfiguration {
+    pub fn new(
+        domain: String,
+        redis_uri: String,
+        tls_cert: Option<String>,
+        tls_key: Option<String>,
+    ) -> ServerConfiguration {
         ServerConfiguration {
             domain: URL(domain),
             redis_uri,
+            tls_cert,
+            tls_key,
         }
     }
 
@@ -250,7 +259,9 @@ impl ServerConfiguration {
     pub fn from_env() -> ServerConfiguration {
         let domain = env::var("TA_DOMAIN").unwrap_or("http://localhost:8080".to_string());
         let redis = env::var("TA_REDIS").unwrap_or("redis://redis:6379".to_string());
-        ServerConfiguration::new(domain, redis)
+        let tls_cert = env::var("TA_TLS_CERT").ok();
+        let tls_key = env::var("TA_TLS_KEY").ok();
+        ServerConfiguration::new(domain, redis, tls_cert, tls_key)
     }
 }
 

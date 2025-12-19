@@ -22,6 +22,8 @@ use josekit::{
     jws::{JwsHeader, RS256},
     jwt::{self, JwtPayload},
 };
+use rustls::ServerConfig;
+use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -84,6 +86,9 @@ struct Cli {
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
+    // Install default crypto provider for rustls
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let args = Cli::parse();
     let port = args.port;
     let toml_file_path = args.toml_file_path;
@@ -107,7 +112,10 @@ async fn main() -> io::Result<()> {
 
     let fed_app_data = web::Data::new(federation);
 
-    HttpServer::new(move || {
+    // Check if TLS configuration is available
+    let has_tls = server_config.tls_cert.is_some() && server_config.tls_key.is_some();
+
+    let http_server = HttpServer::new(move || {
         //
         let jwks = get_ta_jwks_public_keyset();
         //
@@ -130,8 +138,64 @@ async fn main() -> io::Result<()> {
             .wrap(middleware::NormalizePath::trim())
             .wrap(middleware::Logger::default())
     })
-    .workers(2)
-    .bind(("0.0.0.0", port))?
-    .run()
-    .await
+    .workers(2);
+
+    // If TLS is configured, bind HTTPS on the specified port
+    if has_tls {
+        let tls_cert_path = server_config.tls_cert.as_ref().unwrap();
+        let tls_key_path = server_config.tls_key.as_ref().unwrap();
+
+        eprintln!("Loading TLS certificate from: {}", tls_cert_path);
+        eprintln!("Loading TLS key from: {}", tls_key_path);
+
+        // Load TLS certificate and key
+        let cert_file = &mut io::BufReader::new(fs::File::open(tls_cert_path)?);
+        let key_file = &mut io::BufReader::new(fs::File::open(tls_key_path)?);
+
+        let cert_chain: Vec<_> = certs(cert_file)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to load TLS certificate: {}", e),
+                )
+            })?;
+
+        let mut keys = pkcs8_private_keys(key_file)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to load TLS key: {}", e),
+                )
+            })?;
+
+        if keys.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "No private key found in TLS key file",
+            ));
+        }
+
+        let tls_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                cert_chain,
+                rustls::pki_types::PrivateKeyDer::Pkcs8(keys.remove(0)),
+            )
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to configure TLS: {}", e),
+                )
+            })?;
+
+        eprintln!("Starting HTTPS server on 0.0.0.0:{}", port);
+        http_server
+            .bind_rustls_0_23(("0.0.0.0", port), tls_config)?
+            .run()
+            .await
+    } else {
+        http_server.run().await
+    }
 }
