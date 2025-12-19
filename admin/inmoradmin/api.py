@@ -167,6 +167,10 @@ class EntityTypeSchema(Schema):
     valid_for: int | None = None
     autorenew: bool | None = True
     active: bool | None = True
+    additional_claims: Annotated[
+        dict[str, Any] | None,
+        Field(description="Additional claims for an Entity which shows in subordinate statement."),
+    ] = None
 
 
 class EntityTypeUpdateSchema(Schema):
@@ -177,6 +181,10 @@ class EntityTypeUpdateSchema(Schema):
     valid_for: int | None = None
     autorenew: bool | None = True
     active: bool | None = True
+    additional_claims: Annotated[
+        dict[str, Any] | None,
+        Field(description="Additional claims for an Entity which shows in subordinate statement."),
+    ] = None
 
 
 class EntityOutSchema(Schema):
@@ -189,6 +197,10 @@ class EntityOutSchema(Schema):
     valid_for: int | None = None
     autorenew: bool | None = None
     active: bool | None = None
+    additional_claims: Annotated[
+        dict[str, Any] | None,
+        Field(description="Additional claims for an Entity which shows in subordinate statement."),
+    ] = None
 
 
 class Message(Schema):
@@ -510,7 +522,12 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
     signed_statement = create_subordinate_statement(
-        data.entityid, keyset, now, exp, forced_metadata=data.forced_metadata
+        data.entityid,
+        keyset,
+        now,
+        exp,
+        forced_metadata=data.forced_metadata,
+        additional_claims=data.additional_claims,
     )
     # Next save the data in the database.
     if keys:
@@ -527,6 +544,7 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
             valid_for=expiry,
             active=data.active,
             statement=signed_statement,
+            additional_claims=data.additional_claims,
         )
     except Exception as e:
         print(e)
@@ -630,7 +648,12 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
     signed_statement = create_subordinate_statement(
-        sub.entityid, keyset, now, exp, data.forced_metadata
+        sub.entityid,
+        keyset,
+        now,
+        exp,
+        data.forced_metadata,
+        additional_claims=data.additional_claims,
     )
     # Next save the data in the database.
     if keys:
@@ -645,6 +668,8 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
         sub.jwks = keys_for_db
         sub.valid_for = expiry
         sub.active = bool(data.active)
+        sub.additional_claims = data.additional_claims
+        sub.statement = signed_statement
         sub.save()
     except Exception as e:
         print(e)
