@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from django.conf import settings
-from jwcrypto import jwk, jwt
+from jwcrypto import jwt
 from jwcrypto.jwk import JWK
 
 from common.signing import create_signed_jwt

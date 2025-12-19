@@ -33,7 +33,7 @@ def create_signed_jwt(
         alg = "EdDSA"
 
     # Build the header
-    header = {"alg": alg, "kid": key.kid}
+    header = {"alg": alg, "kid": key.get("kid") or key.thumbprint()}
     if token_type:
         header["typ"] = token_type
 
