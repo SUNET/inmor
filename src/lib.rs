@@ -86,12 +86,11 @@ impl EntityDetails {
             // Means we have some trustmarks hopefully
             if let Some(trustmark_array) = trustms.as_array() {
                 for one_tm in trustmark_array.iter() {
-                    if let Some(one_tm_obj) = one_tm.as_object() {
-                        if let Some(tm_type) = one_tm_obj.get("trust_mark_type") {
-                            if let Some(tm_str) = tm_type.as_str() {
-                                tms.insert(tm_str.to_owned());
-                            }
-                        }
+                    if let Some(one_tm_obj) = one_tm.as_object()
+                        && let Some(tm_type) = one_tm_obj.get("trust_mark_type")
+                        && let Some(tm_str) = tm_type.as_str()
+                    {
+                        tms.insert(tm_str.to_owned());
                     }
                 }
             }
@@ -805,28 +804,27 @@ pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
             // TODO: add debug point here
             return;
         }
-        if let Some(endpoint) = list_endpoint.and_then(|e| e.as_str()) {
-            if let Ok(resp) = get_query_sync(endpoint) {
-                // Here we will loop through the subordinates
-                if let Ok(subs) = serde_json::from_str::<Value>(&resp) {
-                    if let Some(sub_array) = subs.as_array() {
-                        for sub in sub_array {
-                            if let Some(sub_str) = sub.as_str() {
-                                let ismember =
-                                    redis::Cmd::sismember("inmor:current_visited", sub_str)
-                                        .query::<bool>(conn)
-                                        .unwrap_or_default();
-                                if ismember {
-                                    // Means we already visited it, it is a loop
-                                    // We should skip it.
-                                    info!("We have a loop: {sub_str}");
-                                    continue;
-                                }
-                                // Means we have a new subordinate
-                                info!("Found new subordinate: {sub_str}");
-                                queue_lpush(sub_str, conn);
-                            }
+        if let Some(endpoint) = list_endpoint.and_then(|e| e.as_str())
+            && let Ok(resp) = get_query_sync(endpoint)
+        {
+            // Here we will loop through the subordinates
+            if let Ok(subs) = serde_json::from_str::<Value>(&resp)
+                && let Some(sub_array) = subs.as_array()
+            {
+                for sub in sub_array {
+                    if let Some(sub_str) = sub.as_str() {
+                        let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
+                            .query::<bool>(conn)
+                            .unwrap_or_default();
+                        if ismember {
+                            // Means we already visited it, it is a loop
+                            // We should skip it.
+                            info!("We have a loop: {sub_str}");
+                            continue;
                         }
+                        // Means we have a new subordinate
+                        info!("Found new subordinate: {sub_str}");
+                        queue_lpush(sub_str, conn);
                     }
                 }
             }
@@ -1290,7 +1288,7 @@ pub async fn resolve_entity(
                     res.payload
                         .claim("metadata")
                         .and_then(|m| m.as_object())
-                        .map(|m| m.clone())
+                        .cloned()
                 }
             }
         };
