@@ -8,6 +8,8 @@ from jwcrypto import jwt
 from jwcrypto.common import json_decode
 from pydantic import BaseModel
 
+from common.signing import create_signed_jwt
+
 
 class TrustMarkRequest(BaseModel):
     entity: str
@@ -48,11 +50,7 @@ def add_trustmark(
     sub_data["trust_mark_type"] = trustmarktype
 
     key = settings.SIGNING_PRIVATE_KEY
-
-    # TODO: fix the alg value for other types of keys of TA/I
-    token = jwt.JWT(header={"alg": "RS256", "kid": key.kid}, claims=sub_data)
-    token.make_signed_token(key)
-    token_data = token.serialize()
+    token_data = create_signed_jwt(sub_data, key)
     # Now we should set it in the redis
     # First, the trustmark for the entity and that trustmarktype
     _ = r.hset(f"inmor:tm:{entity}", trustmarktype, token_data)

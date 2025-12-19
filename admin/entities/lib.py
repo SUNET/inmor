@@ -13,6 +13,8 @@ from oidfpolicy import apply_policy, merge_policies
 from pydantic import BaseModel
 from redis import Redis
 
+from common.signing import create_signed_jwt
+
 INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
 
 logger = logging.getLogger(__name__)
@@ -88,12 +90,7 @@ def create_server_statement() -> str:
     sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
 
     key = settings.SIGNING_PRIVATE_KEY
-    # TODO: fix the alg value for other types of keys of TA/I
-    token = jwt.JWT(
-        header={"alg": "RS256", "kid": key.kid, "typ": "entity-statement+jwt"}, claims=sub_data
-    )
-    token.make_signed_token(key)
-    token_data = token.serialize()
+    token_data = create_signed_jwt(sub_data, key, "entity-statement+jwt")
     return token_data
 
 
@@ -124,13 +121,7 @@ def create_subordinate_statement(
     sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
 
     key = settings.SIGNING_PRIVATE_KEY
-
-    # TODO: fix the alg value for other types of keys of TA/I
-    token = jwt.JWT(
-        header={"alg": "RS256", "kid": key.kid, "typ": "entity-statement+jwt"}, claims=sub_data
-    )
-    token.make_signed_token(key)
-    token_data = token.serialize()
+    token_data = create_signed_jwt(sub_data, key, "entity-statement+jwt")
     return token_data
 
 

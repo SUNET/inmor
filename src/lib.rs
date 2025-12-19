@@ -20,7 +20,9 @@ use josekit::{
     JoseError,
     jwk::{Jwk, JwkSet},
     jws::alg::rsassa::RsassaJwsAlgorithm,
-    jws::{ES256, ES384, ES512, JwsAlgorithm, JwsHeader, JwsVerifier, PS256, RS256},
+    jws::{
+        ES256, ES384, ES512, EdDSA, JwsAlgorithm, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256,
+    },
     jwt::{self, JwtPayload, JwtPayloadValidator},
     util,
 };
@@ -264,6 +266,76 @@ pub fn get_ta_jwks_public_keyset() -> JwkSet {
     keymap.insert("keys".to_string(), json!(keys));
 
     JwkSet::from_map(keymap).unwrap()
+}
+
+/// Generic function to create a signed JWT with the given payload, key, and optional token type.
+///
+/// This function supports signing with different key types (RSA, EC, OKP) and
+/// algorithms (RS256, PS256, ES256, ES384, ES512, EdDSA for Ed25519/Ed448).
+///
+/// # Arguments
+/// * `payload` - JwtPayload containing the JWT claims
+/// * `key` - Jwk private key to sign with
+/// * `token_type` - Optional JWT type (e.g., "resolve-response+jwt", "trust-mark-status-response+jwt")
+///
+/// # Returns
+/// * `Result<String, JoseError>` - Serialized signed JWT string or error
+pub fn create_signed_jwt(
+    payload: &JwtPayload,
+    key: &Jwk,
+    token_type: Option<&str>,
+) -> Result<String, JoseError> {
+    let mut header = JwsHeader::new();
+    header.set_token_type("JWT");
+
+    // Set custom token type if provided
+    if let Some(typ) = token_type {
+        header.set_claim("typ", Some(json!(typ)))?;
+    }
+
+    // Get the algorithm from the key
+    let alg = key.algorithm().unwrap_or("RS256");
+
+    // Normalize algorithm name for josekit
+    // josekit uses "EdDSA" for both Ed25519 and Ed448
+    let normalized_alg = match alg {
+        "Ed25519" | "Ed448" => "EdDSA",
+        _ => alg,
+    };
+
+    header.set_claim("alg", Some(json!(normalized_alg)))?;
+
+    // Set kid from the key
+    if let Some(kid) = key.key_id() {
+        header.set_key_id(kid);
+    }
+
+    // For EdDSA keys, we need to create a modified key with alg="EdDSA"
+    // because josekit's signer_from_jwk checks the alg field
+    let signing_key = if alg == "Ed25519" || alg == "Ed448" {
+        let mut key_map = key.as_ref().clone();
+        key_map.insert("alg".to_string(), json!("EdDSA"));
+        Jwk::from_map(key_map)?
+    } else {
+        key.clone()
+    };
+
+    // Create the appropriate signer based on the normalized algorithm
+    let signer: Box<dyn JwsSigner> = match normalized_alg {
+        "RS256" => Box::new(RS256.signer_from_jwk(&signing_key)?),
+        "PS256" => Box::new(PS256.signer_from_jwk(&signing_key)?),
+        "ES256" => Box::new(ES256.signer_from_jwk(&signing_key)?),
+        "ES384" => Box::new(ES384.signer_from_jwk(&signing_key)?),
+        "ES512" => Box::new(ES512.signer_from_jwk(&signing_key)?),
+        "EdDSA" => Box::new(EdDSA.signer_from_jwk(&signing_key)?),
+        _ => {
+            // Default to RS256 if algorithm is not recognized
+            Box::new(RS256.signer_from_jwk(&signing_key)?)
+        }
+    };
+
+    let jwt = jwt::encode_with_signer(payload, &header, &*signer)?;
+    Ok(jwt)
 }
 
 /// This method returns the corresponding entitys based on given
@@ -591,16 +663,20 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
         return Err(anyhow::Error::msg("Can not find kid used to sign."));
     }
     let key = keys[0];
-    // FIXME: We need different verifiers for different kinds of
-    // JWK.
-    //println!("ALGO: {:?}", header.algorithm().unwrap());
+    // Create the appropriate verifier based on the algorithm
     let boxed_verifier: Box<dyn JwsVerifier> = match header.algorithm().unwrap() {
-        "RS256" => Box::new(RS256.verifier_from_jwk(key).unwrap()),
-        "PS256" => Box::new(PS256.verifier_from_jwk(key).unwrap()),
-        "ES256" => Box::new(ES256.verifier_from_jwk(key).unwrap()),
-        "ES384" => Box::new(ES384.verifier_from_jwk(key).unwrap()),
-        // FIXME: This has to be fixed for all different keys
-        _ => Box::new(ES512.verifier_from_jwk(key).unwrap()),
+        "RS256" => Box::new(RS256.verifier_from_jwk(key)?),
+        "PS256" => Box::new(PS256.verifier_from_jwk(key)?),
+        "ES256" => Box::new(ES256.verifier_from_jwk(key)?),
+        "ES384" => Box::new(ES384.verifier_from_jwk(key)?),
+        "ES512" => Box::new(ES512.verifier_from_jwk(key)?),
+        "EdDSA" => Box::new(EdDSA.verifier_from_jwk(key)?),
+        _ => {
+            return Err(anyhow::Error::msg(format!(
+                "Unsupported algorithm: {}",
+                header.algorithm().unwrap()
+            )));
+        }
     };
     let verifier = &*boxed_verifier;
     let (payload, header) = jwt::decode_with_verifier(data, verifier)?;
@@ -913,11 +989,6 @@ fn create_resolve_response_jwt(
     result: &[VerifiedJWT],
     metadata: Option<Map<String, Value>>,
 ) -> Result<String, JoseError> {
-    let mut header = JwsHeader::new();
-    header.set_token_type("JWT");
-    header.set_claim("typ", Some(json!("resolve-response+jwt")));
-    header.set_claim("alg", Some(json!("RS256")));
-
     let mut payload = JwtPayload::new();
     let iss = state.entity_id.clone();
     payload.set_issuer(iss);
@@ -935,9 +1006,7 @@ fn create_resolve_response_jwt(
     let keydata = &*PRIVATE_KEY.clone();
     let key = Jwk::from_bytes(keydata).unwrap();
 
-    let signer = RS256.signer_from_jwk(&key)?;
-    let jwt = jwt::encode_with_signer(&payload, &header, &signer)?;
-    Ok(jwt)
+    create_signed_jwt(&payload, &key, Some("resolve-response+jwt"))
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#name-resolve-request
@@ -1094,17 +1163,12 @@ fn merge_objects(v1: &mut Value, v2: &Value) {
     }
 }
 
-/// To create the signed JWT for resolve response
+/// To create the signed JWT for trust mark status response
 fn create_trustmark_status_response_jwt(
     state: &web::Data<AppState>,
     trustmark: &str,
     status: &str,
 ) -> Result<String, JoseError> {
-    let mut header = JwsHeader::new();
-    header.set_token_type("JWT");
-    header.set_claim("typ", Some(json!("trust-mark-status-response+jwt")));
-    header.set_claim("alg", Some(json!("RS256")));
-
     let mut payload = JwtPayload::new();
     let iss = state.entity_id.clone();
     payload.set_issuer(iss);
@@ -1119,12 +1183,8 @@ fn create_trustmark_status_response_jwt(
     // Signing JWT
     let keydata = &*PRIVATE_KEY.clone();
     let key = Jwk::from_bytes(keydata).unwrap();
-    // kid MUST be set
-    header.set_key_id(key.key_id().unwrap_or("missing_key_id"));
 
-    let signer = RS256.signer_from_jwk(&key)?;
-    let jwt = jwt::encode_with_signer(&payload, &header, &signer)?;
-    Ok(jwt)
+    create_signed_jwt(&payload, &key, Some("trust-mark-status-response+jwt"))
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.4.1
@@ -1358,4 +1418,173 @@ pub fn error_response_400(edetails: &str, message: &str) -> actix_web::Result<Ht
         .body(format!(
             "{{\"error\":\"{edetails}\",\"error_description\": \"{message}\"}}"
         )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use josekit::jwt;
+    use std::time::SystemTime;
+
+    #[test]
+    fn test_create_signed_jwt_with_all_key_types() {
+        // Load all private keys from the privatekeys directory
+        let keys_dir = "./privatekeys";
+        let entries = fs::read_dir(keys_dir).expect("Failed to read privatekeys directory");
+
+        let mut keys = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "json") {
+                let key_data = fs::read(&path).expect("Failed to read key file");
+                let key = Jwk::from_bytes(&key_data).expect("Failed to parse JWK");
+                keys.push(key);
+            }
+        }
+
+        assert!(!keys.is_empty(), "No private keys found in ./privatekeys");
+
+        // Test signing with each key type
+        for key in keys.iter() {
+            let alg = key.algorithm().unwrap_or("RS256");
+            let kid = key.key_id().unwrap_or("unknown");
+
+            // Create test payload
+            let mut payload = JwtPayload::new();
+            payload.set_issuer("http://localhost:8080");
+            payload.set_subject("http://example.com");
+            payload.set_issued_at(&SystemTime::now());
+
+            let exp = SystemTime::now() + Duration::from_secs(3600);
+            payload.set_expires_at(&exp);
+            payload
+                .set_claim("test_claim", Some(json!("test_value")))
+                .unwrap();
+
+            // Sign the JWT
+            let token_str = create_signed_jwt(&payload, &key, Some("test+jwt"))
+                .expect(&format!("Failed to sign with {} (kid: {})", alg, kid));
+
+            // Verify it's a valid JWT format
+            assert_eq!(
+                token_str.matches('.').count(),
+                2,
+                "Invalid JWT format for key {} ({})",
+                alg,
+                kid
+            );
+
+            println!("✓ Successfully signed with {} (kid: {})", alg, kid);
+        }
+    }
+
+    #[test]
+    fn test_verify_signed_jwt_with_all_key_types() {
+        // Load all private keys
+        let keys_dir = "./privatekeys";
+        let entries = fs::read_dir(keys_dir).expect("Failed to read privatekeys directory");
+
+        let mut keys = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "json") {
+                let key_data = fs::read(&path).expect("Failed to read key file");
+                let key = Jwk::from_bytes(&key_data).expect("Failed to parse JWK");
+                keys.push(key);
+            }
+        }
+
+        // Test signing and verifying with each key type
+        for key in keys.iter() {
+            let alg = key.algorithm().unwrap_or("RS256");
+            let kid = key.key_id().unwrap_or("unknown");
+
+            // Create test payload
+            let mut payload = JwtPayload::new();
+            payload.set_issuer("http://localhost:8080");
+            payload.set_subject("http://example.com");
+            payload.set_issued_at(&SystemTime::now());
+
+            let exp = SystemTime::now() + Duration::from_secs(3600);
+            payload.set_expires_at(&exp);
+            payload
+                .set_claim("test_claim", Some(json!("test_value")))
+                .unwrap();
+
+            // Sign the JWT
+            let token_str = create_signed_jwt(&payload, &key, None)
+                .expect(&format!("Failed to sign with {} (kid: {})", alg, kid));
+
+            // Get public key for verification and set the kid
+            let mut public_key_json = key
+                .to_public_key()
+                .expect(&format!("Failed to get public key for {} ({})", alg, kid));
+
+            // Manually set the kid on the public key since to_public_key doesn't preserve it
+            if let Some(kid_value) = key.key_id() {
+                let mut pub_key_map = public_key_json.as_ref().clone();
+                pub_key_map.insert("kid".to_string(), json!(kid_value));
+                public_key_json = Jwk::from_map(pub_key_map).unwrap();
+            }
+
+            // Verify the JWT using the existing verify_jwt_with_jwks function
+            let mut keymap = Map::new();
+            keymap.insert("keys".to_string(), json!([public_key_json.as_ref()]));
+            let keyset = JwkSet::from_map(keymap).unwrap();
+
+            let result = verify_jwt_with_jwks(&token_str, Some(keyset));
+            match &result {
+                Ok((verified_payload, _)) => {
+                    assert_eq!(verified_payload.issuer().unwrap(), "http://localhost:8080");
+                    assert_eq!(verified_payload.subject().unwrap(), "http://example.com");
+                    println!(
+                        "✓ Successfully verified JWT signed with {} (kid: {})",
+                        alg, kid
+                    );
+                }
+                Err(e) => {
+                    panic!(
+                        "Failed to verify JWT signed with {} (kid: {}): {:?}",
+                        alg, kid, e
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_algorithms_present() {
+        // Load all private keys and check we have expected algorithms
+        let keys_dir = "./privatekeys";
+        let entries = fs::read_dir(keys_dir).expect("Failed to read privatekeys directory");
+
+        let mut algorithms = HashSet::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "json") {
+                let key_data = fs::read(&path).expect("Failed to read key file");
+                let key = Jwk::from_bytes(&key_data).expect("Failed to parse JWK");
+                if let Some(alg) = key.algorithm() {
+                    algorithms.insert(alg.to_string());
+                }
+            }
+        }
+
+        // Check we have at least these algorithms
+        let expected_algs = vec![
+            "RS256", "PS256", "ES256", "ES384", "ES512", "Ed25519", "Ed448",
+        ];
+
+        for alg in expected_algs {
+            assert!(
+                algorithms.contains(alg),
+                "Missing key for algorithm: {}",
+                alg
+            );
+        }
+
+        let mut algs_vec: Vec<_> = algorithms.iter().collect();
+        algs_vec.sort();
+        println!("✓ All expected algorithms present: {:?}", algs_vec);
+    }
 }
