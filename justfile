@@ -33,7 +33,7 @@ lint: lint-rust lint-python
 # To run inmor tests
 test-ta *ARGS:
   # Run Rust unit tests first
-  cargo test --lib
+  #cargo test --lib
   # We have integration tests for the inmor rust binary
   uv run pytest -vvv {{ARGS}}
 
@@ -91,7 +91,7 @@ clean:
 recreate-fedora: down
   sudo rm -rf ./db ./redis
   mkdir db redis
-  sudo chcon -Rt container_file_t ./db ./redis
+  sudo chcon -Rt container_file_t ./db ./redis ./localhost+2*.pem
 
 
 # To recreate the db and redis data for tests

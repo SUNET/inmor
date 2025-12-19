@@ -1,7 +1,10 @@
-FROM rust:1.90 as build
+FROM debian:13 AS build
+RUN apt-get update && apt-get install -y curl build-essential pkg-config libssl-dev cmake && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH=/root/.cargo/bin:$PATH
+
 RUN mkdir /app
-RUN --mount=type=cache,target=/root/.cargo \
-    --mount=type=bind,source=Cargo.toml,target=/app/Cargo.toml \
+RUN --mount=type=bind,source=Cargo.toml,target=/app/Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=/app/Cargo.lock \
     --mount=type=bind,source=src,target=/app/src \
     cd /app && cargo build
@@ -10,7 +13,7 @@ RUN --mount=type=cache,target=/root/.cargo \
 
 
 ##### Production image
-FROM debian:12-slim
+FROM debian:13-slim
 RUN <<EOT
 groupadd -r app
 useradd -r -d /app -g app -N app
@@ -29,5 +32,4 @@ COPY --from=build --chown=app:app /app/target/debug/inmor /app/
 
 USER app
 WORKDIR /app
-#RUN bash .docker/scripts/setup-sass.sh
 EXPOSE 8080
