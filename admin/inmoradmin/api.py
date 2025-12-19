@@ -509,7 +509,9 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     now = datetime.now()
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
-    signed_statement = create_subordinate_statement(data.entityid, keyset, now, exp)
+    signed_statement = create_subordinate_statement(
+        data.entityid, keyset, now, exp, forced_metadata=data.forced_metadata
+    )
     # Next save the data in the database.
     if keys:
         keys_for_db = json.dumps(keys)
@@ -627,7 +629,9 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     now = datetime.now()
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
-    signed_statement = create_subordinate_statement(sub.entityid, keyset, now, exp)
+    signed_statement = create_subordinate_statement(
+        sub.entityid, keyset, now, exp, data.forced_metadata
+    )
     # Next save the data in the database.
     if keys:
         keys_for_db = json.dumps(keys)

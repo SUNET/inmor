@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+
+# import sys
 from pathlib import Path
 
 from jwcrypto import jwk
@@ -147,6 +149,32 @@ CACHES = {
     }
 }
 
+
+# LOGGING = {
+# "version": 1,
+# "disable_existing_loggers": False,
+# "formatters": {
+# "verbose": {
+# "format": "%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
+# },
+# },
+# "handlers": {
+# "console": {
+# "level": "INFO",
+# "class": "logging.StreamHandler",
+# "stream": sys.stdout,
+# "formatter": "verbose",
+# },
+# },
+# "loggers": {
+# "": {
+# "handlers": ["console"],
+# "level": "INFO",
+# "propagate": True,
+# },
+# },
+# }
+
 # TA/IA configuration
 
 SIGNING_PRIVATE_KEY = jwk.JWK.from_json(open("./private.json").read())
@@ -162,8 +190,6 @@ TRUSTMARK_PROVIDER = "http://localhost:8080"
 # We must have this, empty dictionary is okay
 POLICY_DOCUMENT = {
     "metadata_policy": {},
-    # FIXME: This should be for each subordinate separately in database
-    "metadata": {},
 }
 
 SERVER_EXPIRY = 8760  # A year in hours

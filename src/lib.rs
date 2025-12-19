@@ -927,7 +927,7 @@ fn create_resolve_response_jwt(
     // Set expiry after 24 horus
     let exp = SystemTime::now() + Duration::from_secs(86400);
     payload.set_expires_at(&exp);
-    payload.set_claim("metadata", Some(json!(metadata)));
+    payload.set_claim("metadata", Some(json!(metadata.unwrap())));
     let trust_chain: Vec<String> = result.iter().map(|x| x.jwt.clone()).collect();
     let _ = payload.set_claim("trust_chain", Some(json!(trust_chain)));
 
@@ -973,8 +973,10 @@ pub async fn resolve_entity(
     }
 
     let mut mpolicy: Option<Map<String, Value>> = None;
+    let reversed: Vec<&VerifiedJWT> = result.iter().rev().collect();
+
     // We need to skip the top one (the trust anchor's entity configuration)
-    for res in result.iter().rev().skip(1) {
+    for (i, res) in reversed.iter().enumerate().skip(1) {
         println!("\n{:?}\n", res.payload);
         mpolicy = match mpolicy {
             // This is when we have some policy the higher subordinate statement
@@ -1003,20 +1005,32 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
-                    // FIXME: We need to apply any subordinate metadata on top of entity metadata
-
-                    let metadata = res.payload.claim("metadata").unwrap().as_object().unwrap();
+                    let mut metadata = res.payload.claim("metadata").unwrap().clone();
                     eprintln!(
                         "\nFinal policy checking: val= {:?}\n\n metadata= {:?}\n\n",
                         &val, metadata
                     );
-
+                    let mut forced_metadata: Option<&Value> = None;
+                    // Let us see if we have any subordinate statement's metadata to apply first
+                    if (i > 0) {
+                        let last_sub_statement = reversed[i - 1];
+                        forced_metadata = last_sub_statement.payload.claim("metadata");
+                    }
+                    let metadata_obj = metadata.as_object().unwrap();
+                    let full_policy = json!({"metadata_policy": val.clone(), "metadata": forced_metadata.clone()});
+                    let full_policy_document = full_policy.as_object().unwrap();
                     // Here the policy contains for every kind of entity.
-                    // FIXME: We should have the full policy document including
-                    // any forced metadata from the superior.
-                    match apply_policy_document_on_metadata(val, metadata) {
-                        Ok(applied) => Some(applied),
+                    // In the full_policy_document we have any forced metadata from the authority.
+                    match apply_policy_document_on_metadata(full_policy_document, metadata_obj) {
+                        Ok(applied) => {
+                            eprintln!(
+                                "\nApplied final metadata after applying policy: {:?}\n\n",
+                                &applied
+                            );
+                            Some(applied)
+                        }
                         Err(_) => {
+                            eprintln!("Failed in applying metadata policy on metadata");
                             return error_response_400(
                                 "invalid_trust_chain",
                                 "received error in applying metadata policy on metadata",
@@ -1061,13 +1075,23 @@ pub async fn resolve_entity(
         };
     }
     // HACK:
-    println!("After the whole call: {mpolicy:?}\n");
+    eprintln!("After the whole call: {mpolicy:?}\n");
     // If we reach here means we have a list of JWTs and also verified metadata.
     // TODO: deal with the signing error here.
     let resp = create_resolve_response_jwt(&state, &sub, &result, mpolicy).unwrap();
     Ok(HttpResponse::Ok()
         .insert_header(("content-type", "application/resolve-response+jwt"))
         .body(resp))
+}
+
+/// Internal function to apply forced metadata from subordinate statement on top of
+/// the metadata of the final entity statement.
+fn merge_objects(v1: &mut Value, v2: &Value) {
+    if let (Some(obj1), Some(obj2)) = (v1.as_object_mut(), v2.as_object()) {
+        for (key, value) in obj2 {
+            obj1.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 /// To create the signed JWT for resolve response
