@@ -98,7 +98,8 @@ async fn main() -> io::Result<()> {
     //
     //
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
-    let redis = redis::Client::open(server_config.redis_uri.as_str()).unwrap();
+    let redis =
+        redis::Client::open(server_config.redis_uri.as_str()).expect("Failed to connect to Redis");
 
     let mut federation = Federation {
         entities: Mutex::new(HashMap::new()),
