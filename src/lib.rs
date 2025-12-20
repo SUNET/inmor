@@ -1349,9 +1349,9 @@ fn create_trustmark_status_response_jwt(
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.4.1
-#[get("/trust_mark_status")]
+#[post("/trust_mark_status")]
 pub async fn trust_mark_status(
-    info: Query<TrustMarkStatusParams>,
+    info: web::Form<TrustMarkStatusParams>,
     redis: web::Data<redis::Client>,
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
