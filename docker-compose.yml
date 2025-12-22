@@ -16,6 +16,7 @@ services:
       - ./taconfig.toml:/app/taconfig.toml
       - ./private.json:/app/private.json
       - ./publickeys:/app/publickeys
+      - ./historical_keys:/app/historical_keys
       - ./localhost+2.pem:/app/localhost+2.pem 
       - ./localhost+2-key.pem:/app/localhost+2-key.pem 
     depends_on:
