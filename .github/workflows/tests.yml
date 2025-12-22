@@ -53,7 +53,7 @@ jobs:
 
       - name: Add our CA public certificate to the system trust store
         run: |
-          sudo cp rootCA.pem /usr/local/share/ca-certificates/rootCA.pem
+          sudo cp rootCA.pem /usr/local/share/ca-certificates/rootCA.crt
           sudo update-ca-certificates
 
       - name: Run tests for inmor TA
