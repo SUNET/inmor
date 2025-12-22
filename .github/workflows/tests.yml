@@ -51,6 +51,11 @@ jobs:
       - name: Build TA appliation
         run: cargo build
 
+      - name: Add our CA public certificate to the system trust store
+        run: |
+          sudo cp rootCA.pem /usr/local/share/ca-certificates/rootCA.pem
+          sudo update-ca-certificates
+
       - name: Run tests for inmor TA
         run: just test-ta
 
