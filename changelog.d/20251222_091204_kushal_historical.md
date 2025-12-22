@@ -14,6 +14,7 @@ For top level release notes, leave all the headers commented out.
 ### Added
 
 - `add_historical_key.py` to mark a key as expired/revoked for historical keys endpoint.
+- Fixes #108, adds the historical keys endpoint
 
 <!--
 ### Changed

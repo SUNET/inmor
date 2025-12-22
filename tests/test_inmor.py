@@ -327,3 +327,93 @@ def test_ta_entity_configuration(loaddata: Redis, start_server: int, http_client
         == f"{base_url}/trust_mark_list"
     )
     assert federation_entity.get("federation_trust_mark_endpoint") == f"{base_url}/trust_mark"
+
+
+def test_historical_keys_endpoint(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /historical_keys endpoint returns signed JWT with historical keys"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/historical_keys"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    assert resp.headers.get("content-type") == "application/jwk-set+jwt"
+
+    # Parse and verify the JWT
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+
+    # Check the header has correct typ
+    protected = jwt_net.token.objects.get("protected")
+    if isinstance(protected, bytes):
+        protected = protected.decode("utf-8")
+    header = json.loads(protected)
+    assert header.get("typ") == "jwk-set+jwt", "JWT typ header should be 'jwk-set+jwt'"
+
+    # Check the payload
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("iss") == "https://localhost:8080", "iss should match TA domain"
+    assert payload.get("iat") is not None, "iat should be present"
+
+    # Check that keys array exists and contains keys with exp
+    keys = payload.get("keys")
+    assert keys is not None, "keys array should be present in payload"
+    assert isinstance(keys, list), "keys should be a list"
+    assert len(keys) > 0, "at least one historical key should be present"
+
+    for key in keys:
+        assert "exp" in key, "each historical key should have an exp field"
+        assert "kid" in key, "each historical key should have a kid field"
+        assert "kty" in key, "each historical key should have a kty field"
+
+
+def test_historical_keys_contains_expected_keys(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /historical_keys contains the expected key IDs from historical_keys directory"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/historical_keys"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    keys = payload.get("keys")
+
+    # Get all the key IDs from the response
+    key_ids = {key.get("kid") for key in keys}
+
+    # These are the expected historical key IDs based on historical_keys directory
+    expected_kids = {
+        "5RmZ0dJYzWYHNkG2mdOU6e-pPSucOcTg8_utbJxqKp4",
+        "j70psMhRU24mNbHDHHt2cFFYmlpTdu72XdPs-TLTISg",
+    }
+
+    # The response should contain all expected keys
+    assert expected_kids.issubset(key_ids), (
+        f"Expected keys {expected_kids} not found in response keys {key_ids}"
+    )
+
+
+def test_historical_keys_revoked_field(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /historical_keys properly includes revoked field if present"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/historical_keys"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    keys = payload.get("keys")
+
+    # Check if any keys have revoked field and if so verify structure
+    for key in keys:
+        if "revoked" in key:
+            revoked = key.get("revoked")
+            assert isinstance(revoked, dict), "revoked should be an object"
+            assert "revoked_at" in revoked, "revoked object should contain revoked_at"
+            assert "reason" in revoked, "revoked object should contain reason"
+            # Check reason is valid per spec
+            assert revoked.get("reason") in ["unspecified", "compromised", "superseded"], (
+                f"revoked reason should be one of: unspecified, compromised, superseded"
+            )
