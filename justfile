@@ -91,7 +91,7 @@ clean:
 recreate-fedora: down
   sudo rm -rf ./db ./redis
   mkdir db redis
-  sudo chcon -Rt container_file_t ./db ./redis
+  sudo chcon -Rt container_file_t ./db ./redis ./localhost+2*.pem
 
 
 # To recreate the db and redis data for tests

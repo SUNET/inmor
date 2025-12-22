@@ -8,14 +8,16 @@ services:
       - inmor-net
     healthcheck:
       test: ['CMD', 'true']
-      interval: 30s
-      timeout: 60s
+      interval: 1s
+      timeout: 5s
       retries: 5
-      start_period: 80s
+      start_period: 10s
     volumes:
       - ./taconfig.toml:/app/taconfig.toml
       - ./private.json:/app/private.json
       - ./publickeys:/app/publickeys
+      - ./localhost+2.pem:/app/localhost+2.pem 
+      - ./localhost+2-key.pem:/app/localhost+2-key.pem 
     depends_on:
       redis:
         condition: service_healthy

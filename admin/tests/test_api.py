@@ -635,7 +635,7 @@ def test_create_server_entity(db, loadredis):
     payload = self_validate(jwt_net)
 
     # Verify sub and iss claims
-    base_url = "http://localhost:8080"
+    base_url = "https://localhost:8080"
     self.assertEqual(payload.get("sub"), base_url)
     self.assertEqual(payload.get("iss"), base_url)
 

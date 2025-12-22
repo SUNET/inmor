@@ -117,12 +117,16 @@ pub struct Federation {
 
 // SECTION FOR WEB QUERY PARAMETERS
 
-/// FIXME: get all parameters
+/// https://openid.net/specs/openid-federation-1_0.html#section-8.3.1
 #[derive(Debug, Deserialize)]
 pub struct ResolveParams {
     sub: String,
     #[serde(rename = "trust_anchor")]
     trust_anchors: Vec<String>,
+    /// Optional entity_type parameter to filter metadata keys in the response.
+    /// If provided, only metadata keys matching the given entity types are returned.
+    /// If not provided or if no matching types found, all metadata is returned.
+    entity_type: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,13 +234,22 @@ impl Clone for URL {
 pub struct ServerConfiguration {
     pub domain: URL,
     pub redis_uri: String,
+    pub tls_cert: Option<String>,
+    pub tls_key: Option<String>,
 }
 
 impl ServerConfiguration {
-    pub fn new(domain: String, redis_uri: String) -> ServerConfiguration {
+    pub fn new(
+        domain: String,
+        redis_uri: String,
+        tls_cert: Option<String>,
+        tls_key: Option<String>,
+    ) -> ServerConfiguration {
         ServerConfiguration {
             domain: URL(domain),
             redis_uri,
+            tls_cert,
+            tls_key,
         }
     }
 
@@ -250,7 +263,9 @@ impl ServerConfiguration {
     pub fn from_env() -> ServerConfiguration {
         let domain = env::var("TA_DOMAIN").unwrap_or("http://localhost:8080".to_string());
         let redis = env::var("TA_REDIS").unwrap_or("redis://redis:6379".to_string());
-        ServerConfiguration::new(domain, redis)
+        let tls_cert = env::var("TA_TLS_CERT").ok();
+        let tls_key = env::var("TA_TLS_KEY").ok();
+        ServerConfiguration::new(domain, redis, tls_cert, tls_key)
     }
 }
 
@@ -1150,7 +1165,11 @@ pub async fn resolve_entity(
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let mut found_ta = false;
-    let ResolveParams { sub, trust_anchors } = info.into_inner();
+    let ResolveParams {
+        sub,
+        trust_anchors,
+        entity_type,
+    } = info.into_inner();
     let tas: Vec<&str> = trust_anchors.iter().map(|s| s as &str).collect();
     let mut visisted: HashSet<String> = HashSet::new();
     // Now loop over the trust_anchors
@@ -1295,12 +1314,54 @@ pub async fn resolve_entity(
     }
     // HACK:
     eprintln!("After the whole call: {mpolicy:?}\n");
+    // The mpolicy now contains the final metadata after applying policies.
+
+    // Apply entity_type filtering if provided
+    // Per OpenID Federation spec, entity_type filters which metadata keys are returned.
+    // If entity_type is provided but none of the types match, return all metadata.
+    let filtered_metadata = filter_metadata_by_entity_types(mpolicy, entity_type.as_ref());
+
     // If we reach here means we have a list of JWTs and also verified metadata.
-    let resp = create_resolve_response_jwt(&state, &sub, &result, mpolicy)
+    let resp = create_resolve_response_jwt(&state, &sub, &result, filtered_metadata)
         .map_err(error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok()
         .insert_header(("content-type", "application/resolve-response+jwt"))
         .body(resp))
+}
+
+/// Filters metadata by entity_type.
+/// If entity_types is None or empty, returns the original metadata.
+/// If entity_types is provided, returns only the metadata keys that match.
+/// If no matching types found in metadata, returns the original metadata (per spec).
+fn filter_metadata_by_entity_types(
+    metadata: Option<Map<String, Value>>,
+    entity_types: Option<&Vec<String>>,
+) -> Option<Map<String, Value>> {
+    let Some(meta) = metadata else {
+        return None;
+    };
+
+    let Some(types) = entity_types else {
+        return Some(meta);
+    };
+
+    if types.is_empty() {
+        return Some(meta);
+    }
+
+    let mut filtered = Map::new();
+    for entity_type in types {
+        if let Some(value) = meta.get(entity_type) {
+            filtered.insert(entity_type.clone(), value.clone());
+        }
+    }
+
+    // If no matching types found, return all metadata
+    if filtered.is_empty() {
+        return Some(meta);
+    }
+
+    Some(filtered)
 }
 
 /// Internal function to apply forced metadata from subordinate statement on top of
@@ -1338,9 +1399,9 @@ fn create_trustmark_status_response_jwt(
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.4.1
-#[get("/trust_mark_status")]
+#[post("/trust_mark_status")]
 pub async fn trust_mark_status(
-    info: Query<TrustMarkStatusParams>,
+    info: web::Form<TrustMarkStatusParams>,
     redis: web::Data<redis::Client>,
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {

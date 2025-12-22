@@ -185,8 +185,8 @@ for pubkey in os.listdir("./publickeys"):
         pkey = jwk.JWK.from_json(open(os.path.join("./publickeys", pubkey)).read())
         SIGNING_PUBLIC_KEYS.append(pkey)
 
-TA_DOMAIN = "http://localhost:8080"
-TRUSTMARK_PROVIDER = "http://localhost:8080"
+TA_DOMAIN = "https://localhost:8080"
+TRUSTMARK_PROVIDER = "https://localhost:8080"
 # We must have this, empty dictionary is okay
 POLICY_DOCUMENT = {
     "metadata_policy": {},
@@ -227,6 +227,9 @@ TA_DEFAULTS = {
 
 # The following are the trustmarks given to TA by an external entity
 TA_TRUSTMARKS = []
+# Any trusted trustmark issuers can be added in localsettings.py
+TA_TRUSTED_TRUSTMARK_ISSUERS = {}
+
 # now see if we need to override any settings
 for variable in dir(localsettings):
     if not variable.startswith("__"):

@@ -76,6 +76,13 @@ def create_server_statement() -> str:
     tms = settings.TA_TRUSTMARKS
     if len(tms) > 0:
         sub_data["trust_marks"] = tms
+
+    # Any trusted trustmark issuers
+    tm_trusted_issuers = settings.TA_TRUSTED_TRUSTMARK_ISSUERS
+    if len(tm_trusted_issuers) > 0:
+        sub_data["trust_mark_issuers"] = tm_trusted_issuers
+
+    # Set creation and expiry time
     now = datetime.now()
     exp = now + timedelta(hours=settings.SERVER_EXPIRY)
     # creation time
@@ -100,6 +107,7 @@ def create_subordinate_statement(
     now: datetime,
     exp: datetime,
     forced_metadata: dict[str, Any] | None,
+    additional_claims: dict[str, Any] | None = None,
 ) -> str:
     """Creates a signed Subordinate Statement"""
     # This is the data we care for now
@@ -108,6 +116,10 @@ def create_subordinate_statement(
     # Add any forced metadata if available
     if forced_metadata is not None:
         sub_data["metadata"] = forced_metadata
+
+    # Any non-mandatory additional claims will be added in the subordinate statement.
+    if additional_claims:
+        sub_data.update(additional_claims)
 
     # This is the metadata policy of TA defined in the settings.py
     if settings.POLICY_DOCUMENT.get("metadata_policy", {}):

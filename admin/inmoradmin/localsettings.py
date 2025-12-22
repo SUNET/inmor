@@ -3,9 +3,19 @@
 TA_TRUSTMARKS = [
     {
         "trust_mark_type": "https://sunet.se/does_not_exist_trustmark",
-        "trust_mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE3OTc1MDM4NzQuMjc4NjY2LCJpYXQiOjE3NjU5Njc4NzQuMjc4NjY2LCJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjgwODAiLCJzdWIiOiJodHRwOi8vbG9jYWxob3N0OjgwODAiLCJ0cnVzdF9tYXJrX3R5cGUiOiJodHRwczovL3N1bmV0LnNlL2RvZXNfbm90X2V4aXN0X3RydXN0bWFyayJ9.iSO0DhlYs7LB_6pxcKjPHPz8NZkR9BYuKTNNx_u83QPMNZvuw8Iyia6IHrtGKiyXqHGEFd4_yuiZosTCpcZl2bJj032zvjtfAh6vYH7R3CCsYanVv7KgB143e2A66DJfi93WfhOcw9jIojujDayTmGdwwhYKLLteeRezQ9BwYWvw-b3gs8x3eGdGFYuu2bznP1sHV7Jkoe_8rAlTSKdX8M_HODqdWdgceQ08jkXBB7L7Fp4kaO5hMENDtDulzpAbcT54F5Y-_hd3qkIC6uBMTyzocvnndJHQeU8hJHkiLp6oAHEGKUDcLZtOJMd6SFdK8pJ7SLR3SQO_1gFLVdLh4A",
+        "trust_mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE3OTc5MjMxOTkuMDAxOTgyLCJpYXQiOjE3NjYzODcxOTkuMDAxOTgyLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9sb2NhbGhvc3Q6ODA4MCIsInRydXN0X21hcmtfdHlwZSI6Imh0dHBzOi8vc3VuZXQuc2UvZG9lc19ub3RfZXhpc3RfdHJ1c3RtYXJrIn0.T5lDDCSJ3o5tgbCTLOSswu1jqlXOaY_a-rgy4V0gmMcHHXQsw8YyVxERNtlQQbTpqR6W9_9FjRNjRNC_s_6OcHQ-A_yICNAMGkOVPCZUJ9Yuydh2HT83tXNd8fgQVtdbWnnRmEyjYKWN2I8pmrjRKwnH0YuBYBIMO7QVIaaL_iA0_AV8hjjErT83NfffYfS67KQOcxdhJ8vkX1eMFRY1bH9XEtK5ViMBEJaTHZX424Zvtm5OS2RH2_4OkgtwROIOPLzNVmrAG12IdzbVourxmiq3CRouKnEVKFyIYzHo9SesHn3LuUYDPkSEMhfSWJ7_N91EhDQbabr9Dse2Kfc87Q",
     }
 ]
+
+# Add any given trusted trustmark issuers here. This is optional.
+# The format is {trust_mark_type: [list of entity_ids who can issue it]}
+TA_TRUSTED_TRUSTMARK_ISSUERS = {
+    "https://sunet.se/does_not_exist_trustmark": [
+        "https://localhost:8080",
+    ],
+    "https://example.com/trust_mark_type": ["https://localhost:8080"],
+}
+
 
 # TA_DOMAIN = "YOUR ENITITY DOMAIN
 # FEDERATION_ENTITY = {

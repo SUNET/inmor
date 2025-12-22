@@ -1,7 +1,9 @@
 import os
 import subprocess
 import tempfile
+import time
 
+import httpx
 import pytest
 from pytest_redis import factories
 from redis.client import Redis
@@ -10,10 +12,20 @@ file_dir = os.path.dirname(os.path.abspath(__file__))
 dbpath = os.path.join(file_dir, "redisdata")
 inmor_path = os.path.join(os.path.dirname(file_dir), "target/debug/inmor")
 
+# mkcert CA root certificate for TLS verification
+MKCERT_CA = os.path.expanduser("./rootCA.pem")
+
 
 trdb = factories.redis_proc(port=6088, datadir=dbpath)
 
 rdb = factories.redisdb("trdb")
+
+
+@pytest.fixture(scope="session")
+def http_client():
+    """Creates an httpx client that trusts the mkcert CA."""
+    with httpx.Client(verify=MKCERT_CA) as client:
+        yield client
 
 
 @pytest.fixture(scope="function")
@@ -37,10 +49,13 @@ def start_server(trdb):
     with tempfile.TemporaryDirectory() as tmpdir:
         tconfig = os.path.join(tmpdir, "testconfig.toml")
         with open(tconfig, "w") as f:
-            f.write(f'domain = "http://localhost:{port}"\n')
+            f.write(f'domain = "https://localhost:{port}"\n')
             f.write('redis_uri = "redis://localhost:6088"\n')
+            f.write('tls_cert = "localhost+2.pem"\n')
+            f.write('tls_key = "localhost+2-key.pem"\n')
         # Now start a process
         inmor_proc = subprocess.Popen([inmor_path, "-p", str(port), "-c", tconfig])
         assert not inmor_proc.poll()
+        time.sleep(1)  # Wait for server to start
         yield port
         inmor_proc.terminate()
