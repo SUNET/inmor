@@ -14,6 +14,7 @@ For top level release notes, leave all the headers commented out.
 ### Added
 
 - TA can do TLS if certificate and key are provided.
+- `entity_type` as parement in resolve endpoint #106.
 
 <!--
 ### Changed

@@ -76,6 +76,13 @@ def create_server_statement() -> str:
     tms = settings.TA_TRUSTMARKS
     if len(tms) > 0:
         sub_data["trust_marks"] = tms
+
+    # Any trusted trustmark issuers
+    tm_trusted_issuers = settings.TA_TRUSTED_TRUSTMARK_ISSUERS
+    if len(tm_trusted_issuers) > 0:
+        sub_data["trust_mark_issuers"] = tm_trusted_issuers
+
+    # Set creation and expiry time
     now = datetime.now()
     exp = now + timedelta(hours=settings.SERVER_EXPIRY)
     # creation time

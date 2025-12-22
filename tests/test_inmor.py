@@ -202,6 +202,9 @@ def test_ta_resolve_subordinate(loaddata: Redis, start_server: int, http_client:
     assert openid_provider is not None, "openid_provider missing from metadata"
     assert set(openid_provider.get("subject_types_supported")) == {"public", "pairwise", "e2e"}
     assert openid_provider.get("application_type") == "mutant"
+    # Verify entity_type filtering - only openid_provider should be present
+    assert "federation_entity" not in metadata, "federation_entity should be filtered out"
+    assert list(metadata.keys()) == ["openid_provider"], "only openid_provider should be in metadata"
     # forced metadata are valid
     trust_chain = payload.get("trust_chain", [])
     assert len(trust_chain) == 3
@@ -220,6 +223,69 @@ def test_ta_resolve_subordinate(loaddata: Redis, start_server: int, http_client:
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("sub") == "https://localhost:8080"
     assert payload.get("iss") == "https://localhost:8080"
+
+
+def test_resolve_with_multiple_entity_types(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /resolve endpoint with multiple entity_type parameters (openid_provider and federation_entity)"
+    _rdb = loaddata
+    port = start_server
+    # Request both openid_provider and federation_entity
+    url = f"https://localhost:{port}/resolve?sub=https://fakeop0.labb.sunet.se&entity_type=openid_provider&entity_type=federation_entity&trust_anchor=https://localhost:8080"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
+    
+    metadata = payload.get("metadata")
+    assert metadata is not None, "metadata missing from payload"
+    # Both entity types should be present
+    assert "openid_provider" in metadata, "openid_provider should be in metadata"
+    assert "federation_entity" in metadata, "federation_entity should be in metadata"
+    assert set(metadata.keys()) == {"openid_provider", "federation_entity"}, \
+        "Only openid_provider and federation_entity should be in metadata"
+
+
+def test_resolve_with_wrong_entity_type(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /resolve endpoint with a non-existent entity_type - should return all metadata"
+    _rdb = loaddata
+    port = start_server
+    # Request a wrong/non-existent entity type
+    url = f"https://localhost:{port}/resolve?sub=https://fakeop0.labb.sunet.se&entity_type=a_wrong_type&trust_anchor=https://localhost:8080"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
+    
+    metadata = payload.get("metadata")
+    assert metadata is not None, "metadata missing from payload"
+    # When entity_type doesn't match, all metadata should be returned
+    assert "openid_provider" in metadata, "openid_provider should be in metadata"
+    assert "federation_entity" in metadata, "federation_entity should be in metadata"
+    assert set(metadata.keys()) == {"openid_provider", "federation_entity"}, \
+        "All metadata should be returned when entity_type doesn't match"
+
+
+def test_resolve_without_entity_type(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /resolve endpoint without entity_type parameter - should return all metadata"
+    _rdb = loaddata
+    port = start_server
+    # Request without entity_type parameter
+    url = f"https://localhost:{port}/resolve?sub=https://fakeop0.labb.sunet.se&trust_anchor=https://localhost:8080"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    assert payload.get("sub") == "https://fakeop0.labb.sunet.se"
+    
+    metadata = payload.get("metadata")
+    assert metadata is not None, "metadata missing from payload"
+    # Without entity_type, all metadata should be returned
+    assert "openid_provider" in metadata, "openid_provider should be in metadata"
+    assert "federation_entity" in metadata, "federation_entity should be in metadata"
+    assert set(metadata.keys()) == {"openid_provider", "federation_entity"}, \
+        "All metadata should be returned when entity_type is not specified"
 
 
 def test_ta_entity_configuration(loaddata: Redis, start_server: int, http_client: Client):

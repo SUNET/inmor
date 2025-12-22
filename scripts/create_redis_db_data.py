@@ -38,7 +38,7 @@ tms = [
     "https://fakerp0.labb.sunet.se",
     "https://fakeop0.labb.sunet.se",
     "https://fakerp1.labb.sunet.se",
-    "http://localhost:8080",
+    "https://localhost:8080",
 ]
 
 # Because we need to skip the TA itself
