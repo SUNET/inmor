@@ -1,0 +1,13 @@
+{
+  "alg": "PS256",
+  "e": "AQAB",
+  "kid": "j70psMhRU24mNbHDHHt2cFFYmlpTdu72XdPs-TLTISg",
+  "kty": "RSA",
+  "n": "22JYloICEu33l3pjoIVyxrcJlBMFWlIZ3JN9fU3iKvsN43E14WpdT0zkWinBzXTF2bchWFHGJ30WDCC4wmka_FsjP6LvYCKnFPbTVvuVZpFFFgNhWhpfnQw0KRooCxfvVqk0ATiLs-vBiwFKsTVR09BRr-MjBgHFoTxWqGvWRL5CnbnerhNiRImJjtDkxFJWzCJhOy3X_M6RiTG8vWgWs_1IGzdj0owBh31y3lgvCqxw7kZbSdW9Du8zobhsRh-DpW0M-_K2Sf0flOhki3cMW44y-o8T0zIlIyF2xhWdjN3etnEKSkhAv81iAEFv_h1RG_e6lLeQzt0NH7bBsDT-8w",
+  "use": "sig",
+  "exp": 1766390921,
+  "revoked": {
+    "revoked_at": 1766390921,
+    "reason": "compromised"
+  }
+}
