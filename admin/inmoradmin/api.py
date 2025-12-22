@@ -488,6 +488,12 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     # This entity_jwt is verified with the key (signature verification)
     entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(data.entityid, keys)
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    # Verify that our TA_DOMAIN is in the authority_hints of the subordinate
+    authority_hints = claims.get("authority_hints", [])
+    if settings.TA_DOMAIN not in authority_hints:
+        return 400, {
+            "message": f"TA domain {settings.TA_DOMAIN} is not in the authority_hints of the entity configuration."
+        }
     # TODO: If the entity has policy, then we should try to merge to veirfy.
     if "metadata_policy" in claims:
         sub_policy = claims.get("metadata_policy", {})
@@ -614,6 +620,12 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     # This entity_jwt is verified with the key (signature verification)
     entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(sub.entityid, keys)
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    # Verify that our TA_DOMAIN is in the authority_hints of the subordinate
+    authority_hints = claims.get("authority_hints", [])
+    if settings.TA_DOMAIN not in authority_hints:
+        return 400, {
+            "message": f"TA domain {settings.TA_DOMAIN} is not in the authority_hints of the entity configuration."
+        }
     # TODO: If the entity has policy, then we should try to merge to veirfy.
     if "metadata_policy" in claims:
         sub_policy = claims.get("metadata_policy", {})
