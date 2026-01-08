@@ -64,43 +64,6 @@ pub struct AppState {
     pub public_keyset: JwkSet,
 }
 
-/// Holds historical keys loaded at startup
-#[derive(Debug, Clone)]
-pub struct HistoricalKeys {
-    pub keys: Vec<Value>,
-}
-
-impl HistoricalKeys {
-    /// Load historical keys from the historical_keys directory.
-    /// Only keys with an `exp` field are included.
-    pub fn load_from_directory(dir_path: &str) -> Self {
-        let mut keys: Vec<Value> = Vec::new();
-
-        if let Ok(entries) = fs::read_dir(dir_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file()
-                    && path.extension().is_some_and(|ext| ext == "json")
-                    && let Ok(data) = fs::read(&path)
-                    && let Ok(key_json) = serde_json::from_slice::<Value>(&data)
-                {
-                    // Only include keys that have an "exp" field
-                    if key_json.get("exp").is_some() {
-                        keys.push(key_json);
-                    }
-                }
-            }
-        }
-
-        HistoricalKeys { keys }
-    }
-
-    /// Check if there are any historical keys
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
-    }
-}
-
 // To represent the entities in the federation.
 // FIXME: add all different data as proper part of the structure.
 #[derive(Debug, Clone, Deserialize)]
@@ -1525,35 +1488,24 @@ pub async fn trust_mark_status(
 /// Returns 404 if no historical keys are found.
 #[get("/historical_keys")]
 pub async fn federation_historical_keys(
-    state: web::Data<AppState>,
-    historical_keys: web::Data<HistoricalKeys>,
+    redis: web::Data<redis::Client>,
 ) -> actix_web::Result<HttpResponse> {
-    // Return 404 if no historical keys found with exp field
-    if historical_keys.is_empty() {
-        return error_response_404("not_found", "no historical keys found");
+    let mut conn = redis
+        .get_connection_manager()
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
+    let res: Option<String> = redis::Cmd::get("inmor:historical_keys")
+        .query_async(&mut conn)
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
+    match res {
+        Some(token) => Ok(HttpResponse::Ok()
+            .insert_header(("content-type", "application/jwk-set+jwt"))
+            .body(token)),
+        None => error_response_404("not_found", "no historical keys found"),
     }
-
-    // Create the signed JWK Set JWT response
-    let mut payload = JwtPayload::new();
-    let iss = state.entity_id.clone();
-    payload.set_issuer(&iss);
-    payload.set_issued_at(&SystemTime::now());
-
-    // Set the keys array in the payload
-    payload
-        .set_claim("keys", Some(json!(historical_keys.keys.clone())))
-        .map_err(error::ErrorInternalServerError)?;
-
-    // Sign the JWT with the private key
-    let keydata = &*PRIVATE_KEY.clone();
-    let key = Jwk::from_bytes(keydata).map_err(error::ErrorInternalServerError)?;
-
-    let resp = create_signed_jwt(&payload, &key, Some("jwk-set+jwt"))
-        .map_err(error::ErrorInternalServerError)?;
-
-    Ok(HttpResponse::Ok()
-        .insert_header(("content-type", "application/jwk-set+jwt"))
-        .body(resp))
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#section-8.5.1

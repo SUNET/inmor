@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
@@ -11,6 +12,7 @@ from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import BaseModel, BeforeValidator, Field
 from redis.client import Redis
 
+from common.signing import create_signed_jwt
 from entities.lib import (
     apply_server_policy,
     create_server_statement,
@@ -701,6 +703,54 @@ def create_server_entity(request: HttpRequest):
     con: Redis = get_redis_connection("default")
     _ = con.set("inmor:entity_id", token)
     return 201, {"entity_statement": token}
+
+
+@router.post("/server/historical_keys", response={201: Message, 404: Message})
+def create_historical_keys(request: HttpRequest):
+    """Creates signed historical keys JWT and stores in Redis.
+
+    Reads historical key files from HISTORICAL_KEYS_DIR, filters to only
+    include keys with 'exp' field, creates a signed JWT, and stores in Redis.
+    """
+
+    keys: list[dict[str, Any]] = []
+    keys_dir = settings.HISTORICAL_KEYS_DIR
+
+    # Check if directory exists
+    if not os.path.isdir(keys_dir):
+        return 404, {"message": f"Historical keys directory not found: {keys_dir}"}
+
+    # Read all JSON files from the directory
+    for filename in os.listdir(keys_dir):
+        if filename.endswith(".json"):
+            filepath = os.path.join(keys_dir, filename)
+            try:
+                with open(filepath) as f:
+                    key_data = json.load(f)
+                    # Only include keys that have an "exp" field
+                    if "exp" in key_data:
+                        keys.append(key_data)
+            except (json.JSONDecodeError, IOError):
+                continue
+
+    if not keys:
+        return 404, {"message": "No historical keys found with exp field"}
+
+    # Create the signed JWT
+    now = datetime.now()
+    claims: dict[str, Any] = {
+        "iss": settings.TA_DOMAIN,
+        "iat": now.timestamp(),
+        "keys": keys,
+    }
+
+    token = create_signed_jwt(claims, settings.SIGNING_PRIVATE_KEY, "jwk-set+jwt")
+
+    # Store in Redis
+    con: Redis = get_redis_connection("default")
+    _ = con.set("inmor:historical_keys", token)
+
+    return 201, {"message": f"Historical keys JWT created with {len(keys)} keys"}
 
 
 api.add_router("", router)

@@ -112,10 +112,6 @@ async fn main() -> io::Result<()> {
 
     let fed_app_data = web::Data::new(federation);
 
-    // Load historical keys at startup
-    let historical_keys = HistoricalKeys::load_from_directory("./historical_keys");
-    let historical_keys_data = web::Data::new(historical_keys);
-
     // Check if TLS configuration is available
     let has_tls = server_config.tls_cert.is_some() && server_config.tls_key.is_some();
 
@@ -130,7 +126,6 @@ async fn main() -> io::Result<()> {
             }))
             .app_data(web::Data::new(redis.clone()))
             .app_data(fed_app_data.clone())
-            .app_data(historical_keys_data.clone())
             .service(index)
             .service(openid_federation)
             .service(list_subordinates)

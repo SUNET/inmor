@@ -27,6 +27,9 @@ tmts = [
 print("First let us create the server entity configuration")
 _ = httpx.post("http://localhost:8000/api/v1/server/entity")
 
+print("Creating historical_keys if any")
+_ = httpx.post("http://localhost:8000/api/v1/server/historical_keys")
+
 
 # Then let us create the trustmark types
 for tm in tmts:
