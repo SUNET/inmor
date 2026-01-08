@@ -666,3 +666,43 @@ def test_create_server_entity(db, loadredis):
     tms = payload.get("trust_marks", [])
     self.assertEqual(len(tms), 1)
     self.assertEqual(tms[0].get("trust_mark_type", ""), "https://sunet.se/does_not_exist_trustmark")
+
+
+@pytest.mark.django_db
+def test_create_historical_keys(db, loadredis):
+    """Tests creation of historical keys JWT"""
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+
+    response = client.post("/server/historical_keys")
+    self.assertEqual(response.status_code, 201)
+    resp = response.json()
+    self.assertIn("2 keys", resp.get("message", ""))
+
+    # Verify JWT is stored in Redis
+    token = loadredis.get("inmor:historical_keys")
+    self.assertIsNotNone(token)
+
+    # Verify JWT payload
+    payload = get_payload(token.decode("utf-8"))
+    self.assertEqual(payload.get("iss"), "https://localhost:8080")
+    self.assertIsNotNone(payload.get("iat"))
+
+    # Verify keys in payload (only keys with exp field)
+    keys = payload.get("keys", [])
+    self.assertEqual(len(keys), 2)
+
+
+@pytest.mark.django_db
+def test_create_historical_keys_missing_dir(db, loadredis, settings):
+    """Tests that 404 is returned when historical keys directory doesn't exist"""
+    self = TestCase()
+    self.maxDiff = None
+    client: TestClient = TestClient(router)
+
+    settings.HISTORICAL_KEYS_DIR = "/nonexistent/path/to/keys"
+
+    response = client.post("/server/historical_keys")
+    self.assertEqual(response.status_code, 404)
+    self.assertIn("directory not found", response.json().get("message", ""))

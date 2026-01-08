@@ -208,6 +208,8 @@ FEDERATION_ENTITY = {
     "federation_historical_keys_endpoint": f"{TA_DOMAIN}/historical_keys",
 }
 
+HISTORICAL_KEYS_DIR = os.environ.get("HISTORICAL_KEYS_DIR", "./historical_keys")
+
 SUBORDINATE_DEFAULT_VALID_FOR: int = 8760  # a year in hours
 
 # The following are the default values the system will use while creating new entries via API.

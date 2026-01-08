@@ -76,6 +76,7 @@ services:
     volumes:
       - ./admin/private.json:/app/private.json
       - ./publickeys:/app/publickeys
+      - ./historical_keys:/app/historical_keys
     # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
     ports:
       - "8000:8000"
