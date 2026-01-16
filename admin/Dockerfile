@@ -42,6 +42,7 @@ EOT
 COPY --from=build --chown=app:app /app /app
 COPY ./inmoradmin /app/inmoradmin
 COPY ./entities /app/entities
+COPY ./common /app/common
 COPY ./trustmarks /app/trustmarks
 COPY ./docker-entrypoint.sh /app/
 COPY ./manage.py /app/

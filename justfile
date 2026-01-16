@@ -11,6 +11,12 @@ venv:
 dev:
   uv run scripts/create-keys.py
 
+# To run the frontend development server
+[working-directory: 'admin/frontend']
+dev-frontend:
+  pnpm install
+  pnpm dev
+
 # To check for formatting and clippy error in TA
 lint-rust:
   cargo clippy
@@ -26,6 +32,11 @@ lint-python: venv
   ty check .  --exclude api_demo && \
   ruff format --check && \
   ruff check .
+
+# To check for TypeScript errors in frontend
+[working-directory: 'admin/frontend']
+lint-frontend:
+  pnpm vue-tsc --noEmit
 
 # Lint target for both rust and python
 lint: lint-rust lint-python
@@ -62,6 +73,7 @@ build-rs:
 build:
   docker compose build ta
   docker compose build admin
+  docker compose build frontend
 
 rebuild-ta:
   @cargo build

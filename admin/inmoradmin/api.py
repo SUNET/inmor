@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
+import httpx
 import pytz
 from django.conf import settings
 from django.http import HttpRequest
@@ -18,6 +19,7 @@ from entities.lib import (
     create_server_statement,
     create_subordinate_statement,
     fetch_entity_configuration,
+    fetch_payload,
     merge_our_policy_ontop_subpolicy,
     update_redis_with_subordinate,
 )
@@ -25,8 +27,16 @@ from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
-api = NinjaAPI()
-router = Router()
+from .auth import auth_router, session_auth
+
+api = NinjaAPI(
+    title="Inmor Admin API",
+    version="0.2.0",
+    description="Admin API for managing Trust Anchor entities, subordinates, and trust marks.",
+)
+
+# Protected router - requires authentication
+router = Router(auth=session_auth)
 
 DEFAULTS: dict[str, dict[str, Any]] = settings.TA_DEFAULTS
 
@@ -95,6 +105,7 @@ class TrustMarkSchema(Schema):
 
 class TrustMarkOutSchema(Schema):
     id: int
+    tmt_id: Annotated[int, Field(description="Trust Mark Type ID.")]
     domain: Annotated[str, Field(description="Domain/entity_id the TrustMark was generated for.")]
     expire_at: Annotated[
         datetime, Field(description="Expiry date/time for the current TrustMark JWT.")
@@ -696,6 +707,67 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     return 200, sub
 
 
+class FetchConfigSchema(Schema):
+    url: Annotated[str, Field(description="The entity URL to fetch configuration from.")]
+
+
+class FetchConfigOutSchema(Schema):
+    metadata: Annotated[dict[str, Any], Field(description="Entity metadata from the configuration.")]
+    jwks: Annotated[dict[str, Any], Field(description="JWKS from the entity configuration.")]
+    authority_hints: Annotated[
+        list[str] | None, Field(description="Authority hints from the configuration.")
+    ] = None
+    trust_marks: Annotated[
+        list[dict[str, Any]] | None, Field(description="Trust marks from the configuration.")
+    ] = None
+
+
+@router.post(
+    "/subordinates/fetch-config",
+    response={200: FetchConfigOutSchema, 400: Message, 500: Message},
+    tags=["Subordinates"],
+)
+def fetch_entity_config(request: HttpRequest, data: FetchConfigSchema):
+    """Fetches and self-validates an entity configuration from the given URL.
+
+    This endpoint fetches the OpenID Federation entity configuration from the
+    well-known endpoint, self-validates it using the embedded JWKS, and returns
+    the verified claims.
+    """
+    try:
+        payload, _jwt_str = fetch_payload(data.url)
+        return 200, {
+            "metadata": payload.get("metadata", {}),
+            "jwks": payload.get("jwks", {}),
+            "authority_hints": payload.get("authority_hints"),
+            "trust_marks": payload.get("trust_marks"),
+        }
+    except httpx.ConnectError:
+        return 400, {
+            "message": f"Could not connect to {data.url}. Please check the URL and ensure the domain exists."
+        }
+    except httpx.TimeoutException:
+        return 400, {"message": f"Connection to {data.url} timed out. Please try again."}
+    except httpx.RequestError as e:
+        return 400, {"message": f"Failed to reach {data.url}: {e}"}
+    except Exception as e:
+        error_str = str(e)
+        if "Fetching payload returns" in error_str:
+            # Extract status code if present
+            if "404" in error_str:
+                return 400, {
+                    "message": f"No OpenID Federation configuration found at {data.url}/.well-known/openid-federation"
+                }
+            return 400, {"message": f"Failed to fetch entity configuration: {error_str}"}
+        if "InvalidJWSSignature" in error_str or "signature" in error_str.lower():
+            return 400, {"message": "Entity configuration signature validation failed."}
+        if "Expecting value" in error_str or "Invalid" in error_str:
+            return 400, {
+                "message": "Invalid response from server. No valid OpenID Federation JWT found."
+            }
+        return 400, {"message": f"Error fetching entity configuration: {error_str}"}
+
+
 @router.post("/server/entity", response={201: EntityStatement})
 def create_server_entity(request: HttpRequest):
     "Creates server's entity configuration"
@@ -753,4 +825,6 @@ def create_historical_keys(request: HttpRequest):
     return 201, {"message": f"Historical keys JWT created with {len(keys)} keys"}
 
 
-api.add_router("", router)
+# Add routers to API
+api.add_router("/auth", auth_router)  # Auth endpoints (no auth required)
+api.add_router("", router)  # Main API (auth required)
