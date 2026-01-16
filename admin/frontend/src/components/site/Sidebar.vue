@@ -1,17 +1,20 @@
 <script lang="ts">
 import { defineComponent, type FunctionalComponent } from 'vue';
 import { RouterLink } from 'vue-router';
-import { Home, FileLock2, Files, Server, LogOut } from 'lucide-vue-next';
+import { Home, FileLock2, Files, Server, ServerCog, RefreshCw, LogOut } from 'lucide-vue-next';
 import packageJson from '../../../package.json';
 import sunetLogo from '../../assets/sunet-logo.svg';
 
 export default defineComponent({
     name: 'Sidebar',
-    components: { RouterLink, LogOut },
+    components: { RouterLink, LogOut, ServerCog, RefreshCw },
     data() {
         return {
             version: packageJson.version || '0.2.0',
             sunetLogo,
+            regenerating: false,
+            regenerateMessage: '',
+            regenerateSuccess: false,
             nav: [
                 {
                     icon: Home,
@@ -45,6 +48,30 @@ export default defineComponent({
                 console.error('Logout failed:', e);
             }
         },
+        async handleRegenerateEntity() {
+            if (this.regenerating) return;
+
+            this.regenerating = true;
+            this.regenerateMessage = '';
+
+            try {
+                await this.$sdk.regenerateServerEntity();
+                this.regenerateSuccess = true;
+                this.regenerateMessage = 'Entity regenerated';
+                // Clear message after 3 seconds
+                setTimeout(() => {
+                    this.regenerateMessage = '';
+                }, 3000);
+            } catch (e) {
+                this.regenerateSuccess = false;
+                this.regenerateMessage = e instanceof Error ? e.message : 'Failed to regenerate';
+                setTimeout(() => {
+                    this.regenerateMessage = '';
+                }, 5000);
+            } finally {
+                this.regenerating = false;
+            }
+        },
     },
 });
 </script>
@@ -65,6 +92,21 @@ export default defineComponent({
                 </li>
             </ul>
         </nav>
+        <div class="server-section">
+            <button
+                type="button"
+                class="server-btn"
+                :class="{ 'server-btn--loading': regenerating }"
+                :disabled="regenerating"
+                @click="handleRegenerateEntity"
+            >
+                <RefreshCw :size="16" :class="{ 'spin': regenerating }" />
+                {{ regenerating ? 'Regenerating...' : 'Entity Configuration' }}
+            </button>
+            <div v-if="regenerateMessage" class="server-message" :class="{ 'server-message--success': regenerateSuccess, 'server-message--error': !regenerateSuccess }">
+                {{ regenerateMessage }}
+            </div>
+        </div>
         <footer class="footer">
             <div class="version">v{{ version }}</div>
             <button type="button" class="logout-btn" @click="handleLogout">
@@ -180,5 +222,71 @@ export default defineComponent({
 .logout-btn:hover {
     background-color: var(--ir--color--danger-bg);
     color: var(--ir--color--danger);
+}
+
+.server-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ir--space--1);
+}
+
+.server-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ir--space--2);
+    padding: var(--ir--space--2);
+    border: 1px solid #e5e7eb;
+    border-radius: var(--ir--space--1);
+    background-color: white;
+    color: var(--ir--color--gray-700);
+    font-family: var(--ir--font-family);
+    font-size: var(--ir--font-size--s);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.server-btn:hover:not(:disabled) {
+    background-color: #f3f4f6;
+    border-color: #d1d5db;
+}
+
+.server-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.server-btn--loading {
+    color: var(--ir--color--primary);
+}
+
+.server-message {
+    font-size: var(--ir--font-size--xs);
+    text-align: center;
+    padding: var(--ir--space--1);
+    border-radius: 4px;
+}
+
+.server-message--success {
+    color: #059669;
+    background-color: #ecfdf5;
+}
+
+.server-message--error {
+    color: var(--ir--color--danger);
+    background-color: var(--ir--color--danger-bg);
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.spin {
+    animation: spin 1s linear infinite;
 }
 </style>
