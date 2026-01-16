@@ -75,22 +75,25 @@ services:
       - INSIDE_CONTAINER=true
     volumes:
       - ./admin/private.json:/app/private.json
+      - ./admin/inmoradmin:/app/inmoradmin
       - ./publickeys:/app/publickeys
       - ./historical_keys:/app/historical_keys
     # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
     ports:
       - "8000:8000"
-  admin-frontend:
-    build: ./admin/frontend
-    volumes:
-      - ./admin/frontend:/app
-      - node_modules:/app/node_modules
+  frontend:
+    build:
+      context: ./admin/frontend/
+      target: production
+      args:
+        VITE_API_URL: http://localhost:8000
+    image: docker.sunet.se/inmor-frontend:0.2.1
+    networks:
+      - inmor-net
+    depends_on:
+      - admin
     ports:
-      - 5173:5173
-
-volumes:
-  node_modules:
-
+      - "3000:80"
 networks:
   inmor-net:
     driver: bridge

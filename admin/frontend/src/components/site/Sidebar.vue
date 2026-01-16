@@ -1,14 +1,23 @@
 <script lang="ts">
 import { defineComponent, type FunctionalComponent } from 'vue';
 import { RouterLink } from 'vue-router';
-import { FileLock2, Files, Server } from 'lucide-vue-next';
+import { Home, FileLock2, Files, Server, LogOut } from 'lucide-vue-next';
+import packageJson from '../../../package.json';
+import sunetLogo from '../../assets/sunet-logo.svg';
 
 export default defineComponent({
     name: 'Sidebar',
-    components: { RouterLink },
+    components: { RouterLink, LogOut },
     data() {
         return {
+            version: packageJson.version || '0.2.0',
+            sunetLogo,
             nav: [
+                {
+                    icon: Home,
+                    label: 'Home',
+                    link: '/',
+                },
                 {
                     icon: FileLock2,
                     label: 'Trust mark types',
@@ -27,7 +36,15 @@ export default defineComponent({
             ] satisfies Array<{ icon: FunctionalComponent; label: string; link: string; }>
         };
     },
-    async mounted() {
+    methods: {
+        async handleLogout() {
+            try {
+                await this.$sdk.logout();
+                this.$router.push('/login');
+            } catch (e) {
+                console.error('Logout failed:', e);
+            }
+        },
     },
 });
 </script>
@@ -35,11 +52,14 @@ export default defineComponent({
 <template>
     <aside class="ir-sidebar" aria-label="Sidebar">
         <header class="header">
+            <div class="logo">
+                <img :src="sunetLogo" alt="SUNET" class="logo-img" />
+            </div>
             <RouterLink to="/" class="title">Inmor</RouterLink>
         </header>
         <nav class="nav" aria-label="Main navigation">
             <ul class="menu">
-                <li v-for="item in nav" class="item">
+                <li v-for="item in nav" :key="item.link" class="item">
                     <RouterLink :to="item.link" class="link">
                         <component :is="item.icon" :size="18" />
                         {{ item.label }}
@@ -47,49 +67,134 @@ export default defineComponent({
                 </li>
             </ul>
         </nav>
+        <footer class="footer">
+            <div class="version">v{{ version }}</div>
+            <button type="button" class="logout-btn" @click="handleLogout">
+                <LogOut :size="18" />
+                Logout
+            </button>
+        </footer>
     </aside>
 </template>
 
-<style>
-    .ir-sidebar {
-        padding: var(--ir--space--5) var(--ir--space--5) var(--ir--space--3) var(--ir--space--4);
-        min-height: calc(100dvh - (var(--ir--space--3) * 2));
-        display: grid;
-        grid-template-rows: min-content;
-        gap: 1rem;
-        border-radius: var(--ir--border-radius);
-        border: var(--ir--border);
-        background-color: #f7f7f7;
+<style scoped>
+.ir-sidebar {
+    padding: var(--ir--space--4);
+    min-height: calc(100dvh - (var(--ir--space--3) * 2));
+    display: flex;
+    flex-direction: column;
+    gap: var(--ir--space--4);
+    border-radius: var(--ir--border-radius);
+    border: var(--ir--border);
+    background-color: #f7f7f7;
+    min-width: 220px;
+}
 
-        > .header > .title {
-            padding: min(.2em, var(--ir--space--1)) min(.4em, var(--ir--space--2));
-            margin-bottom: var(--ir--space--2);
-            font-size: var(--ir--font-size--m);
-            font-weight: var(--ir--font-weight--bold);
-            text-decoration: none;
-            border-radius: var(--ir--space--1);
-            &:hover {
-                background-color: rgba(0, 0, 0, 0.075);
-            }
-        }
+.header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ir--space--2);
+}
 
-        /* > .nav {} */
-        /* > .nav > .menu {} */
-        /* > .nav > .menu > .item {} */
+.logo {
+    display: flex;
+    align-items: center;
+    gap: var(--ir--space--2);
+    padding: var(--ir--space--2);
+}
 
-        > .nav > .menu > .item > .link {
-            padding: min(.2em, var(--ir--space--1)) min(.4em, var(--ir--space--2));
-            display: inline-flex;
-            align-items: center;
-            gap: var(--ir--space--2);
-            border-radius: var(--ir--space--1);
-            font-size: var(--ir--font-size);
-            text-decoration: none;
-            white-space: nowrap;
+.logo-img {
+    height: 48px;
+    width: auto;
+}
 
-            &:hover {
-                background-color: rgba(0, 0, 0, 0.075);
-            }
-        }
-    }
+.logo-text {
+    font-size: var(--ir--font-size--s);
+    font-weight: 600;
+    color: #6b7280;
+    letter-spacing: 0.05em;
+}
+
+.title {
+    padding: var(--ir--space--2);
+    font-size: var(--ir--font-size--m);
+    font-weight: var(--ir--font-weight--bold);
+    text-decoration: none;
+    border-radius: var(--ir--space--1);
+    color: var(--ir--color--black);
+}
+
+.title:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.nav {
+    flex: 1;
+}
+
+.menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ir--space--1);
+}
+
+.item .link {
+    padding: var(--ir--space--2);
+    display: flex;
+    align-items: center;
+    gap: var(--ir--space--2);
+    border-radius: var(--ir--space--1);
+    font-size: var(--ir--font-size--s);
+    text-decoration: none;
+    white-space: nowrap;
+    color: var(--ir--color--gray-700);
+    transition: background-color 0.15s ease;
+}
+
+.item .link:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.item .link.router-link-active {
+    background-color: rgba(37, 99, 235, 0.1);
+    color: var(--ir--color--primary);
+}
+
+.footer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ir--space--2);
+    padding-top: var(--ir--space--3);
+    border-top: var(--ir--border);
+}
+
+.version {
+    font-size: var(--ir--font-size--xs);
+    color: var(--ir--color--gray-500);
+    text-align: center;
+}
+
+.logout-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ir--space--2);
+    padding: var(--ir--space--2);
+    border: none;
+    border-radius: var(--ir--space--1);
+    background-color: transparent;
+    color: var(--ir--color--gray-600);
+    font-family: var(--ir--font-family);
+    font-size: var(--ir--font-size--s);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.logout-btn:hover {
+    background-color: var(--ir--color--danger-bg);
+    color: var(--ir--color--danger);
+}
 </style>

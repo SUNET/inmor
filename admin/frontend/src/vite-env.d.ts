@@ -1,8 +1,4 @@
 /// <reference types="vite/client" />
-import { AdminSDK } from "./lib/admin-sdk/sdk";
 
-declare module 'vue' {
-  interface ComponentCustomProperties {
-    $sdk: AdminSDK
-  }
-}
+// Global constant defined in vite.config.ts
+declare const __API_URL__: string;

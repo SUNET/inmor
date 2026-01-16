@@ -5,17 +5,17 @@ import Layout from './components/site/Layout.vue';
 export default defineComponent({
   name: 'App',
   components: { Layout },
-  mounted() {
-
-    // if (this.$route.fullPath !== 'trustmark-types') {
-    //     this.$router.push('/trustmark-types')
-    // }
+  computed: {
+    showLayout(): boolean {
+      return this.$route.meta.layout !== 'none';
+    },
   },
-})
+});
 </script>
 
 <template>
-    <Layout>
+    <Layout v-if="showLayout">
         <RouterView />
     </Layout>
+    <RouterView v-else />
 </template>
