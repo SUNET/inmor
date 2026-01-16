@@ -24,7 +24,7 @@ const defaultFormData: FormData = {
     domain: '',
     autorenew: true,
     active: true,
-    additional_claims: null,
+    additional_claims: {},
 };
 
 export default defineComponent({
@@ -147,7 +147,7 @@ export default defineComponent({
                 domain: item.domain,
                 autorenew: item.autorenew ?? true,
                 active: item.active ?? true,
-                additional_claims: item.additional_claims ?? null,
+                additional_claims: item.additional_claims ?? {},
             };
             this.formError = null;
             this.jsonError = null;

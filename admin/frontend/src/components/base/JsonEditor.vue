@@ -1,8 +1,13 @@
 <script lang="ts">
-import { defineComponent } from 'vue';
+import { defineComponent, ref, watch, shallowRef } from 'vue';
+import { Codemirror } from 'vue-codemirror';
+import { json, jsonParseLinter } from '@codemirror/lang-json';
+import { linter, lintGutter } from '@codemirror/lint';
+import { EditorView } from '@codemirror/view';
 
 export default defineComponent({
     name: 'JsonEditor',
+    components: { Codemirror },
     props: {
         modelValue: {
             type: [Object, Array, String, null],
@@ -38,10 +43,161 @@ export default defineComponent({
         },
     },
     emits: ['update:modelValue', 'error'],
-    data() {
+    setup(props, { emit }) {
+        const localValue = ref('');
+        const parseError = ref<string | null>(null);
+        const view = shallowRef<EditorView>();
+
+        // Extensions for CodeMirror
+        const extensions = [
+            json(),
+            linter(jsonParseLinter()),
+            lintGutter(),
+            EditorView.lineWrapping,
+            EditorView.theme({
+                '&': {
+                    fontSize: '13px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                },
+                '&.cm-focused': {
+                    outline: 'none',
+                    borderColor: '#2563eb',
+                    boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.1)',
+                },
+                '.cm-content': {
+                    fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
+                    padding: '8px 0',
+                },
+                '.cm-line': {
+                    padding: '0 8px',
+                },
+                '.cm-gutters': {
+                    backgroundColor: '#f9fafb',
+                    borderRight: '1px solid #e5e7eb',
+                    borderRadius: '6px 0 0 6px',
+                },
+                '.cm-activeLineGutter': {
+                    backgroundColor: '#f3f4f6',
+                },
+                '.cm-activeLine': {
+                    backgroundColor: '#f9fafb',
+                },
+                // Lint error styling
+                '.cm-lintRange-error': {
+                    backgroundImage: 'none',
+                    textDecoration: 'wavy underline #ef4444',
+                    textDecorationSkipInk: 'none',
+                },
+                '.cm-lintRange-warning': {
+                    backgroundImage: 'none',
+                    textDecoration: 'wavy underline #f59e0b',
+                    textDecorationSkipInk: 'none',
+                },
+                '.cm-diagnostic-error': {
+                    borderLeft: '3px solid #ef4444',
+                    backgroundColor: '#fef2f2',
+                    padding: '3px 6px 3px 8px',
+                    marginLeft: '-1px',
+                },
+                '.cm-diagnostic-warning': {
+                    borderLeft: '3px solid #f59e0b',
+                    backgroundColor: '#fffbeb',
+                    padding: '3px 6px 3px 8px',
+                    marginLeft: '-1px',
+                },
+                '.cm-tooltip-lint': {
+                    backgroundColor: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '4px',
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                },
+            }),
+        ];
+
+        // Calculate height based on rows
+        const editorHeight = `${props.rows * 20 + 16}px`;
+
+        // Convert modelValue to string
+        const toStringValue = (val: unknown): string => {
+            if (val === null || val === undefined) {
+                return '';
+            }
+            if (typeof val === 'string') {
+                return val;
+            }
+            return JSON.stringify(val, null, 2);
+        };
+
+        // Initialize local value from prop
+        localValue.value = toStringValue(props.modelValue);
+
+        // Watch for external changes to modelValue
+        watch(() => props.modelValue, (newVal) => {
+            const stringVal = toStringValue(newVal);
+            // Only update if the parsed values differ to avoid cursor jumps
+            if (localValue.value.trim() === '') {
+                localValue.value = stringVal;
+            } else {
+                try {
+                    const currentParsed = JSON.parse(localValue.value);
+                    const newParsed = newVal;
+                    if (JSON.stringify(currentParsed) !== JSON.stringify(newParsed)) {
+                        localValue.value = stringVal;
+                    }
+                } catch {
+                    // Current value is invalid, update it
+                    localValue.value = stringVal;
+                }
+            }
+        });
+
+        const handleChange = (value: string) => {
+            localValue.value = value;
+            parseError.value = null;
+
+            // Handle empty input
+            if (value.trim() === '') {
+                emit('update:modelValue', null);
+                emit('error', null);
+                return;
+            }
+
+            try {
+                const parsed = JSON.parse(value);
+                emit('update:modelValue', parsed);
+                emit('error', null);
+            } catch (e) {
+                const errorMessage = e instanceof Error ? e.message : 'Invalid JSON syntax';
+                parseError.value = errorMessage;
+                emit('error', errorMessage);
+            }
+        };
+
+        const handleReady = ({ view: editorView }: { view: EditorView }) => {
+            view.value = editorView;
+        };
+
+        const formatJson = () => {
+            try {
+                const parsed = JSON.parse(localValue.value);
+                localValue.value = JSON.stringify(parsed, null, 2);
+                parseError.value = null;
+                emit('update:modelValue', parsed);
+                emit('error', null);
+            } catch (e) {
+                parseError.value = 'Cannot format: Invalid JSON';
+            }
+        };
+
         return {
-            localValue: '',
-            parseError: null as string | null,
+            localValue,
+            parseError,
+            extensions,
+            editorHeight,
+            handleChange,
+            handleReady,
+            formatJson,
         };
     },
     computed: {
@@ -50,53 +206,6 @@ export default defineComponent({
         },
         displayError(): string {
             return this.error || this.parseError || '';
-        },
-    },
-    watch: {
-        modelValue: {
-            immediate: true,
-            handler(newVal) {
-                if (newVal === null || newVal === undefined) {
-                    this.localValue = '';
-                } else if (typeof newVal === 'string') {
-                    this.localValue = newVal;
-                } else {
-                    this.localValue = JSON.stringify(newVal, null, 2);
-                }
-            },
-        },
-    },
-    methods: {
-        handleInput(event: Event) {
-            const target = event.target as HTMLTextAreaElement;
-            this.localValue = target.value;
-            this.parseError = null;
-
-            // Handle empty input - emit null
-            if (target.value.trim() === '') {
-                this.$emit('update:modelValue', null);
-                this.$emit('error', null);
-                return;
-            }
-
-            try {
-                const parsed = JSON.parse(target.value);
-                this.$emit('update:modelValue', parsed);
-                this.$emit('error', null);
-            } catch (e) {
-                this.parseError = 'Invalid JSON syntax';
-                this.$emit('error', 'Invalid JSON syntax');
-            }
-        },
-        formatJson() {
-            try {
-                const parsed = JSON.parse(this.localValue);
-                this.localValue = JSON.stringify(parsed, null, 2);
-                this.parseError = null;
-                this.$emit('update:modelValue', parsed);
-            } catch (e) {
-                this.parseError = 'Cannot format: Invalid JSON';
-            }
         },
     },
 });
@@ -118,18 +227,21 @@ export default defineComponent({
                 Format
             </button>
         </div>
-        <textarea
-            :id="id"
-            :value="localValue"
-            :placeholder="placeholder"
-            :disabled="disabled"
-            :required="required"
-            :rows="rows"
-            :class="['ir-json-editor__textarea', { 'ir-json-editor__textarea--error': hasError }]"
-            @input="handleInput"
-            spellcheck="false"
-        ></textarea>
-        <p v-if="displayError" class="ir-json-editor__error">{{ displayError }}</p>
+        <div
+            class="ir-json-editor__wrapper"
+            :class="{ 'ir-json-editor__wrapper--error': hasError, 'ir-json-editor__wrapper--disabled': disabled }"
+            :style="{ minHeight: editorHeight }"
+        >
+            <Codemirror
+                v-model="localValue"
+                :placeholder="placeholder"
+                :extensions="extensions"
+                :disabled="disabled"
+                :style="{ height: editorHeight }"
+                @change="handleChange"
+                @ready="handleReady"
+            />
+        </div>
     </div>
 </template>
 
@@ -176,42 +288,26 @@ export default defineComponent({
     cursor: not-allowed;
 }
 
-.ir-json-editor__textarea {
-    padding: var(--ir--space--2) var(--ir--space--3);
-    border: var(--ir--border);
-    border-radius: var(--ir--space--1);
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    color: #1f2937;
-    resize: vertical;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+.ir-json-editor__wrapper {
+    border-radius: 6px;
+    overflow: hidden;
 }
 
-.ir-json-editor__textarea:focus {
-    outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.ir-json-editor__textarea:disabled {
-    background-color: #f9fafb;
-    color: #9ca3af;
-    cursor: not-allowed;
-}
-
-.ir-json-editor__textarea--error {
+.ir-json-editor__wrapper--error :deep(.cm-editor) {
     border-color: #ef4444;
 }
 
-.ir-json-editor__textarea--error:focus {
+.ir-json-editor__wrapper--error :deep(.cm-editor.cm-focused) {
     border-color: #ef4444;
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 
-.ir-json-editor__error {
-    font-size: var(--ir--font-size--xs);
-    color: #ef4444;
-    margin: 0;
+.ir-json-editor__wrapper--disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.ir-json-editor__wrapper--disabled :deep(.cm-editor) {
+    background-color: #f9fafb;
 }
 </style>
