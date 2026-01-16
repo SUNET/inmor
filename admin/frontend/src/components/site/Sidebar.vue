@@ -52,9 +52,7 @@ export default defineComponent({
 <template>
     <aside class="ir-sidebar" aria-label="Sidebar">
         <header class="header">
-            <div class="logo">
-                <img :src="sunetLogo" alt="SUNET" class="logo-img" />
-            </div>
+            <img :src="sunetLogo" alt="SUNET" class="logo-img" />
             <RouterLink to="/" class="title">Inmor</RouterLink>
         </header>
         <nav class="nav" aria-label="Main navigation">
@@ -92,40 +90,26 @@ export default defineComponent({
 
 .header {
     display: flex;
-    flex-direction: column;
-    gap: var(--ir--space--2);
-}
-
-.logo {
-    display: flex;
+    flex-direction: row;
     align-items: center;
-    gap: var(--ir--space--2);
+    gap: var(--ir--space--3);
     padding: var(--ir--space--2);
 }
 
 .logo-img {
-    height: 48px;
+    height: 40px;
     width: auto;
 }
 
-.logo-text {
-    font-size: var(--ir--font-size--s);
-    font-weight: 600;
-    color: #6b7280;
-    letter-spacing: 0.05em;
-}
-
 .title {
-    padding: var(--ir--space--2);
-    font-size: var(--ir--font-size--m);
+    font-size: 1.5rem;
     font-weight: var(--ir--font-weight--bold);
     text-decoration: none;
-    border-radius: var(--ir--space--1);
     color: var(--ir--color--black);
 }
 
 .title:hover {
-    background-color: rgba(0, 0, 0, 0.05);
+    opacity: 0.8;
 }
 
 .nav {
