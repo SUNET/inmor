@@ -8,6 +8,7 @@ import DataTable from '../components/base/DataTable.vue';
 import Modal from '../components/base/Modal.vue';
 import Input from '../components/base/Input.vue';
 import Toggle from '../components/base/Toggle.vue';
+import JsonEditor from '../components/base/JsonEditor.vue';
 import type { TrustMark, TrustMarks, TrustMarkType, TrustMarkTypes } from '../lib/admin-sdk';
 
 interface FormData {
@@ -15,6 +16,7 @@ interface FormData {
     domain: string;
     autorenew: boolean;
     active: boolean;
+    additional_claims: Record<string, unknown> | null;
 }
 
 const defaultFormData: FormData = {
@@ -22,6 +24,7 @@ const defaultFormData: FormData = {
     domain: '',
     autorenew: true,
     active: true,
+    additional_claims: null,
 };
 
 export default defineComponent({
@@ -34,6 +37,7 @@ export default defineComponent({
         Modal,
         Input,
         Toggle,
+        JsonEditor,
         Plus,
         Pencil,
         RefreshCw,
@@ -67,9 +71,13 @@ export default defineComponent({
             copiedId: null as number | null,
             showTypeModal: false,
             viewingType: null as TrustMarkType | null,
+            jsonError: null as string | null,
         };
     },
     computed: {
+        hasJsonError(): boolean {
+            return !!this.jsonError;
+        },
         trustMarkTypesMap(): Map<number, TrustMarkType> {
             const map = new Map<number, TrustMarkType>();
             if (this.trustMarkTypes?.items) {
@@ -129,6 +137,7 @@ export default defineComponent({
         openCreateModal() {
             this.formData = { ...defaultFormData };
             this.formError = null;
+            this.jsonError = null;
             this.showCreateModal = true;
         },
         openEditModal(item: TrustMark) {
@@ -138,8 +147,10 @@ export default defineComponent({
                 domain: item.domain,
                 autorenew: item.autorenew ?? true,
                 active: item.active ?? true,
+                additional_claims: item.additional_claims ?? null,
             };
             this.formError = null;
+            this.jsonError = null;
             this.showEditModal = true;
         },
         openRevokeModal(item: TrustMark) {
@@ -155,10 +166,18 @@ export default defineComponent({
             this.revokingItem = null;
             this.viewingType = null;
             this.formError = null;
+            this.jsonError = null;
+        },
+        setJsonError(error: string | null) {
+            this.jsonError = error;
         },
         async handleCreate() {
             if (!this.formData.tmt) {
                 this.formError = 'Please select a trust mark type';
+                return;
+            }
+            if (this.hasJsonError) {
+                this.formError = 'Please fix JSON syntax errors before submitting';
                 return;
             }
             this.formLoading = true;
@@ -169,6 +188,7 @@ export default defineComponent({
                     domain: this.formData.domain,
                     autorenew: this.formData.autorenew,
                     active: this.formData.active,
+                    additional_claims: this.formData.additional_claims,
                 });
                 // Copy the trustmark JWT to clipboard
                 if (trustMark.mark) {
@@ -185,12 +205,17 @@ export default defineComponent({
         },
         async handleUpdate() {
             if (!this.editingItem) return;
+            if (this.hasJsonError) {
+                this.formError = 'Please fix JSON syntax errors before submitting';
+                return;
+            }
             this.formLoading = true;
             this.formError = null;
             try {
                 await this.$sdk.updateTrustMark(this.editingItem.id, {
                     autorenew: this.formData.autorenew,
                     active: this.formData.active,
+                    additional_claims: this.formData.additional_claims,
                 });
                 this.closeModals();
                 await this.loadData();
@@ -350,11 +375,18 @@ export default defineComponent({
                     <Toggle v-model="formData.autorenew" label="Auto-renew" />
                     <Toggle v-model="formData.active" label="Active" />
                 </div>
+                <JsonEditor
+                    v-model="formData.additional_claims"
+                    label="Additional Claims (optional)"
+                    placeholder='{ "key": "value" }'
+                    :rows="4"
+                    @error="setJsonError"
+                />
                 <p v-if="formError" class="form-error">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
-                <Button @click="handleCreate" :loading="formLoading">Issue Trust Mark</Button>
+                <Button @click="handleCreate" :loading="formLoading" :disabled="hasJsonError">Issue Trust Mark</Button>
             </template>
         </Modal>
 
@@ -371,11 +403,18 @@ export default defineComponent({
                     <Toggle v-model="formData.autorenew" label="Auto-renew" />
                     <Toggle v-model="formData.active" label="Active" />
                 </div>
+                <JsonEditor
+                    v-model="formData.additional_claims"
+                    label="Additional Claims (optional)"
+                    placeholder='{ "key": "value" }'
+                    :rows="4"
+                    @error="setJsonError"
+                />
                 <p v-if="formError" class="form-error">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
-                <Button @click="handleUpdate" :loading="formLoading">Save Changes</Button>
+                <Button @click="handleUpdate" :loading="formLoading" :disabled="hasJsonError">Save Changes</Button>
             </template>
         </Modal>
 

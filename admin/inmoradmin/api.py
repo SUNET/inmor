@@ -208,12 +208,20 @@ class EntityOutSchema(Schema):
     jwks: InternalJWKS
     required_trustmarks: str | None = None
     valid_for: int | None = None
+    expire_at: datetime | None = None
     autorenew: bool | None = None
     active: bool | None = None
     additional_claims: Annotated[
         dict[str, Any] | None,
         Field(description="Additional claims for an Entity which shows in subordinate statement."),
     ] = None
+
+    @staticmethod
+    def resolve_expire_at(obj):
+        """Calculate expiration date from added + valid_for."""
+        if obj.added and obj.valid_for:
+            return obj.added + timedelta(hours=obj.valid_for)
+        return None
 
 
 class Message(Schema):

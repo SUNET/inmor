@@ -5,8 +5,8 @@ export default defineComponent({
     name: 'JsonEditor',
     props: {
         modelValue: {
-            type: [Object, Array, String],
-            default: () => ({}),
+            type: [Object, Array, String, null],
+            default: null,
         },
         label: {
             type: String,
@@ -56,7 +56,9 @@ export default defineComponent({
         modelValue: {
             immediate: true,
             handler(newVal) {
-                if (typeof newVal === 'string') {
+                if (newVal === null || newVal === undefined) {
+                    this.localValue = '';
+                } else if (typeof newVal === 'string') {
                     this.localValue = newVal;
                 } else {
                     this.localValue = JSON.stringify(newVal, null, 2);
@@ -69,6 +71,13 @@ export default defineComponent({
             const target = event.target as HTMLTextAreaElement;
             this.localValue = target.value;
             this.parseError = null;
+
+            // Handle empty input - emit null
+            if (target.value.trim() === '') {
+                this.$emit('update:modelValue', null);
+                this.$emit('error', null);
+                return;
+            }
 
             try {
                 const parsed = JSON.parse(target.value);

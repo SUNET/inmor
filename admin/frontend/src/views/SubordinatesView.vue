@@ -19,6 +19,7 @@ interface FormData {
     valid_for: number | null;
     autorenew: boolean;
     active: boolean;
+    additional_claims: Record<string, unknown> | null;
 }
 
 const defaultFormData: FormData = {
@@ -29,6 +30,7 @@ const defaultFormData: FormData = {
     valid_for: null,
     autorenew: true,
     active: true,
+    additional_claims: null,
 };
 
 export default defineComponent({
@@ -56,7 +58,7 @@ export default defineComponent({
             columns: [
                 { key: 'id', label: 'ID', width: '80px' },
                 { key: 'entityid', label: 'Entity ID' },
-                { key: 'valid_for', label: 'Valid for', width: '120px' },
+                { key: 'expire_at', label: 'Expires', width: '180px' },
                 { key: 'autorenew', label: 'Autorenew', width: '120px' },
                 { key: 'active', label: 'Status', width: '100px' },
             ],
@@ -76,18 +78,30 @@ export default defineComponent({
                 metadata: null as string | null,
                 forced_metadata: null as string | null,
                 jwks: null as string | null,
+                additional_claims: null as string | null,
             },
         };
     },
     computed: {
         hasJsonErrors(): boolean {
-            return !!(this.jsonErrors.metadata || this.jsonErrors.forced_metadata || this.jsonErrors.jwks);
+            return !!(this.jsonErrors.metadata || this.jsonErrors.forced_metadata || this.jsonErrors.jwks || this.jsonErrors.additional_claims);
         },
     },
     async mounted() {
         await this.loadData();
     },
     methods: {
+        formatDate(dateStr: string | null | undefined): string {
+            if (!dateStr) return 'N/A';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        },
         async loadData() {
             this.loading = true;
             this.error = null;
@@ -117,7 +131,7 @@ export default defineComponent({
         openCreateModal() {
             this.formData = { ...defaultFormData };
             this.formError = null;
-            this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null };
+            this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null, additional_claims: null };
             this.showCreateModal = true;
         },
         openEditModal(item: Subordinate) {
@@ -130,9 +144,10 @@ export default defineComponent({
                 valid_for: item.valid_for,
                 autorenew: item.autorenew ?? true,
                 active: item.active ?? true,
+                additional_claims: item.additional_claims ?? null,
             };
             this.formError = null;
-            this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null };
+            this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null, additional_claims: null };
             this.showEditModal = true;
         },
         openViewModal(item: Subordinate) {
@@ -153,7 +168,7 @@ export default defineComponent({
             this.deactivatingItem = null;
             this.formError = null;
         },
-        setJsonError(field: 'metadata' | 'forced_metadata' | 'jwks', error: string | null) {
+        setJsonError(field: 'metadata' | 'forced_metadata' | 'jwks' | 'additional_claims', error: string | null) {
             this.jsonErrors[field] = error;
         },
         async handleCreate() {
@@ -172,6 +187,7 @@ export default defineComponent({
                     valid_for: this.formData.valid_for,
                     autorenew: this.formData.autorenew,
                     active: this.formData.active,
+                    additional_claims: this.formData.additional_claims,
                 });
                 this.closeModals();
                 await this.loadData();
@@ -198,6 +214,7 @@ export default defineComponent({
                     valid_for: this.formData.valid_for,
                     autorenew: this.formData.autorenew,
                     active: this.formData.active,
+                    additional_claims: this.formData.additional_claims,
                 });
                 this.closeModals();
                 await this.loadData();
@@ -249,7 +266,7 @@ export default defineComponent({
                 this.formData.metadata = config.metadata || {};
                 this.formData.jwks = config.jwks || { keys: [] };
                 // Clear JSON errors since we just set valid JSON
-                this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null };
+                this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null, additional_claims: null };
             } catch (e: any) {
                 this.formError = e.message || 'Failed to fetch entity configuration';
                 console.error(e);
@@ -282,8 +299,8 @@ export default defineComponent({
             <template #cell-entityid="{ value }">
                 <code class="entity-url">{{ value }}</code>
             </template>
-            <template #cell-valid_for="{ value }">
-                {{ formatHours(value as number | null) }}
+            <template #cell-expire_at="{ value }">
+                {{ formatDate(value as string) }}
             </template>
             <template #cell-autorenew="{ value }">
                 <Badge :variant="value ? 'success' : 'neutral'" size="sm">
@@ -367,6 +384,13 @@ export default defineComponent({
                     <Toggle v-model="formData.autorenew" label="Auto-renew" />
                     <Toggle v-model="formData.active" label="Active" />
                 </div>
+                <JsonEditor
+                    v-model="formData.additional_claims"
+                    label="Additional Claims (optional)"
+                    placeholder='{ "key": "value" }'
+                    :rows="4"
+                    @error="(e) => setJsonError('additional_claims', e)"
+                />
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
@@ -412,6 +436,13 @@ export default defineComponent({
                     <Toggle v-model="formData.autorenew" label="Auto-renew" />
                     <Toggle v-model="formData.active" label="Active" />
                 </div>
+                <JsonEditor
+                    v-model="formData.additional_claims"
+                    label="Additional Claims (optional)"
+                    placeholder='{ "key": "value" }'
+                    :rows="4"
+                    @error="(e) => setJsonError('additional_claims', e)"
+                />
                 <p v-if="formError" class="form-error">{{ formError }}</p>
             </form>
             <template #footer>
@@ -455,6 +486,10 @@ export default defineComponent({
                     <span class="detail-label">JWKS:</span>
                     <pre class="detail-json">{{ JSON.stringify(viewingItem.jwks, null, 2) }}</pre>
                 </div>
+                <div class="detail-section" v-if="viewingItem.additional_claims">
+                    <span class="detail-label">Additional Claims:</span>
+                    <pre class="detail-json">{{ JSON.stringify(viewingItem.additional_claims, null, 2) }}</pre>
+                </div>
             </div>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Close</Button>
@@ -465,7 +500,7 @@ export default defineComponent({
         <!-- Deactivate Confirmation Modal -->
         <Modal :open="showDeactivateModal" title="Deactivate Subordinate" size="sm" @close="closeModals">
             <p>Are you sure you want to deactivate this subordinate?</p>
-            <p v-if="deactivatingItem"><strong>{{ deactivatingItem.entityid }}</strong></p>
+            <p v-if="deactivatingItem" class="entity-url">{{ deactivatingItem.entityid }}</p>
             <p class="warning-text">This will remove the entity from the federation. Their subordinate statement will no longer be served.</p>
             <p v-if="formError" class="form-error">{{ formError }}</p>
             <template #footer>
@@ -558,6 +593,12 @@ export default defineComponent({
 .warning-text {
     color: var(--ir--color--warning-text);
     font-size: var(--ir--font-size--s);
+}
+
+.entity-url {
+    color: var(--ir--color--primary);
+    font-weight: 500;
+    word-break: break-all;
 }
 
 /* View details */
