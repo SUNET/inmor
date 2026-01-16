@@ -55,16 +55,19 @@ export default defineComponent({
             this.regenerateMessage = '';
 
             try {
-                await this.$sdk.regenerateServerEntity();
+                await Promise.all([
+                    this.$sdk.regenerateServerEntity(),
+                    this.$sdk.syncHistoricalKeys(),
+                ]);
                 this.regenerateSuccess = true;
-                this.regenerateMessage = 'Entity regenerated';
+                this.regenerateMessage = 'Configuration updated';
                 // Clear message after 3 seconds
                 setTimeout(() => {
                     this.regenerateMessage = '';
                 }, 3000);
             } catch (e) {
                 this.regenerateSuccess = false;
-                this.regenerateMessage = e instanceof Error ? e.message : 'Failed to regenerate';
+                this.regenerateMessage = e instanceof Error ? e.message : 'Failed to update';
                 setTimeout(() => {
                     this.regenerateMessage = '';
                 }, 5000);

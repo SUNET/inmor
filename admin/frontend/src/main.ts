@@ -10,7 +10,7 @@ import App from './App.vue'
 const app = createApp(App);
 
 const sdk = new AdminSDK({
-    apiUrl: new URL(__API_URL__),
+    apiUrl: new URL(__API_URL__ || window.location.origin),
 });
 
 app.config.globalProperties.$sdk = sdk;

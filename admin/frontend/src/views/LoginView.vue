@@ -20,6 +20,8 @@ export default defineComponent({
             this.error = null;
             try {
                 await this.$sdk.login(this.username, this.password);
+                // Reset auth state so router guard re-checks authentication
+                this.$resetAuth();
                 this.$router.push('/');
             } catch (e: any) {
                 this.error = e.message || 'Invalid username or password';
