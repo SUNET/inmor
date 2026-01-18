@@ -12,7 +12,7 @@ OpenID Federation Endpoints
 Entity Configuration
 ^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /.well-known/openid-federation
 
@@ -73,7 +73,7 @@ Returns the Trust Anchor's entity configuration as a signed JWT.
 List Subordinates
 ^^^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /list
 
@@ -136,7 +136,7 @@ Returns a list of subordinate entity IDs registered with this Trust Anchor.
 Fetch Subordinate Statement
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /fetch
 
@@ -173,7 +173,7 @@ Fetches the subordinate statement for a specific entity.
      "iat": 1705315200,
      "exp": 1736851200,
      "jwks": {
-       "keys": [...]
+       "keys": ["...key data..."]
      },
      "metadata": {
        "openid_relying_party": {
@@ -201,7 +201,7 @@ Fetches the subordinate statement for a specific entity.
 Resolve Entity
 ^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /resolve
 
@@ -279,7 +279,7 @@ Trust Mark Endpoints
 Get Trust Mark
 ^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /trust_mark
 
@@ -337,7 +337,7 @@ Retrieves a specific trust mark JWT for an entity.
 List Trust Mark Holders
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /trust_mark_list
 
@@ -375,7 +375,7 @@ Returns a list of entity IDs that have been issued a specific trust mark type.
 Validate Trust Mark Status
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    POST /trust_mark_status
 
@@ -434,7 +434,7 @@ Validates a trust mark JWT and returns its current status.
 Historical Keys
 ^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /historical_keys
 
@@ -499,7 +499,7 @@ Other Endpoints
 Collection Endpoint
 ^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /collection
 
@@ -508,7 +508,7 @@ Entity collection endpoint (per draft specification).
 Index Page
 ^^^^^^^^^^
 
-.. code-block:: http
+.. code-block:: text
 
    GET /
 
