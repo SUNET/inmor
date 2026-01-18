@@ -720,7 +720,9 @@ class FetchConfigSchema(Schema):
 
 
 class FetchConfigOutSchema(Schema):
-    metadata: Annotated[dict[str, Any], Field(description="Entity metadata from the configuration.")]
+    metadata: Annotated[
+        dict[str, Any], Field(description="Entity metadata from the configuration.")
+    ]
     jwks: Annotated[dict[str, Any], Field(description="JWKS from the entity configuration.")]
     authority_hints: Annotated[
         list[str] | None, Field(description="Authority hints from the configuration.")

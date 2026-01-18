@@ -86,9 +86,5 @@ class Command(BaseCommand):
             password=password,
         )
 
-        self.stdout.write(
-            self.style.SUCCESS(f"Successfully created admin user: {user.username}")
-        )
-        self.stdout.write(
-            "You can now log in to the Inmor Admin frontend with these credentials."
-        )
+        self.stdout.write(self.style.SUCCESS(f"Successfully created admin user: {user.username}"))
+        self.stdout.write("You can now log in to the Inmor Admin frontend with these credentials.")

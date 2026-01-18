@@ -5,6 +5,7 @@ Designed to be extensible for future SAML/OAuth providers.
 """
 
 from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from ninja import Router, Schema
@@ -49,10 +50,10 @@ auth_router = Router(tags=["Authentication"])
 def api_login(request: HttpRequest, data: LoginSchema):
     """Authenticate user and create session."""
     user = authenticate(request, username=data.username, password=data.password)
-    if user is not None:
+    if user is not None and isinstance(user, User):
         login(request, user)
         return 200, {
-            "id": user.id,
+            "id": user.pk,
             "username": user.username,
             "email": user.email or "",
             "is_staff": user.is_staff,

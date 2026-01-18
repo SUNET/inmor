@@ -1,9 +1,9 @@
 # You can override any django settings via this file.
 
 # Session cookie settings for cross-origin development (frontend on 5173, backend on 8000)
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
-CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
 
 TA_TRUSTMARKS = [
