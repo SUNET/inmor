@@ -47,43 +47,43 @@ export default defineComponent({
     <div class="home-view">
         <Heading level="h1">Dashboard</Heading>
 
-        <div class="stats-grid">
+        <div class="stats-grid" aria-live="polite">
             <RouterLink to="/trustmark-types" class="stat-card">
-                <div class="stat-icon stat-icon--types">
+                <div class="stat-icon stat-icon--types" aria-hidden="true">
                     <FileLock2 :size="24" />
                 </div>
                 <div class="stat-content">
                     <div class="stat-value">{{ loading ? '...' : stats.trustMarkTypes }}</div>
                     <div class="stat-label">Trust Mark Types</div>
                 </div>
-                <ArrowRight :size="20" class="stat-arrow" />
+                <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
             </RouterLink>
 
             <RouterLink to="/trustmarks" class="stat-card">
-                <div class="stat-icon stat-icon--marks">
+                <div class="stat-icon stat-icon--marks" aria-hidden="true">
                     <Files :size="24" />
                 </div>
                 <div class="stat-content">
                     <div class="stat-value">{{ loading ? '...' : stats.trustMarks }}</div>
                     <div class="stat-label">Trust Marks</div>
                 </div>
-                <ArrowRight :size="20" class="stat-arrow" />
+                <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
             </RouterLink>
 
             <RouterLink to="/subordinates" class="stat-card">
-                <div class="stat-icon stat-icon--subs">
+                <div class="stat-icon stat-icon--subs" aria-hidden="true">
                     <Server :size="24" />
                 </div>
                 <div class="stat-content">
                     <div class="stat-value">{{ loading ? '...' : stats.subordinates }}</div>
                     <div class="stat-label">Subordinates</div>
                 </div>
-                <ArrowRight :size="20" class="stat-arrow" />
+                <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
             </RouterLink>
         </div>
 
-        <section class="quick-start">
-            <Heading level="h2">Quick Start</Heading>
+        <section class="quick-start" aria-labelledby="quick-start-heading">
+            <Heading id="quick-start-heading" level="h2">Quick Start</Heading>
             <div class="quick-start-content">
                 <ol class="quick-start-list">
                     <li>
@@ -129,6 +129,11 @@ export default defineComponent({
 .stat-card:hover {
     border-color: var(--ir--color--primary);
     box-shadow: var(--ir--box-shadow);
+}
+
+.stat-card:focus-visible {
+    outline: 2px solid var(--ir--color--primary);
+    outline-offset: 2px;
 }
 
 .stat-icon {

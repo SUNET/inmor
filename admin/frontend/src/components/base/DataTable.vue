@@ -31,6 +31,10 @@ export default defineComponent({
             type: String,
             default: 'id',
         },
+        caption: {
+            type: String,
+            default: '',
+        },
     },
     computed: {
         hasActions(): boolean {
@@ -48,28 +52,30 @@ export default defineComponent({
 <template>
     <div class="ir-table-container">
         <table class="ir-table">
+            <caption v-if="caption" class="sr-only">{{ caption }}</caption>
             <thead>
                 <tr>
                     <th
                         v-for="column in columns"
                         :key="column.key"
+                        scope="col"
                         :style="column.width ? { width: column.width } : {}"
                         :title="column.title"
                     >
                         {{ column.label }}
                     </th>
-                    <th v-if="hasActions" class="ir-table__actions-header">Actions</th>
+                    <th v-if="hasActions" scope="col" class="ir-table__actions-header">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <tr v-if="loading">
-                    <td :colspan="columns.length + (hasActions ? 1 : 0)" class="ir-table__loading">
-                        <span class="ir-table__spinner"></span>
-                        Loading...
+                    <td :colspan="columns.length + (hasActions ? 1 : 0)" class="ir-table__loading" aria-live="polite">
+                        <span class="ir-table__spinner" aria-hidden="true"></span>
+                        <span>Loading...</span>
                     </td>
                 </tr>
                 <tr v-else-if="data.length === 0">
-                    <td :colspan="columns.length + (hasActions ? 1 : 0)" class="ir-table__empty">
+                    <td :colspan="columns.length + (hasActions ? 1 : 0)" class="ir-table__empty" aria-live="polite">
                         {{ emptyMessage }}
                     </td>
                 </tr>
@@ -149,7 +155,7 @@ export default defineComponent({
     width: 1em;
     height: 1em;
     border: 2px solid #e5e7eb;
-    border-right-color: #2563eb;
+    border-right-color: var(--ir--color--primary);
     border-radius: 50%;
     animation: spin 0.6s linear infinite;
     margin-right: var(--ir--space--2);

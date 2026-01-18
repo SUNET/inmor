@@ -34,7 +34,7 @@ export default defineComponent({
 </script>
 
 <template>
-    <div class="login-view">
+    <main class="login-view" role="main">
         <div class="login-card">
             <header class="login-header">
                 <div class="login-logo">SUNET</div>
@@ -42,7 +42,7 @@ export default defineComponent({
                 <p class="login-subtitle">Trust Anchor Admin</p>
             </header>
 
-            <form @submit.prevent="handleLogin" class="login-form">
+            <form @submit.prevent="handleLogin" class="login-form" :aria-busy="loading">
                 <Input
                     v-model="username"
                     label="Username"
@@ -50,6 +50,7 @@ export default defineComponent({
                     placeholder="Enter your username"
                     required
                     :disabled="loading"
+                    id="username"
                 />
                 <Input
                     v-model="password"
@@ -58,14 +59,15 @@ export default defineComponent({
                     placeholder="Enter your password"
                     required
                     :disabled="loading"
+                    id="password"
                 />
-                <p v-if="error" class="login-error">{{ error }}</p>
+                <p v-if="error" class="login-error" role="alert" aria-live="polite">{{ error }}</p>
                 <Button type="submit" :loading="loading" class="login-button">
                     Sign In
                 </Button>
             </form>
         </div>
-    </div>
+    </main>
 </template>
 
 <style scoped>

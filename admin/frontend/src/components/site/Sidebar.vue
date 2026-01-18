@@ -86,10 +86,14 @@ export default defineComponent({
             <RouterLink to="/" class="title">Inmor</RouterLink>
         </header>
         <nav class="nav" aria-label="Main navigation">
-            <ul class="menu">
+            <ul class="menu" role="list">
                 <li v-for="item in nav" :key="item.link" class="item">
-                    <RouterLink :to="item.link" class="link">
-                        <component :is="item.icon" :size="18" />
+                    <RouterLink
+                        :to="item.link"
+                        class="link"
+                        :aria-current="$route.path === item.link ? 'page' : undefined"
+                    >
+                        <component :is="item.icon" :size="18" aria-hidden="true" />
                         {{ item.label }}
                     </RouterLink>
                 </li>
@@ -101,19 +105,26 @@ export default defineComponent({
                 class="server-btn"
                 :class="{ 'server-btn--loading': regenerating }"
                 :disabled="regenerating"
+                :aria-busy="regenerating"
                 @click="handleRegenerateEntity"
             >
-                <RefreshCw :size="16" :class="{ 'spin': regenerating }" />
+                <RefreshCw :size="16" :class="{ 'spin': regenerating }" aria-hidden="true" />
                 {{ regenerating ? 'Regenerating...' : 'Entity Configuration' }}
             </button>
-            <div v-if="regenerateMessage" class="server-message" :class="{ 'server-message--success': regenerateSuccess, 'server-message--error': !regenerateSuccess }">
+            <div
+                v-if="regenerateMessage"
+                class="server-message"
+                :class="{ 'server-message--success': regenerateSuccess, 'server-message--error': !regenerateSuccess }"
+                role="status"
+                aria-live="polite"
+            >
                 {{ regenerateMessage }}
             </div>
         </div>
         <footer class="footer">
             <div class="version">v{{ version }}</div>
             <button type="button" class="logout-btn" @click="handleLogout">
-                <LogOut :size="18" />
+                <LogOut :size="18" aria-hidden="true" />
                 Logout
             </button>
         </footer>
@@ -157,6 +168,12 @@ export default defineComponent({
     opacity: 0.8;
 }
 
+.title:focus-visible {
+    outline: 2px solid var(--ir--color--primary);
+    outline-offset: 2px;
+    border-radius: var(--ir--space--1);
+}
+
 .nav {
     flex: 1;
 }
@@ -190,6 +207,11 @@ export default defineComponent({
 .item .link.router-link-active {
     background-color: rgba(37, 99, 235, 0.1);
     color: var(--ir--color--primary);
+}
+
+.item .link:focus-visible {
+    outline: 2px solid var(--ir--color--primary);
+    outline-offset: 2px;
 }
 
 .footer {
@@ -227,6 +249,11 @@ export default defineComponent({
     color: var(--ir--color--danger);
 }
 
+.logout-btn:focus-visible {
+    outline: 2px solid var(--ir--color--primary);
+    outline-offset: 2px;
+}
+
 .server-section {
     display: flex;
     flex-direction: column;
@@ -257,6 +284,11 @@ export default defineComponent({
 .server-btn:disabled {
     opacity: 0.7;
     cursor: not-allowed;
+}
+
+.server-btn:focus-visible {
+    outline: 2px solid var(--ir--color--primary);
+    outline-offset: 2px;
 }
 
 .server-btn--loading {

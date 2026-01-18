@@ -62,8 +62,8 @@ export default defineComponent({
                 },
                 '&.cm-focused': {
                     outline: 'none',
-                    borderColor: '#2563eb',
-                    boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.1)',
+                    borderColor: '#1d4ed8',
+                    boxShadow: '0 0 0 3px rgba(29, 78, 216, 0.1)',
                 },
                 '.cm-content': {
                     fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
@@ -207,6 +207,9 @@ export default defineComponent({
         displayError(): string {
             return this.error || this.parseError || '';
         },
+        errorId(): string {
+            return `${this.id}-error`;
+        },
     },
 });
 </script>
@@ -216,7 +219,7 @@ export default defineComponent({
         <div class="ir-json-editor__header">
             <label v-if="label" :for="id" class="ir-json-editor__label">
                 {{ label }}
-                <span v-if="required" class="ir-json-editor__required">*</span>
+                <span v-if="required" class="ir-json-editor__required" aria-hidden="true">*</span>
             </label>
             <button
                 type="button"
@@ -231,6 +234,8 @@ export default defineComponent({
             class="ir-json-editor__wrapper"
             :class="{ 'ir-json-editor__wrapper--error': hasError, 'ir-json-editor__wrapper--disabled': disabled }"
             :style="{ minHeight: editorHeight }"
+            :aria-invalid="hasError ? 'true' : undefined"
+            :aria-describedby="hasError ? errorId : undefined"
         >
             <Codemirror
                 v-model="localValue"
@@ -242,6 +247,9 @@ export default defineComponent({
                 @ready="handleReady"
             />
         </div>
+        <p v-if="displayError" :id="errorId" class="ir-json-editor__error" role="alert">
+            {{ displayError }}
+        </p>
     </div>
 </template>
 
@@ -309,5 +317,16 @@ export default defineComponent({
 
 .ir-json-editor__wrapper--disabled :deep(.cm-editor) {
     background-color: #f9fafb;
+}
+
+.ir-json-editor__error {
+    font-size: var(--ir--font-size--xs);
+    color: #ef4444;
+    margin: var(--ir--space--1) 0 0;
+}
+
+.ir-json-editor__format-btn:focus-visible {
+    outline: 2px solid var(--ir--color--primary, #1d4ed8);
+    outline-offset: 2px;
 }
 </style>

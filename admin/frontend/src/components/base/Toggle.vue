@@ -39,13 +39,14 @@ export default defineComponent({
             role="switch"
             :id="id"
             :aria-checked="modelValue"
+            :aria-labelledby="label ? `${id}-label` : undefined"
             :disabled="disabled"
             :class="['ir-toggle__switch', { 'ir-toggle__switch--on': modelValue }]"
             @click="toggle"
         >
-            <span class="ir-toggle__thumb"></span>
+            <span class="ir-toggle__thumb" aria-hidden="true"></span>
         </button>
-        <label v-if="label" :for="id" class="ir-toggle__label" @click="toggle">
+        <label v-if="label" :id="`${id}-label`" :for="id" class="ir-toggle__label" @click="toggle">
             {{ label }}
         </label>
     </div>
@@ -76,11 +77,16 @@ export default defineComponent({
 
 .ir-toggle__switch:focus {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.ir-toggle__switch:focus-visible {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+    outline: 2px solid var(--ir--color--primary, #1d4ed8);
+    outline-offset: 2px;
 }
 
 .ir-toggle__switch--on {
-    background-color: #2563eb;
+    background-color: var(--ir--color--primary);
 }
 
 .ir-toggle__switch:disabled {

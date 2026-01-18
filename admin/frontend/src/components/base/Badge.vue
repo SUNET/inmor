@@ -26,7 +26,7 @@ export default defineComponent({
 </script>
 
 <template>
-    <span :class="classes">
+    <span :class="classes" role="status">
         <slot></slot>
     </span>
 </template>

@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, nextTick } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router';
 import { AdminSDK } from './lib/admin-sdk';
 import './styles/reset.css';
@@ -19,6 +19,14 @@ const router = createRouter({
     history: createWebHistory(),
     routes,
 });
+
+// Create a live region for route announcements
+const announcer = document.createElement('div');
+announcer.setAttribute('role', 'status');
+announcer.setAttribute('aria-live', 'polite');
+announcer.setAttribute('aria-atomic', 'true');
+announcer.className = 'sr-only';
+document.body.appendChild(announcer);
 
 // Authentication guard
 let isAuthenticated: boolean | null = null;
@@ -59,6 +67,33 @@ router.beforeEach(async (to, _from, next) => {
 app.config.globalProperties.$resetAuth = () => {
     isAuthenticated = null;
 };
+
+// Route change announcements and document title updates
+router.afterEach(async (to) => {
+    const title = to.meta.title as string || 'Inmor';
+    const fullTitle = `${title} - Inmor Admin`;
+
+    // Update document title
+    document.title = fullTitle;
+
+    // Announce route change to screen readers
+    await nextTick();
+    announcer.textContent = `Navigated to ${title}`;
+
+    // Move focus to main content heading after short delay
+    setTimeout(() => {
+        const mainContent = document.getElementById('main-content');
+        const heading = mainContent?.querySelector('h1');
+        if (heading && heading instanceof HTMLElement) {
+            heading.setAttribute('tabindex', '-1');
+            heading.focus();
+            // Remove tabindex after focus to avoid tab stops
+            heading.addEventListener('blur', () => {
+                heading.removeAttribute('tabindex');
+            }, { once: true });
+        }
+    }, 100);
+});
 
 app.use(router);
 app.mount('#app');

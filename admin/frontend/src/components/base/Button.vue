@@ -44,12 +44,14 @@ export default defineComponent({
         :type="type"
         :class="classes"
         :disabled="disabled || loading"
+        :aria-busy="loading ? 'true' : undefined"
         @click="$emit('click', $event)"
     >
-        <span v-if="loading" class="ir-button__spinner"></span>
+        <span v-if="loading" class="ir-button__spinner" aria-hidden="true"></span>
         <span :class="{ 'ir-button__content--hidden': loading }">
             <slot></slot>
         </span>
+        <span v-if="loading" class="sr-only">Loading</span>
     </button>
 </template>
 
@@ -73,6 +75,11 @@ export default defineComponent({
     opacity: 0.6;
 }
 
+.ir-button:focus-visible {
+    outline: 2px solid var(--ir--color--primary, #1d4ed8);
+    outline-offset: 2px;
+}
+
 /* Sizes */
 .ir-button--sm {
     padding: var(--ir--space--1) var(--ir--space--2);
@@ -91,7 +98,7 @@ export default defineComponent({
 
 /* Variants */
 .ir-button--primary {
-    background-color: #2563eb;
+    background-color: var(--ir--color--primary);
     color: white;
 }
 

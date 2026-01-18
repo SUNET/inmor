@@ -1,5 +1,5 @@
 <script lang="ts">
-import { defineComponent } from 'vue';
+import { defineComponent, ref, nextTick } from 'vue';
 import { X } from 'lucide-vue-next';
 
 export default defineComponent({
@@ -20,6 +20,19 @@ export default defineComponent({
         },
     },
     emits: ['close'],
+    setup() {
+        const modalId = `modal-${Math.random().toString(36).substr(2, 9)}`;
+        const titleId = `${modalId}-title`;
+        const modalContent = ref<HTMLElement | null>(null);
+        const previousActiveElement = ref<HTMLElement | null>(null);
+
+        return {
+            modalId,
+            titleId,
+            modalContent,
+            previousActiveElement,
+        };
+    },
     computed: {
         sizeClass(): string {
             return `ir-modal__content--${this.size}`;
@@ -31,28 +44,90 @@ export default defineComponent({
                 this.$emit('close');
             }
         },
-        onEscKey(event: KeyboardEvent) {
+        onKeyDown(event: KeyboardEvent) {
             if (event.key === 'Escape' && this.open) {
                 this.$emit('close');
+                return;
             }
+            // Handle focus trapping
+            if (event.key === 'Tab' && this.open) {
+                this.trapFocus(event);
+            }
+        },
+        trapFocus(event: KeyboardEvent) {
+            const modal = this.modalContent;
+            if (!modal) return;
+
+            const focusableSelectors = [
+                'button:not([disabled])',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                'textarea:not([disabled])',
+                'a[href]',
+                '[tabindex]:not([tabindex="-1"])',
+            ];
+            const focusableElements = modal.querySelectorAll<HTMLElement>(
+                focusableSelectors.join(', ')
+            );
+            const firstElement = focusableElements[0];
+            const lastElement = focusableElements[focusableElements.length - 1];
+
+            if (!firstElement) return;
+
+            if (event.shiftKey && document.activeElement === firstElement) {
+                event.preventDefault();
+                lastElement?.focus();
+            } else if (!event.shiftKey && document.activeElement === lastElement) {
+                event.preventDefault();
+                firstElement?.focus();
+            }
+        },
+        async focusFirstElement() {
+            await nextTick();
+            const modal = this.modalContent;
+            if (!modal) return;
+
+            const focusableSelectors = [
+                'button:not([disabled])',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                'textarea:not([disabled])',
+                'a[href]',
+                '[tabindex]:not([tabindex="-1"])',
+            ];
+            const firstFocusable = modal.querySelector<HTMLElement>(
+                focusableSelectors.join(', ')
+            );
+            firstFocusable?.focus();
+        },
+        returnFocus() {
+            this.previousActiveElement?.focus();
         },
     },
     watch: {
         open: {
             immediate: true,
-            handler(isOpen) {
+            async handler(isOpen, wasOpen) {
                 if (isOpen) {
-                    document.addEventListener('keydown', this.onEscKey);
+                    // Store the element that was focused before opening
+                    this.previousActiveElement = document.activeElement as HTMLElement;
+                    document.addEventListener('keydown', this.onKeyDown);
                     document.body.style.overflow = 'hidden';
+                    // Focus first focusable element in modal
+                    await this.focusFirstElement();
                 } else {
-                    document.removeEventListener('keydown', this.onEscKey);
+                    document.removeEventListener('keydown', this.onKeyDown);
                     document.body.style.overflow = '';
+                    // Return focus to trigger element on close
+                    if (wasOpen) {
+                        this.returnFocus();
+                    }
                 }
             },
         },
     },
     unmounted() {
-        document.removeEventListener('keydown', this.onEscKey);
+        document.removeEventListener('keydown', this.onKeyDown);
         document.body.style.overflow = '';
     },
 });
@@ -62,18 +137,24 @@ export default defineComponent({
     <Teleport to="body">
         <Transition name="modal">
             <div v-if="open" class="ir-modal" @click="onBackdropClick">
-                <div :class="['ir-modal__content', sizeClass]" role="dialog" aria-modal="true">
+                <div
+                    ref="modalContent"
+                    :class="['ir-modal__content', sizeClass]"
+                    role="dialog"
+                    aria-modal="true"
+                    :aria-labelledby="title ? titleId : undefined"
+                >
                     <header v-if="title || $slots.header" class="ir-modal__header">
                         <slot name="header">
-                            <h2 class="ir-modal__title">{{ title }}</h2>
+                            <h2 :id="titleId" class="ir-modal__title">{{ title }}</h2>
                         </slot>
                         <button
                             type="button"
                             class="ir-modal__close"
                             @click="$emit('close')"
-                            aria-label="Close"
+                            aria-label="Close modal"
                         >
-                            <X :size="20" />
+                            <X :size="20" aria-hidden="true" />
                         </button>
                     </header>
                     <div class="ir-modal__body">
@@ -160,6 +241,11 @@ export default defineComponent({
 .ir-modal__close:hover {
     background-color: #f3f4f6;
     color: #1f2937;
+}
+
+.ir-modal__close:focus-visible {
+    outline: 2px solid var(--ir--color--primary, #1d4ed8);
+    outline-offset: 2px;
 }
 
 .ir-modal__body {

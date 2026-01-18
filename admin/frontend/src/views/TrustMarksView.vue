@@ -283,7 +283,7 @@ export default defineComponent({
             </Button>
         </header>
 
-        <p v-if="error" class="error-message">{{ error }}</p>
+        <p v-if="error" class="error-message" role="alert" aria-live="polite">{{ error }}</p>
 
         <DataTable
             :columns="columns"
@@ -352,8 +352,14 @@ export default defineComponent({
         <Modal :open="showCreateModal" title="Issue Trust Mark" @close="closeModals">
             <form @submit.prevent="handleCreate" class="form">
                 <div class="form-group">
-                    <label class="form-label">Trust Mark Type <span class="required">*</span></label>
-                    <select v-model="formData.tmt" class="form-select" required>
+                    <label for="tmt-select" class="form-label">Trust Mark Type <span class="required" aria-hidden="true">*</span></label>
+                    <select
+                        id="tmt-select"
+                        v-model="formData.tmt"
+                        class="form-select"
+                        required
+                        aria-required="true"
+                    >
                         <option :value="null" disabled>Select a type...</option>
                         <option
                             v-for="type in trustMarkTypes?.items.filter(t => t.active)"
@@ -382,7 +388,7 @@ export default defineComponent({
                     :rows="4"
                     @error="setJsonError"
                 />
-                <p v-if="formError" class="form-error">{{ formError }}</p>
+                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
@@ -410,7 +416,7 @@ export default defineComponent({
                     :rows="4"
                     @error="setJsonError"
                 />
-                <p v-if="formError" class="form-error">{{ formError }}</p>
+                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
@@ -423,7 +429,7 @@ export default defineComponent({
             <p>Are you sure you want to revoke this trust mark?</p>
             <p v-if="revokingItem"><strong>{{ revokingItem.domain }}</strong></p>
             <p class="warning-text">This action will invalidate the trust mark. The entity will no longer be trusted for this mark type.</p>
-            <p v-if="formError" class="form-error">{{ formError }}</p>
+            <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
                 <Button variant="danger" @click="handleRevoke" :loading="formLoading">Revoke</Button>
@@ -624,7 +630,7 @@ export default defineComponent({
 
 .form-select:focus {
     outline: none;
-    border-color: #2563eb;
+    border-color: var(--ir--color--primary);
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 

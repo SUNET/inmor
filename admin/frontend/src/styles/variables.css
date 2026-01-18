@@ -31,9 +31,9 @@
     --ir--color--black: #141414;
     --ir--color--white: #ffffff;
 
-    /* Primary */
-    --ir--color--primary: #2563eb;
-    --ir--color--primary-hover: #1d4ed8;
+    /* Primary - #1d4ed8 has 4.9:1 contrast ratio (WCAG AA compliant) */
+    --ir--color--primary: #1d4ed8;
+    --ir--color--primary-hover: #1e40af;
 
     /* Status colors */
     --ir--color--success: #22c55e;

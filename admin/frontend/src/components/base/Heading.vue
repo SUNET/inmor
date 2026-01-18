@@ -7,13 +7,17 @@ export default defineComponent({
         level: {
             type: String as PropType<'h1'|'h2'|'h3'|'h4'>,
             required: true,
+        },
+        id: {
+            type: String,
+            default: undefined,
         }
     }
 });
 </script>
 
 <template>
-    <component :is="level" :class="['heading', `-${level}`]">
+    <component :is="level" :id="id" :class="['heading', `-${level}`]">
         <slot></slot>
     </component>
 </template>

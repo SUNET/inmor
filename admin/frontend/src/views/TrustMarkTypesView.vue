@@ -191,7 +191,7 @@ export default defineComponent({
             </Button>
         </header>
 
-        <p v-if="error" class="error-message">{{ error }}</p>
+        <p v-if="error" class="error-message" role="alert" aria-live="polite">{{ error }}</p>
 
         <DataTable
             :columns="columns"
@@ -297,7 +297,7 @@ export default defineComponent({
                     <Toggle v-model="formData.autorenew" label="Auto-renew" />
                     <Toggle v-model="formData.active" label="Active" />
                 </div>
-                <p v-if="formError" class="form-error">{{ formError }}</p>
+                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
@@ -310,7 +310,7 @@ export default defineComponent({
             <p>Are you sure you want to deactivate this trust mark type?</p>
             <p v-if="deletingItem"><strong>{{ deletingItem.tmtype }}</strong></p>
             <p class="warning-text">This will prevent new trust marks from being issued with this type.</p>
-            <p v-if="formError" class="form-error">{{ formError }}</p>
+            <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
                 <Button variant="danger" @click="handleDelete" :loading="formLoading">Deactivate</Button>

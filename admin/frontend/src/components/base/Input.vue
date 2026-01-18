@@ -45,6 +45,9 @@ export default defineComponent({
                 this.error ? 'ir-input__field--error' : '',
             ].filter(Boolean);
         },
+        errorId(): string {
+            return `${this.id}-error`;
+        },
     },
 });
 </script>
@@ -53,7 +56,7 @@ export default defineComponent({
     <div class="ir-input">
         <label v-if="label" :for="id" class="ir-input__label">
             {{ label }}
-            <span v-if="required" class="ir-input__required">*</span>
+            <span v-if="required" class="ir-input__required" aria-hidden="true">*</span>
         </label>
         <input
             :id="id"
@@ -63,9 +66,12 @@ export default defineComponent({
             :disabled="disabled"
             :required="required"
             :class="inputClasses"
+            :aria-invalid="error ? 'true' : undefined"
+            :aria-describedby="error ? errorId : undefined"
+            :aria-required="required ? 'true' : undefined"
             @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
         />
-        <p v-if="error" class="ir-input__error">{{ error }}</p>
+        <p v-if="error" :id="errorId" class="ir-input__error" role="alert">{{ error }}</p>
     </div>
 </template>
 
@@ -98,7 +104,7 @@ export default defineComponent({
 
 .ir-input__field:focus {
     outline: none;
-    border-color: #2563eb;
+    border-color: var(--ir--color--primary);
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 

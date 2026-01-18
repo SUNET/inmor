@@ -288,7 +288,7 @@ export default defineComponent({
             </Button>
         </header>
 
-        <p v-if="error" class="error-message">{{ error }}</p>
+        <p v-if="error" class="error-message" role="alert" aria-live="polite">{{ error }}</p>
 
         <DataTable
             :columns="columns"
@@ -352,7 +352,7 @@ export default defineComponent({
                         Fetch config
                     </Button>
                 </div>
-                <p v-if="formError" class="form-error">{{ formError }}</p>
+                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
                 <JsonEditor
                     v-model="formData.metadata"
                     label="Metadata"
@@ -443,7 +443,7 @@ export default defineComponent({
                     :rows="4"
                     @error="(e) => setJsonError('additional_claims', e)"
                 />
-                <p v-if="formError" class="form-error">{{ formError }}</p>
+                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
@@ -502,7 +502,7 @@ export default defineComponent({
             <p>Are you sure you want to deactivate this subordinate?</p>
             <p v-if="deactivatingItem" class="entity-url">{{ deactivatingItem.entityid }}</p>
             <p class="warning-text">This will remove the entity from the federation. Their subordinate statement will no longer be served.</p>
-            <p v-if="formError" class="form-error">{{ formError }}</p>
+            <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>
                 <Button variant="danger" @click="handleDeactivate" :loading="formLoading">Deactivate</Button>
