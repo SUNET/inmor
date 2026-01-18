@@ -2,7 +2,9 @@ import os
 import sys
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.test import Client
 from dotenv import load_dotenv
 from pytest_redis import factories
 from redis.client import Redis
@@ -37,3 +39,28 @@ def loadredis(rdb: Redis) -> Redis:
 def conf_settings(settings):
     # The `settings` argument is a fixture provided by pytest-django.
     settings.FOO = "bar"
+
+
+@pytest.fixture
+def user(db):
+    """Create or get a test user for authentication."""
+    user, created = User.objects.get_or_create(
+        username="testuser",
+        defaults={
+            "email": "test@example.com",
+            "is_staff": True,
+            "is_superuser": True,
+        },
+    )
+    if created:
+        user.set_password("testpass123")
+        user.save()
+    return user
+
+
+@pytest.fixture
+def auth_client(user) -> Client:
+    """Return an authenticated Django test client."""
+    client = Client()
+    client.login(username="testuser", password="testpass123")
+    return client
