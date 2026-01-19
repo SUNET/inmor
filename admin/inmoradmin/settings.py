@@ -30,9 +30,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-28am!-fa@e-j@#9*=a^$=60oc7o5!ggp=r-(+5zs_u*4ebe2k4"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS: list[str] = []
+ALLOWED_HOSTS: list[str] = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,admin").split(",")
 
 
 # Application definition
@@ -40,23 +40,62 @@ ALLOWED_HOSTS: list[str] = []
 INSTALLED_APPS = [
     "trustmarks.apps.TrustmarksConfig",
     "entities.apps.EntitiesConfig",
+    "apikeys.apps.ApikeysConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.sites",
+    "django.contrib.humanize",
+    "corsheaders",
+    "allauth",
+    "allauth.account",
+    "allauth.mfa",
 ]
+
+SITE_ID = 1
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # Serve static files efficiently
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# CORS Configuration (for frontend)
+# Default origins for development/Docker; override with CORS_ORIGINS env var
+_default_origins = (
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
+)
+CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", _default_origins).split(",")
+CORS_ALLOW_CREDENTIALS = True
+
+# CSRF trusted origins (for frontend making API requests)
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", _default_origins).split(",")
+
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+# django-allauth settings
+ACCOUNT_LOGIN_METHODS = {"email", "username"}
+ACCOUNT_SIGNUP_FIELDS = ["email", "username*", "password1*", "password2*"]
+ACCOUNT_EMAIL_VERIFICATION = "none"  # For development; set to "mandatory" in production
+ACCOUNT_ALLOW_SIGNUPS = False  # Disable public registration; only admins can create users
+
+# Login/logout redirect URLs (relative paths work with nginx proxy)
+LOGIN_REDIRECT_URL = os.environ.get("LOGIN_REDIRECT_URL", "/")
+LOGOUT_REDIRECT_URL = os.environ.get("LOGOUT_REDIRECT_URL", "/login")
 
 ROOT_URLCONF = "inmoradmin.urls"
 
@@ -128,14 +167,26 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"  # Where collectstatic puts files
+
+# Whitenoise configuration for efficient static file serving
+# Use CompressedManifestStaticFilesStorage in production (requires collectstatic)
+# Use CompressedStaticFilesStorage in development (no manifest needed)
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"
+        if DEBUG
+        else "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "/"
 
 REDIS_LOCATION: str = os.environ.get("REDIS_LOCATION", "redis://redis:6379/0")
 
@@ -232,6 +283,23 @@ TA_DEFAULTS = {
 TA_TRUSTMARKS = []
 # Any trusted trustmark issuers can be added in localsettings.py
 TA_TRUSTED_TRUSTMARK_ISSUERS = {}
+
+# django-allauth MFA settings
+MFA_SUPPORTED_TYPES = ["totp", "webauthn"]
+MFA_TOTP_ISSUER = "Inmor Admin"
+MFA_WEBAUTHN_RP_NAME = "Inmor Admin"
+
+# Custom MFA adapter with encrypted secret storage
+MFA_ADAPTER = "common.mfa_adapter.EncryptedMFAAdapter"
+
+# Encryption key for MFA secrets (TOTP)
+# SECURITY WARNING: Change this in production! Generate a new key with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# This default key is for development only.
+MFA_ENCRYPTION_KEY = os.environ.get(
+    "MFA_ENCRYPTION_KEY",
+    "s098x330cQk5XaIdRWI2-bRsWiiy7ggvJfPrq8OKmQE=",  # Development default - DO NOT USE IN PRODUCTION
+)
 
 # now see if we need to override any settings
 for variable in dir(localsettings):

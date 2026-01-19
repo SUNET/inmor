@@ -1,0 +1,122 @@
+{% extends "account/base.html" %}
+{% load i18n static %}
+
+{% block title %}{% trans "Add Security Key" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Add Security Key" %}</h1>
+
+<p style="text-align: center; margin-bottom: 1.5rem; color: #6b7280; font-size: 0.875rem;">
+    {% trans "Register a security key or passkey for two-factor authentication." %}
+</p>
+
+<noscript>
+<div class="alert alert-error" role="alert">
+    {% trans "This functionality requires JavaScript." %}
+</div>
+</noscript>
+
+{% if form.non_field_errors %}
+<div role="alert">
+    <ul class="errorlist">
+        {% for error in form.non_field_errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<form method="post" action="{% url 'mfa_add_webauthn' %}" aria-labelledby="page-title" novalidate>
+    {% csrf_token %}
+
+    <div class="field-group">
+        <label for="{{ form.name.auto_id }}">{% trans "Key Name" %}</label>
+        <input type="text"
+               name="{{ form.name.html_name }}"
+               id="{{ form.name.auto_id }}"
+               value="{{ form.name.value|default:'' }}"
+               placeholder="{% trans 'e.g., YubiKey, MacBook Touch ID' %}"
+               required
+               {% if form.name.errors %}aria-invalid="true" aria-describedby="name-error"{% endif %}>
+        {% if form.name.errors %}
+        <div id="name-error" role="alert">
+            <ul class="errorlist">
+                {% for error in form.name.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Hidden fields for WebAuthn data -->
+    <input type="hidden" name="{{ form.credential.html_name }}" id="{{ form.credential.auto_id }}">
+    {% if form.passwordless %}
+    <input type="hidden" name="{{ form.passwordless.html_name }}" id="{{ form.passwordless.auto_id }}">
+    {% endif %}
+
+    <button type="button" id="mfa_webauthn_add" class="btn-webauthn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        {% trans "Register Security Key" %}
+    </button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="{% url 'mfa_index' %}">{% trans "Cancel" %}</a>
+</nav>
+
+<style>
+    .btn-webauthn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        background-color: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.15s;
+    }
+
+    .btn-webauthn:hover {
+        background-color: #1d4ed8;
+    }
+
+    .btn-webauthn:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+    }
+
+    .alert-error {
+        padding: 1rem;
+        background-color: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 8px;
+        color: #dc2626;
+        margin-bottom: 1.5rem;
+        text-align: center;
+    }
+</style>
+
+<!-- WebAuthn JavaScript -->
+<script src="{% static 'mfa/js/webauthn-json.js' %}"></script>
+<script src="{% static 'mfa/js/webauthn.js' %}"></script>
+<script src="{% static 'account/js/onload.js' %}"></script>
+{{ js_data|json_script:"js_data" }}
+<script data-allauth-onload="allauth.webauthn.forms.addForm" type="application/json">{
+    "ids": {
+        "add": "mfa_webauthn_add",
+        "passwordless": "{{ form.passwordless.auto_id }}",
+        "credential": "{{ form.credential.auto_id }}",
+        "data": "js_data"
+    }
+}</script>
+{% endblock %}

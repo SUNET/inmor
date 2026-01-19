@@ -1,4 +1,4 @@
-# inmor 
+# inmor
 
 A Trust Anchor implementation for https://openid.net/specs/openid-federation-1_0.html draft 46.
 

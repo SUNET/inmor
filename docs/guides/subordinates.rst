@@ -47,7 +47,7 @@ Before registering a subordinate, the entity must:
      "exp": 1736851200,
      "authority_hints": ["https://federation.example.com"],
      "jwks": {
-       "keys": [...]
+       "keys": ["...key data..."]
      },
      "metadata": {
        "openid_relying_party": {
@@ -121,9 +121,9 @@ Fetch the entity's configuration and register it:
    {
      "id": 1,
      "entityid": "https://example-rp.com",
-     "metadata": {...},
+     "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
      "forced_metadata": {},
-     "jwks": {...},
+     "jwks": {"keys": ["..."]},
      "valid_for": 8760,
      "autorenew": true,
      "active": true
@@ -236,9 +236,9 @@ List All Subordinates
        {
          "id": 1,
          "entityid": "https://example-rp.com",
-         "metadata": {...},
+         "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
          "forced_metadata": {},
-         "jwks": {...},
+         "jwks": {"keys": ["..."]},
          "valid_for": 8760,
          "autorenew": true,
          "active": true
@@ -334,7 +334,7 @@ The Trust Anchor creates subordinate statements with this structure:
      "iat": 1705315200,
      "exp": 1736851200,
      "jwks": {
-       "keys": [...]
+       "keys": ["...key data..."]
      },
      "metadata": {
        "openid_relying_party": {

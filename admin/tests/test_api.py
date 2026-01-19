@@ -4,13 +4,11 @@ import os
 from typing import Any
 
 import pytest
-from django.test import TestCase
+from django.test import Client
 from jwcrypto import jwt
 from jwcrypto.common import json_decode
-from ninja.testing import TestClient
 
 from entities.lib import self_validate
-from inmoradmin.api import router
 
 # from pprint import pprint
 
@@ -24,10 +22,7 @@ def get_payload(token_str: str):
     return json_decode(jose.token.objects.get("payload", ""))
 
 
-def test_trustmarktypes_list(db):
-    # don't forget to import router from code above
-    self = TestCase()
-    self.maxDiff = None
+def test_trustmarktypes_list(auth_client: Client):
     trustmark_list = [
         {
             "tmtype": "https://sunet.se/does_not_exist_trustmark",
@@ -46,19 +41,15 @@ def test_trustmarktypes_list(db):
             "renewal_time": 48,
         },
     ]
-    client: TestClient = TestClient(router)
-    response = client.get("/trustmarktypes")
+    response = auth_client.get("/api/v1/trustmarktypes")
 
-    self.assertEqual(response.status_code, 200)
+    assert response.status_code == 200
     marks = response.json()
-    self.assertEqual(marks["count"], 2)
-    self.assertEqual(marks["items"], trustmark_list)
+    assert marks["count"] == 2
+    assert marks["items"] == trustmark_list
 
 
-def test_trustmarktypes_get_byid(db):
-    # don't forget to import router from code above
-    self = TestCase()
-    self.maxDiff = None
+def test_trustmarktypes_get_byid(auth_client: Client):
     data = {
         "tmtype": "https://example.com/trust_mark_type",
         "id": 2,
@@ -67,17 +58,13 @@ def test_trustmarktypes_get_byid(db):
         "autorenew": True,
         "renewal_time": 48,
     }
-    client: TestClient = TestClient(router)
-    response = client.get("/trustmarktypes/2")
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.get("/api/v1/trustmarktypes/2")
+    assert response.status_code == 200
     mark = response.json()
-    self.assertEqual(mark, data)
+    assert mark == data
 
 
-def test_trustmarktypes_get_bytype(db):
-    # don't forget to import router from code above
-    self = TestCase()
-    self.maxDiff = None
+def test_trustmarktypes_get_bytype(auth_client: Client):
     data = {
         "tmtype": "https://example.com/trust_mark_type",
         "id": 2,
@@ -86,20 +73,19 @@ def test_trustmarktypes_get_bytype(db):
         "autorenew": True,
         "renewal_time": 48,
     }
-    client: TestClient = TestClient(router)
-    response = client.get(
-        "/trustmarktypes/", json={"tmtype": "https://example.com/trust_mark_type"}
+    response = auth_client.generic(
+        "GET",
+        "/api/v1/trustmarktypes/",
+        data=json.dumps({"tmtype": "https://example.com/trust_mark_type"}),
+        content_type="application/json",
     )
-    self.assertEqual(response.status_code, 200)
-    mark = response.json()
-    self.assertEqual(mark, data)
+    assert response.status_code == 200  # type: ignore[union-attr]
+    mark = response.json()  # type: ignore[union-attr]
+    assert mark == data
 
 
 @pytest.mark.django_db
-def test_trustmarktypes_create(db):
-    # don't forget to import router from code above
-    self = TestCase()
-    self.maxDiff = None
+def test_trustmarktypes_create(auth_client: Client):
     data = {
         "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
         "valid_for": 8760,
@@ -107,41 +93,41 @@ def test_trustmarktypes_create(db):
         "autorenew": True,
         "renewal_time": 48,
     }
-    client: TestClient = TestClient(router)
-    response = client.post("/trustmarktypes", json=data)
+    response = auth_client.post(
+        "/api/v1/trustmarktypes",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
 
-    self.assertEqual(response.status_code, 201)
+    assert response.status_code == 201
     resp = response.json()
     for key in data:
-        self.assertEqual(data[key], resp.get(key))
+        assert data[key] == resp.get(key)
 
 
 @pytest.mark.django_db
-def test_trustmarktypes_create_default(db):
-    # don't forget to import router from code above
-    self = TestCase()
-    self.maxDiff = None
+def test_trustmarktypes_create_default(auth_client: Client):
     data = {
         "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
     }
-    client: TestClient = TestClient(router)
-    response = client.get("/trustmarktypes")
+    response = auth_client.get("/api/v1/trustmarktypes")
     marks = response.json()
-    self.assertEqual(marks["count"], 2)
-    response = client.post("/trustmarktypes", json=data)
+    assert marks["count"] == 2
+    response = auth_client.post(
+        "/api/v1/trustmarktypes",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
 
-    self.assertEqual(response.status_code, 201)
+    assert response.status_code == 201
     resp = response.json()
     for key in data:
-        self.assertEqual(data[key], resp.get(key))
+        assert data[key] == resp.get(key)
 
 
 @pytest.mark.django_db
-def test_trustmarktypes_create_double(db):
+def test_trustmarktypes_create_double(auth_client: Client):
     "We will try to create same entry twice."
-    # don't forget to import router from code above
-    self = TestCase()
-    self.maxDiff = None
     data = {
         "tmtype": "https://test.sunet.se/does_not_exist_trustmark",
         "valid_for": 8760,
@@ -150,220 +136,263 @@ def test_trustmarktypes_create_double(db):
         "renewal_time": 48,
     }
 
-    client: TestClient = TestClient(router)
-    response = client.get("/trustmarktypes")
+    response = auth_client.get("/api/v1/trustmarktypes")
     marks = response.json()
-    self.assertEqual(marks["count"], 2)
-    response = client.post("/trustmarktypes", json=data)
-    self.assertEqual(response.status_code, 201)
-    response = client.post("/trustmarktypes", json=data)
-    self.assertEqual(response.status_code, 403)
+    assert marks["count"] == 2
+    response = auth_client.post(
+        "/api/v1/trustmarktypes",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    response = auth_client.post(
+        "/api/v1/trustmarktypes",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 403
     resp = response.json()
     for key in data:
-        self.assertEqual(data[key], resp.get(key))
+        assert data[key] == resp.get(key)
 
 
 @pytest.mark.django_db
-def test_trustmarktypes_update(db):
+def test_trustmarktypes_update(auth_client: Client):
     """Updates the values of an existing TrustMarkType."""
-    self = TestCase()
-    self.maxDiff = None
     data = {
         "active": False,
         "autorenew": False,
         "renewal_time": 4,
         "valid_for": 100,
     }
-    client: TestClient = TestClient(router)
-    response = client.put("/trustmarktypes/2", json=data)
+    response = auth_client.put(
+        "/api/v1/trustmarktypes/2",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
     mark = response.json()
     for key in data:
-        self.assertEqual(data[key], mark.get(key))
+        assert data[key] == mark.get(key)
     # Now the other values
-    self.assertEqual(2, mark.get("id"))
-    self.assertEqual("https://example.com/trust_mark_type", mark.get("tmtype"))
+    assert 2 == mark.get("id")
+    assert "https://example.com/trust_mark_type" == mark.get("tmtype")
 
 
 @pytest.mark.django_db
-def test_trustmark_create(db, loadredis):
-    domain = "https://fakerp0.labb.sunet.se"
+def test_trustmark_create(auth_client: Client, loadredis):
+    domain = "https://newrp.test.example.com"
 
-    self = TestCase()
-    self.maxDiff = None
     data = {"tmt": 2, "domain": domain, "valid_for": 24}
-    client: TestClient = TestClient(router)
-    response = client.post("/trustmarks", json=data)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
 
-    self.assertEqual(response.status_code, 201)
+    assert response.status_code == 201
     resp = response.json()
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
-    self.assertEqual(domain, payload.get("sub"))
-    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    assert domain == payload.get("sub")
+    assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
     # Here data is signed JWT
-    data = loadredis.hget(f"inmor:tm:{domain}", payload["trust_mark_type"])
-    self.assertIsNotNone(data)
+    redis_data = loadredis.hget(f"inmor:tm:{domain}", payload["trust_mark_type"])
+    assert redis_data is not None
     # Also this should be the same we received via response
-    self.assertEqual(data.decode("utf-8"), jwt_token)
+    assert redis_data.decode("utf-8") == jwt_token
     # The following is to test #51
     iat = datetime.datetime.fromtimestamp(payload.get("iat"), datetime.timezone.utc)
     exp = datetime.datetime.fromtimestamp(payload.get("exp"), datetime.timezone.utc)
     diff = exp - iat
-    self.assertEqual(diff.days, 1)
+    assert diff.days == 1
 
 
 @pytest.mark.django_db
-def test_trustmark_create_with_additional_claims(db, loadredis):
+def test_trustmark_create_with_additional_claims(auth_client: Client, loadredis):
     """Test creating a trustmark with additional_claims and verify they appear in the JWT payload."""
-    domain = "https://fakerp0.labb.sunet.se"
+    domain = "https://newrp0.test.example.com"
 
-    self = TestCase()
-    self.maxDiff = None
     additional_claims = {"ref": "https://github.com/SUNET/inmor"}
     data = {"tmt": 2, "domain": domain, "valid_for": 24, "additional_claims": additional_claims}
-    client: TestClient = TestClient(router)
-    response = client.post("/trustmarks", json=data)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
 
-    self.assertEqual(response.status_code, 201)
+    assert response.status_code == 201
     resp = response.json()
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
-    self.assertEqual(domain, payload.get("sub"))
-    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    assert domain == payload.get("sub")
+    assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
     # Verify the additional claim is present in the JWT payload
-    self.assertEqual("https://github.com/SUNET/inmor", payload.get("ref"))
+    assert "https://github.com/SUNET/inmor" == payload.get("ref")
 
 
 @pytest.mark.django_db
-def test_trustmark_update_additional_claims(db, loadredis):
+def test_trustmark_update_additional_claims(auth_client: Client, loadredis):
     """Test updating a trustmark's additional_claims and verify changes in JWT payload."""
     domain = "https://fakerp2.labb.sunet.se"
-
-    self = TestCase()
-    self.maxDiff = None
 
     # Step 1: Create trustmark with initial additional_claims
     additional_claims = {"ref": "https://github.com/SUNET/inmor"}
     data = {"tmt": 2, "domain": domain, "valid_for": 24, "additional_claims": additional_claims}
-    client: TestClient = TestClient(router)
-    response = client.post("/trustmarks", json=data)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
 
-    self.assertEqual(response.status_code, 201)
+    assert response.status_code == 201
     resp = response.json()
     trustmark_id = resp["id"]
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
-    self.assertEqual("https://github.com/SUNET/inmor", payload.get("ref"))
+    assert "https://github.com/SUNET/inmor" == payload.get("ref")
 
     # Step 2: Update additional_claims with different value
     update_data = {"additional_claims": {"ref": "https://python.org"}}
-    response = client.put(f"/trustmarks/{trustmark_id}", json=update_data)
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.put(
+        f"/api/v1/trustmarks/{trustmark_id}",
+        data=json.dumps(update_data),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
     resp = response.json()
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
     # Verify the updated claim is present in the JWT payload
-    self.assertEqual("https://python.org", payload.get("ref"))
+    assert "https://python.org" == payload.get("ref")
 
     # Step 3: Update additional_claims to None
     update_data = {"additional_claims": None}
-    response = client.put(f"/trustmarks/{trustmark_id}", json=update_data)
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.put(
+        f"/api/v1/trustmarks/{trustmark_id}",
+        data=json.dumps(update_data),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
     resp = response.json()
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
     # Verify the claim is removed from the JWT payload
-    self.assertIsNone(payload.get("ref"))
+    assert payload.get("ref") is None
 
 
 @pytest.mark.django_db
-def test_trustmark_create_twice(db, loadredis):
-    domain = "https://fakerp0.labb.sunet.se"
+def test_trustmark_create_twice(auth_client: Client, loadredis):
+    domain = "https://newrp0.test.example.com"
 
-    self = TestCase()
-    self.maxDiff = None
     data = {"tmt": 2, "domain": domain}
-    client: TestClient = TestClient(router)
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     resp = response.json()
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
-    self.assertEqual(domain, payload.get("sub"))
-    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 403)
+    assert domain == payload.get("sub")
+    assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 403
     resp = response.json()
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
-    self.assertEqual(domain, payload.get("sub"))
-    self.assertEqual("https://example.com/trust_mark_type", payload.get("trust_mark_type"))
+    assert domain == payload.get("sub")
+    assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
 
 
 @pytest.mark.django_db
-def test_trustmark_list(db, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
-    domain1 = "https://fakerp1.labb.sunet.se"
+def test_trustmark_list(auth_client: Client, loadredis):
+    # Get initial count (fixture may have existing trustmarks)
+    response = auth_client.get("/api/v1/trustmarks")
+    initial_count = response.json()["count"]
 
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
+    domain0 = "https://newrp0.test.example.com"
+    domain1 = "https://newrp1.test.example.com"
+
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     # Add the second trustmark
     data = {"tmt": 2, "domain": domain1}
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
 
-    response = client.get("/trustmarks")
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.get("/api/v1/trustmarks")
+    assert response.status_code == 200
 
     # Now verify the data we received
     resp = response.json()
-    self.assertTrue(isinstance(resp.get("items"), list))
-    self.assertEqual(2, resp["count"])
+    assert isinstance(resp.get("items"), list)
+    # Verify we have 2 more trustmarks than before
+    assert resp["count"] == initial_count + 2
 
 
 @pytest.mark.django_db
-def test_trustmark_list_entity(db, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
-    domain1 = "https://fakerp1.labb.sunet.se"
+def test_trustmark_list_entity(auth_client: Client, loadredis):
+    domain0 = "https://newrp0.test.example.com"
+    domain1 = "https://newrp1.test.example.com"
 
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     # Add the second trustmark
     data = {"tmt": 2, "domain": domain1}
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
 
     data = {"domain": domain0}
-    response = client.post("/trustmarks/list", json=data)
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.post(
+        "/api/v1/trustmarks/list",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
 
     # Now verify the data we received
     resp = response.json()
-    self.assertTrue(isinstance(resp.get("items"), list))
-    self.assertEqual(1, resp["count"])
+    assert isinstance(resp.get("items"), list)
+    assert 1 == resp["count"]
 
 
 @pytest.mark.django_db
-def test_trustmark_renew(db, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
+def test_trustmark_renew(auth_client: Client, loadredis):
+    domain0 = "https://newrp0.test.example.com"
 
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     resp = response.json()
     original_mark = resp["mark"]
     original_payload = get_payload(original_mark)
@@ -371,88 +400,88 @@ def test_trustmark_renew(db, loadredis):
     trustmark_id = resp["id"]
 
     # Renew the trustmark
-    response = client.post(f"/trustmarks/{trustmark_id}/renew")
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.post(f"/api/v1/trustmarks/{trustmark_id}/renew")
+    assert response.status_code == 200
     renewed_resp = response.json()
     renewed_mark = renewed_resp["mark"]
     renewed_payload = get_payload(renewed_mark)
     renewed_exp = renewed_payload.get("exp")
 
     # Verify expiry date is higher after renewal
-    self.assertGreater(renewed_exp, original_exp)
+    assert renewed_exp > original_exp
 
     # Verify other attributes remain the same
-    self.assertEqual(renewed_payload.get("sub"), original_payload.get("sub"))
-    self.assertEqual(renewed_payload.get("iss"), original_payload.get("iss"))
-    self.assertEqual(
-        renewed_payload.get("trust_mark_type"), original_payload.get("trust_mark_type")
-    )
-    self.assertEqual(renewed_resp.get("domain"), domain0)
-    self.assertEqual(renewed_resp.get("id"), trustmark_id)
+    assert renewed_payload.get("sub") == original_payload.get("sub")
+    assert renewed_payload.get("iss") == original_payload.get("iss")
+    assert renewed_payload.get("trust_mark_type") == original_payload.get("trust_mark_type")
+    assert renewed_resp.get("domain") == domain0
+    assert renewed_resp.get("id") == trustmark_id
 
 
 @pytest.mark.django_db
-def test_trustmark_update(db, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
+def test_trustmark_update(auth_client: Client, loadredis):
+    domain0 = "https://newrp0.test.example.com"
 
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
-    response = client.post("/trustmarks", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     resp = response.json()
     # At this moment redis MUST have the data related to the trustmark
     jwt_token = resp["mark"]
     payload = get_payload(jwt_token)
     # Here data is signed JWT
-    data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
-    self.assertIsNotNone(data)
+    redis_data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
+    assert redis_data is not None
     update_data = {"autorenew": False, "active": False}
-    response = client.put(f"/trustmarks/{resp['id']}", json=update_data)
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.put(
+        f"/api/v1/trustmarks/{resp['id']}",
+        data=json.dumps(update_data),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
     resp = response.json()
     # The response itself should have JWT anymore.
-    self.assertFalse(resp["mark"])
+    assert not resp["mark"]
     # Here data is signed JWT
-    data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
-    self.assertEqual(data, b"revoked")
-    self.assertEqual(False, resp.get("autorenew"))
-    self.assertEqual(False, resp.get("active"))
+    redis_data = loadredis.hget(f"inmor:tm:{domain0}", payload["trust_mark_type"])
+    assert redis_data == b"revoked"
+    assert resp.get("autorenew") is False
+    assert resp.get("active") is False
 
 
 @pytest.mark.django_db
-def test_add_subordinate(db, loadredis, conf_settings):  # type: ignore
+def test_add_subordinate(auth_client: Client, loadredis, conf_settings):  # type: ignore
     "Tests adding subordinate without passing any JWKS"
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
     data = {
-        "entityid": "https://fakerp0.labb.sunet.se",
+        "entityid": "https://newsubordinate.test.example.com",
         "metadata": metadata,
         "forced_metadata": {},
     }
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 422)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_key(db, loadredis):  # type: ignore
+def test_add_subordinate_with_key(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests adding subordinate"
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -460,25 +489,26 @@ def test_add_subordinate_with_key(db, loadredis):  # type: ignore
         "forced_metadata": {},
     }
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     d1 = response.json()
     # This is because the keys are sent separately
-    self.assertEqual(keys, d1.get("jwks"))
+    assert keys == d1.get("jwks")
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_key_twice(db, loadredis):  # type: ignore
+def test_add_subordinate_with_key_twice(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests adding subordinate"
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -486,23 +516,27 @@ def test_add_subordinate_with_key_twice(db, loadredis):  # type: ignore
         "forced_metadata": {},
     }
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     d1 = response.json()
     # This is because the keys are sent separately
-    self.assertEqual(keys, d1.get("jwks"))
+    assert keys == d1.get("jwks")
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 403)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_forced_metadata(db, loadredis):  # type: ignore
+def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests listing subordinates"
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
 
@@ -516,24 +550,29 @@ def test_add_subordinate_with_forced_metadata(db, loadredis):  # type: ignore
         "forced_metadata": {"openid_relying_party": {"application_type": "mutant"}},
     }
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     resp = response.json()
-    self.assertEqual(resp["forced_metadata"], data["forced_metadata"])
+    assert resp["forced_metadata"] == data["forced_metadata"]
 
 
 @pytest.mark.django_db
-def test_list_subordinates(db, loadredis):  # type: ignore
+def test_list_subordinates(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests listing subordinates"
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
+    # Get initial count (fixture may have existing subordinates)
+    response = auth_client.get("/api/v1/subordinates")
+    initial_count = response.json()["count"]
 
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -541,28 +580,30 @@ def test_list_subordinates(db, loadredis):  # type: ignore
         "forced_metadata": {},
     }
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
 
-    response = client.get("/subordinates")
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.get("/api/v1/subordinates")
+    assert response.status_code == 200
 
     marks = response.json()
-    self.assertEqual(marks["count"], 1)
+    # Verify we have one more subordinate than before
+    assert marks["count"] == initial_count + 1
 
 
 @pytest.mark.django_db
-def test_get_subordinate_byid(db, loadredis):  # type: ignore
+def test_get_subordinate_byid(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests listing subordinates"
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -570,37 +611,43 @@ def test_get_subordinate_byid(db, loadredis):  # type: ignore
         "forced_metadata": {},
     }
 
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     original = response.json()
 
-    response = client.get(f"/subordinates/{original['id']}")
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.get(f"/api/v1/subordinates/{original['id']}")
+    assert response.status_code == 200
 
     new = response.json()
-    self.assertEqual(original, new)
+    assert original == new
 
 
 @pytest.mark.django_db
-def test_update_subordinate_autorenew(db, loadredis):
+def test_update_subordinate_autorenew(auth_client: Client, loadredis, clean_subordinate):
     """Test updating a subordinate's autorenew field to False and verify the update."""
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     # Add a subordinate first
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
         "jwks": keys,
         "forced_metadata": {},
     }
-    response = client.post("/subordinates", json=data)
-    self.assertEqual(response.status_code, 201)
+
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
     original = response.json()
 
     # Prepare full update data, flipping autorenew to False
@@ -614,95 +661,154 @@ def test_update_subordinate_autorenew(db, loadredis):
         "autorenew": False,
         "active": original.get("active", True),
     }
-    response = client.post(f"/subordinates/{original['id']}", json=update_data)
-    self.assertEqual(response.status_code, 200)
+    response = auth_client.post(
+        f"/api/v1/subordinates/{original['id']}",
+        data=json.dumps(update_data),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
     updated = response.json()
-    self.assertEqual(updated.get("autorenew"), False)
+    assert updated.get("autorenew") is False
 
 
 @pytest.mark.django_db
-def test_create_server_entity(db, loadredis):
+def test_create_server_entity(auth_client: Client, loadredis):
     """Tests creation of server's entity_id"""
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
-    response = client.post("/server/entity")
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post("/api/v1/server/entity")
+    assert response.status_code == 201
     entity_statement = response.json().get("entity_statement")
-    self.assertIsNotNone(entity_statement)
+    assert entity_statement is not None
     jwt_net: jwt.JWT = jwt.JWT.from_jose_token(entity_statement)
     payload = self_validate(jwt_net)
 
     # Verify sub and iss claims
     base_url = "https://localhost:8080"
-    self.assertEqual(payload.get("sub"), base_url)
-    self.assertEqual(payload.get("iss"), base_url)
+    assert payload.get("sub") == base_url
+    assert payload.get("iss") == base_url
 
     # Check that metadata contains federation_entity with correct endpoints
     metadata: dict[str, Any] = payload.get("metadata", {})
 
-    self.assertIsNotNone(metadata, "metadata missing from payload")
+    assert metadata is not None, "metadata missing from payload"
     federation_entity = metadata.get("federation_entity", {})
-    self.assertIsNotNone(federation_entity, "federation_entity missing from metadata")
+    assert federation_entity is not None, "federation_entity missing from metadata"
 
     # Verify all FEDERATION_ENTITY endpoints are present and have expected values
-    self.assertEqual(federation_entity.get("federation_fetch_endpoint"), f"{base_url}/fetch")
-    self.assertEqual(federation_entity.get("federation_list_endpoint"), f"{base_url}/list")
-    self.assertEqual(federation_entity.get("federation_resolve_endpoint"), f"{base_url}/resolve")
-    self.assertEqual(
-        federation_entity.get("federation_trust_mark_status_endpoint"),
-        f"{base_url}/trust_mark_status",
+    assert federation_entity.get("federation_fetch_endpoint") == f"{base_url}/fetch"
+    assert federation_entity.get("federation_list_endpoint") == f"{base_url}/list"
+    assert federation_entity.get("federation_resolve_endpoint") == f"{base_url}/resolve"
+    assert (
+        federation_entity.get("federation_trust_mark_status_endpoint")
+        == f"{base_url}/trust_mark_status"
     )
-    self.assertEqual(
-        federation_entity.get("federation_trust_mark_list_endpoint"),
-        f"{base_url}/trust_mark_list",
+    assert (
+        federation_entity.get("federation_trust_mark_list_endpoint")
+        == f"{base_url}/trust_mark_list"
     )
-    self.assertEqual(
-        federation_entity.get("federation_trust_mark_endpoint"), f"{base_url}/trust_mark"
-    )
+    assert federation_entity.get("federation_trust_mark_endpoint") == f"{base_url}/trust_mark"
 
     # Verify we have our own Trustmark for TA
     tms = payload.get("trust_marks", [])
-    self.assertEqual(len(tms), 1)
-    self.assertEqual(tms[0].get("trust_mark_type", ""), "https://sunet.se/does_not_exist_trustmark")
+    assert len(tms) == 1
+    assert tms[0].get("trust_mark_type", "") == "https://sunet.se/does_not_exist_trustmark"
 
 
 @pytest.mark.django_db
-def test_create_historical_keys(db, loadredis):
+def test_create_historical_keys(auth_client: Client, loadredis):
     """Tests creation of historical keys JWT"""
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
-    response = client.post("/server/historical_keys")
-    self.assertEqual(response.status_code, 201)
+    response = auth_client.post("/api/v1/server/historical_keys")
+    assert response.status_code == 201
     resp = response.json()
-    self.assertIn("2 keys", resp.get("message", ""))
+    assert "2 keys" in resp.get("message", "")
 
     # Verify JWT is stored in Redis
     token = loadredis.get("inmor:historical_keys")
-    self.assertIsNotNone(token)
+    assert token is not None
 
     # Verify JWT payload
     payload = get_payload(token.decode("utf-8"))
-    self.assertEqual(payload.get("iss"), "https://localhost:8080")
-    self.assertIsNotNone(payload.get("iat"))
+    assert payload.get("iss") == "https://localhost:8080"
+    assert payload.get("iat") is not None
 
     # Verify keys in payload (only keys with exp field)
     keys = payload.get("keys", [])
-    self.assertEqual(len(keys), 2)
+    assert len(keys) == 2
 
 
 @pytest.mark.django_db
-def test_create_historical_keys_missing_dir(db, loadredis, settings):
+def test_create_historical_keys_missing_dir(auth_client: Client, loadredis, settings):
     """Tests that 404 is returned when historical keys directory doesn't exist"""
-    self = TestCase()
-    self.maxDiff = None
-    client: TestClient = TestClient(router)
-
     settings.HISTORICAL_KEYS_DIR = "/nonexistent/path/to/keys"
 
-    response = client.post("/server/historical_keys")
-    self.assertEqual(response.status_code, 404)
-    self.assertIn("directory not found", response.json().get("message", ""))
+    response = auth_client.post("/api/v1/server/historical_keys")
+    assert response.status_code == 404
+    assert "directory not found" in response.json().get("message", "")
+
+
+# ============================================================================
+# Unauthenticated Access Tests
+# ============================================================================
+
+
+def test_unauthenticated_trustmarktypes_list(db):
+    """Verify unauthenticated requests to trustmarktypes list are rejected."""
+    client = Client()
+    response = client.get("/api/v1/trustmarktypes")
+    assert response.status_code == 401
+
+
+def test_unauthenticated_trustmarktypes_create(db):
+    """Verify unauthenticated requests to create trustmarktype are rejected."""
+    client = Client()
+    data = {"tmtype": "https://test.example.com/trustmark"}
+    response = client.post(
+        "/api/v1/trustmarktypes",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 401
+
+
+def test_unauthenticated_trustmarks_list(db):
+    """Verify unauthenticated requests to trustmarks list are rejected."""
+    client = Client()
+    response = client.get("/api/v1/trustmarks")
+    assert response.status_code == 401
+
+
+def test_unauthenticated_trustmarks_create(db):
+    """Verify unauthenticated requests to create trustmark are rejected."""
+    client = Client()
+    data = {"tmt": 1, "domain": "https://example.com"}
+    response = client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 401
+
+
+def test_unauthenticated_subordinates_list(db):
+    """Verify unauthenticated requests to subordinates list are rejected."""
+    client = Client()
+    response = client.get("/api/v1/subordinates")
+    assert response.status_code == 401
+
+
+def test_unauthenticated_subordinates_create(db):
+    """Verify unauthenticated requests to create subordinate are rejected."""
+    client = Client()
+    data = {"entityid": "https://example.com", "metadata": {}, "jwks": {}}
+    response = client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 401
+
+
+def test_unauthenticated_server_entity(db):
+    """Verify unauthenticated requests to server entity are rejected."""
+    client = Client()
+    response = client.post("/api/v1/server/entity")
+    assert response.status_code == 401

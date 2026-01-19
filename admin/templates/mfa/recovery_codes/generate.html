@@ -1,0 +1,32 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Generate Recovery Codes" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Generate Recovery Codes" %}</h1>
+
+<div class="alert alert-warning" role="alert">
+    <p>{% trans "Generating new recovery codes will invalidate all existing codes. Are you sure you want to continue?" %}</p>
+</div>
+
+<form method="post" aria-labelledby="page-title">
+    {% csrf_token %}
+    <button type="submit">{% trans "Generate New Codes" %}</button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="{% url 'mfa_index' %}">{% trans "Cancel" %}</a>
+</nav>
+
+<style>
+    .alert-warning {
+        padding: 1rem;
+        background-color: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-radius: 8px;
+        color: #92400e;
+        margin-bottom: 1.5rem;
+    }
+</style>
+{% endblock %}

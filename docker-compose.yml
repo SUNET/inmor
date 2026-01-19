@@ -3,7 +3,7 @@ services:
   ta:
     restart: always
     build: .
-    image: docker.sunet.se/inmor:0.2.0
+    image: docker.sunet.se/inmor:0.2.1
     networks:
       - inmor-net
     healthcheck:
@@ -60,7 +60,7 @@ services:
       - ./redis:/data
   admin:
     build: ./admin/
-    image: docker.sunet.se/inmor-admin:0.2.0
+    image: docker.sunet.se/inmor-admin:0.2.1
     networks:
       - inmor-net
     depends_on:
@@ -73,13 +73,35 @@ services:
     command: /app/docker-entrypoint.sh
     environment:
       - INSIDE_CONTAINER=true
+      # MFA encryption key for TOTP secrets - generate a new key for production with:
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # - MFA_ENCRYPTION_KEY=your-production-key-here
     volumes:
       - ./admin/private.json:/app/private.json
+      - ./admin/inmoradmin:/app/inmoradmin
+      - ./admin/apikeys:/app/apikeys
+      - ./admin/templates:/app/templates
+      - ./admin/common:/app/common
+      - ./admin/tests:/app/tests
       - ./publickeys:/app/publickeys
       - ./historical_keys:/app/historical_keys
     # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
     ports:
       - "8000:8000"
+  frontend:
+    build:
+      context: ./admin/frontend/
+      target: production
+      args:
+        # Empty string means use same origin (nginx proxies API requests)
+        VITE_API_URL: ""
+    image: docker.sunet.se/inmor-frontend:0.2.1
+    networks:
+      - inmor-net
+    depends_on:
+      - admin
+    ports:
+      - "127.0.0.1:5173:80"
 networks:
   inmor-net:
     driver: bridge

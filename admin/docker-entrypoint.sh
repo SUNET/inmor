@@ -4,12 +4,12 @@
 echo "Apply database migrations"
 python manage.py migrate
 
+# Collect static files for whitenoise
+echo "Collecting static files"
+python manage.py collectstatic --noinput
+
 # Reload any already issued trustmarks
 python manage.py reload_issued_tms
-
-# Initial CSS build
-#echo "Building styles"
-#bash ./scripts/sass.sh build
 
 # Start server
 echo "Starting web server"

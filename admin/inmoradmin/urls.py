@@ -26,5 +26,6 @@ urlpatterns = [
     path("entities/", include("entities.urls")),
     path("admin/", admin.site.urls),
     path("api/v1/", api.urls),
+    path("accounts/", include("allauth.urls")),
     path("", views.index),
 ]

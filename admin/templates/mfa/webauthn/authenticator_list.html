@@ -1,0 +1,179 @@
+{% extends "account/base.html" %}
+{% load i18n humanize %}
+
+{% block title %}{% trans "Security Keys" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Security Keys" %}</h1>
+
+{% if authenticators|length == 0 %}
+<p style="text-align: center; color: #6b7280; margin-bottom: 1.5rem;">
+    {% trans "No security keys have been added." %}
+</p>
+{% else %}
+<div class="keys-list" role="list" aria-label="{% trans 'Your security keys' %}">
+    {% for authenticator in authenticators %}
+    <div class="key-item" role="listitem">
+        <div class="key-info">
+            <div class="key-name">
+                {{ authenticator }}
+                {% if authenticator.wrap.is_passwordless is True %}
+                <span class="badge badge--primary">{% trans "Passkey" %}</span>
+                {% elif authenticator.wrap.is_passwordless is False %}
+                <span class="badge badge--secondary">{% trans "Security key" %}</span>
+                {% else %}
+                <span class="badge badge--warning" title="{% trans 'This key does not indicate whether it is a passkey.' %}">{% trans "Unspecified" %}</span>
+                {% endif %}
+            </div>
+            <div class="key-meta">
+                {% blocktrans with created_at=authenticator.created_at|date:"SHORT_DATE_FORMAT" %}Added on {{ created_at }}{% endblocktrans %}.
+                {% if authenticator.last_used_at %}
+                {% blocktrans with last_used=authenticator.last_used_at|naturaltime %}Last used {{ last_used }}{% endblocktrans %}
+                {% else %}
+                {% trans "Not used yet." %}
+                {% endif %}
+            </div>
+        </div>
+        <div class="key-actions">
+            <a href="{% url 'mfa_edit_webauthn' pk=authenticator.pk %}" class="btn-secondary btn-small" aria-label="{% blocktrans with name=authenticator %}Edit {{ name }}{% endblocktrans %}">
+                {% trans "Edit" %}
+            </a>
+            <a href="{% url 'mfa_remove_webauthn' pk=authenticator.pk %}" class="btn-secondary btn-danger btn-small" aria-label="{% blocktrans with name=authenticator %}Remove {{ name }}{% endblocktrans %}">
+                {% trans "Remove" %}
+            </a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="actions" style="margin-top: 1.5rem;">
+    <a href="{% url 'mfa_add_webauthn' %}" class="btn-primary">{% trans "Add Security Key" %}</a>
+</div>
+
+<nav class="links" aria-label="{% trans 'Navigation' %}">
+    <a href="{% url 'mfa_index' %}">{% trans "Back to MFA Settings" %}</a>
+</nav>
+
+<style>
+    .keys-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .key-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background-color: #fafafa;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .key-info {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .key-name {
+        font-weight: 500;
+        color: #111827;
+        margin-bottom: 0.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .key-meta {
+        font-size: 0.75rem;
+        color: #6b7280;
+    }
+
+    .key-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        border-radius: 9999px;
+    }
+
+    .badge--primary {
+        background-color: #dbeafe;
+        color: #1d4ed8;
+    }
+
+    .badge--secondary {
+        background-color: #f3f4f6;
+        color: #4b5563;
+    }
+
+    .badge--warning {
+        background-color: #fef3c7;
+        color: #92400e;
+    }
+
+    .btn-small {
+        padding: 0.375rem 0.75rem;
+        font-size: 0.75rem;
+    }
+
+    .btn-primary {
+        display: inline-block;
+        padding: 0.625rem 1rem;
+        background-color: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+    }
+
+    .btn-primary:hover {
+        background-color: #1d4ed8;
+        text-decoration: none;
+    }
+
+    .btn-secondary {
+        display: inline-block;
+        padding: 0.625rem 1rem;
+        background-color: #f3f4f6;
+        color: #374151;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+    }
+
+    .btn-secondary:hover {
+        background-color: #e5e7eb;
+        text-decoration: none;
+    }
+
+    .btn-danger {
+        background-color: #fef2f2;
+        color: #dc2626;
+        border-color: #fecaca;
+    }
+
+    .btn-danger:hover {
+        background-color: #fee2e2;
+    }
+
+    .actions {
+        text-align: center;
+    }
+</style>
+{% endblock %}

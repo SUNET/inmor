@@ -2,7 +2,9 @@ import os
 import sys
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.test import Client
 from dotenv import load_dotenv
 from pytest_redis import factories
 from redis.client import Redis
@@ -17,9 +19,11 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 @pytest.fixture(scope="function")
-def db(request, django_db_setup, django_db_blocker):
+def db_with_fixtures(request, db, django_db_blocker):
+    """Load test fixture data into the database."""
     django_db_blocker.unblock()
     call_command("loaddata", "db.json")
+    yield
 
 
 @pytest.fixture(scope="function")
@@ -37,3 +41,40 @@ def loadredis(rdb: Redis) -> Redis:
 def conf_settings(settings):
     # The `settings` argument is a fixture provided by pytest-django.
     settings.FOO = "bar"
+
+
+@pytest.fixture
+def user(db_with_fixtures):
+    """Create or get a test user for authentication."""
+    user, created = User.objects.get_or_create(
+        username="testuser",
+        defaults={
+            "email": "test@example.com",
+            "is_staff": True,
+            "is_superuser": True,
+        },
+    )
+    if created:
+        user.set_password("testpass123")
+        user.save()
+    return user
+
+
+@pytest.fixture
+def auth_client(user) -> Client:
+    """Return an authenticated Django test client."""
+    client = Client()
+    client.login(username="testuser", password="testpass123")
+    return client
+
+
+@pytest.fixture
+def clean_subordinate(db_with_fixtures):
+    """Clean up test subordinate before test to ensure isolation."""
+    from entities.models import Subordinate
+
+    # Delete the test subordinate if it exists
+    Subordinate.objects.filter(entityid="https://fakerp0.labb.sunet.se").delete()
+    yield
+    # Clean up after test as well
+    Subordinate.objects.filter(entityid="https://fakerp0.labb.sunet.se").delete()

@@ -69,6 +69,8 @@ Documentation Contents
    :maxdepth: 2
    :caption: User Guides
 
+   guides/admin-ui
+   guides/mfa
    guides/trustmarks
    guides/subordinates
 

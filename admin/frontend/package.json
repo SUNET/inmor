@@ -1,0 +1,35 @@
+{
+  "name": "inmor-admin-frontend",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "contributors": [
+    "Simon Lagerlöf <contact@smn.codes>"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.12.1",
+    "@codemirror/lint": "^6.9.2",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/view": "^6.39.11",
+    "codemirror": "^6.0.2",
+    "lucide-vue-next": "^0.544.0",
+    "valibot": "^1.1.0",
+    "vue": "^3.5.18",
+    "vue-codemirror": "^6.1.1",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/tsconfig": "^0.7.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.2",
+    "vue-tsc": "^3.0.5"
+  }
+}
