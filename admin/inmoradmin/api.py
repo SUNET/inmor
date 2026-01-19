@@ -27,7 +27,7 @@ from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
-from .auth import auth_router, session_auth
+from .auth import auth_router, combined_auth
 
 api = NinjaAPI(
     title="Inmor Admin API",
@@ -35,8 +35,8 @@ api = NinjaAPI(
     description="Admin API for managing Trust Anchor entities, subordinates, and trust marks.",
 )
 
-# Protected router - requires authentication
-router = Router(auth=session_auth)
+# Protected router - requires authentication (session or API key)
+router = Router(auth=combined_auth)
 
 DEFAULTS: dict[str, dict[str, Any]] = settings.TA_DEFAULTS
 

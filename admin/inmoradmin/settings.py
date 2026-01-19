@@ -40,6 +40,7 @@ ALLOWED_HOSTS: list[str] = []
 INSTALLED_APPS = [
     "trustmarks.apps.TrustmarksConfig",
     "entities.apps.EntitiesConfig",
+    "apikeys.apps.ApikeysConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -50,6 +51,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "allauth",
     "allauth.account",
+    "allauth.mfa",
 ]
 
 SITE_ID = 1
@@ -90,9 +92,10 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # django-allauth settings
-ACCOUNT_AUTHENTICATION_METHOD = "username_email"
-ACCOUNT_EMAIL_REQUIRED = False
+ACCOUNT_LOGIN_METHODS = {"email", "username"}
+ACCOUNT_SIGNUP_FIELDS = ["email", "username*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "none"  # For development; set to "mandatory" in production
+ACCOUNT_ALLOW_SIGNUPS = False  # Disable public registration; only admins can create users
 
 ROOT_URLCONF = "inmoradmin.urls"
 
@@ -268,6 +271,11 @@ TA_DEFAULTS = {
 TA_TRUSTMARKS = []
 # Any trusted trustmark issuers can be added in localsettings.py
 TA_TRUSTED_TRUSTMARK_ISSUERS = {}
+
+# django-allauth MFA settings
+MFA_SUPPORTED_TYPES = ["totp", "webauthn"]
+MFA_TOTP_ISSUER = "Inmor Admin"
+MFA_WEBAUTHN_RP_NAME = "Inmor Admin"
 
 # now see if we need to override any settings
 for variable in dir(localsettings):

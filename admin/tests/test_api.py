@@ -180,7 +180,7 @@ def test_trustmarktypes_update(auth_client: Client):
 
 @pytest.mark.django_db
 def test_trustmark_create(auth_client: Client, loadredis):
-    domain = "https://fakerp0.labb.sunet.se"
+    domain = "https://newrp.test.example.com"
 
     data = {"tmt": 2, "domain": domain, "valid_for": 24}
     response = auth_client.post(
@@ -210,7 +210,7 @@ def test_trustmark_create(auth_client: Client, loadredis):
 @pytest.mark.django_db
 def test_trustmark_create_with_additional_claims(auth_client: Client, loadredis):
     """Test creating a trustmark with additional_claims and verify they appear in the JWT payload."""
-    domain = "https://fakerp0.labb.sunet.se"
+    domain = "https://newrp0.test.example.com"
 
     additional_claims = {"ref": "https://github.com/SUNET/inmor"}
     data = {"tmt": 2, "domain": domain, "valid_for": 24, "additional_claims": additional_claims}
@@ -282,7 +282,7 @@ def test_trustmark_update_additional_claims(auth_client: Client, loadredis):
 
 @pytest.mark.django_db
 def test_trustmark_create_twice(auth_client: Client, loadredis):
-    domain = "https://fakerp0.labb.sunet.se"
+    domain = "https://newrp0.test.example.com"
 
     data = {"tmt": 2, "domain": domain}
     response = auth_client.post(
@@ -311,8 +311,12 @@ def test_trustmark_create_twice(auth_client: Client, loadredis):
 
 @pytest.mark.django_db
 def test_trustmark_list(auth_client: Client, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
-    domain1 = "https://fakerp1.labb.sunet.se"
+    # Get initial count (fixture may have existing trustmarks)
+    response = auth_client.get("/api/v1/trustmarks")
+    initial_count = response.json()["count"]
+
+    domain0 = "https://newrp0.test.example.com"
+    domain1 = "https://newrp1.test.example.com"
 
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
@@ -337,13 +341,14 @@ def test_trustmark_list(auth_client: Client, loadredis):
     # Now verify the data we received
     resp = response.json()
     assert isinstance(resp.get("items"), list)
-    assert 2 == resp["count"]
+    # Verify we have 2 more trustmarks than before
+    assert resp["count"] == initial_count + 2
 
 
 @pytest.mark.django_db
 def test_trustmark_list_entity(auth_client: Client, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
-    domain1 = "https://fakerp1.labb.sunet.se"
+    domain0 = "https://newrp0.test.example.com"
+    domain1 = "https://newrp1.test.example.com"
 
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
@@ -378,7 +383,7 @@ def test_trustmark_list_entity(auth_client: Client, loadredis):
 
 @pytest.mark.django_db
 def test_trustmark_renew(auth_client: Client, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
+    domain0 = "https://newrp0.test.example.com"
 
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
@@ -415,7 +420,7 @@ def test_trustmark_renew(auth_client: Client, loadredis):
 
 @pytest.mark.django_db
 def test_trustmark_update(auth_client: Client, loadredis):
-    domain0 = "https://fakerp0.labb.sunet.se"
+    domain0 = "https://newrp0.test.example.com"
 
     # Add the first trustmark
     data = {"tmt": 2, "domain": domain0}
@@ -455,7 +460,7 @@ def test_add_subordinate(auth_client: Client, loadredis, conf_settings):  # type
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
     data = {
-        "entityid": "https://fakerp0.labb.sunet.se",
+        "entityid": "https://newsubordinate.test.example.com",
         "metadata": metadata,
         "forced_metadata": {},
     }
@@ -476,6 +481,7 @@ def test_add_subordinate_with_key(auth_client: Client, loadredis):  # type: igno
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -502,6 +508,7 @@ def test_add_subordinate_with_key_twice(auth_client: Client, loadredis):  # type
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -556,11 +563,16 @@ def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis):  
 @pytest.mark.django_db
 def test_list_subordinates(auth_client: Client, loadredis):  # type: ignore
     "Tests listing subordinates"
+    # Get initial count (fixture may have existing subordinates)
+    response = auth_client.get("/api/v1/subordinates")
+    initial_count = response.json()["count"]
+
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -579,7 +591,8 @@ def test_list_subordinates(auth_client: Client, loadredis):  # type: ignore
     assert response.status_code == 200
 
     marks = response.json()
-    assert marks["count"] == 1
+    # Verify we have one more subordinate than before
+    assert marks["count"] == initial_count + 1
 
 
 @pytest.mark.django_db
@@ -590,6 +603,7 @@ def test_get_subordinate_byid(auth_client: Client, loadredis):  # type: ignore
 
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
@@ -620,12 +634,14 @@ def test_update_subordinate_autorenew(auth_client: Client, loadredis):
         metadata = json.load(fobj)
     with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
         keys = json.load(fobj)
+
     data = {
         "entityid": "https://fakerp0.labb.sunet.se",
         "metadata": metadata,
         "jwks": keys,
         "forced_metadata": {},
     }
+
     response = auth_client.post(
         "/api/v1/subordinates",
         data=json.dumps(data),

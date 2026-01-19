@@ -39,6 +39,7 @@ dependencies = [
 	"pytest-dotenv",
 	"django-allauth",
 	"django-cors-headers",
+	"fido2",
 ]
 
 [project.urls]

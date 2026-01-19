@@ -1,6 +1,6 @@
 """Authentication module for Inmor Admin API.
 
-Provides session-based authentication for django-ninja API.
+Provides session-based and API key authentication for django-ninja API.
 Designed to be extensible for future SAML/OAuth providers.
 """
 
@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from ninja import Router, Schema
-from ninja.security import SessionAuth
+from ninja.security import APIKeyHeader, SessionAuth
 
 
 class SessionAuthentication(SessionAuth):
@@ -21,8 +21,28 @@ class SessionAuthentication(SessionAuth):
         return None
 
 
-# Create a reusable auth instance
+class APIKeyAuthentication(APIKeyHeader):
+    """API Key authentication via X-API-Key header."""
+
+    param_name = "X-API-Key"
+
+    def authenticate(self, request: HttpRequest, key: str | None):
+        if key:
+            # Import here to avoid circular imports
+            from apikeys.models import APIKey
+
+            user = APIKey.authenticate(key)
+            if user:
+                return user
+        return None
+
+
+# Create reusable auth instances
 session_auth = SessionAuthentication()
+api_key_auth = APIKeyAuthentication()
+
+# Combined auth - accepts either session or API key
+combined_auth = [session_auth, api_key_auth]
 
 
 class LoginSchema(Schema):
