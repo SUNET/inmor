@@ -41,6 +41,7 @@ dependencies = [
 	"django-cors-headers",
 	"fido2",
 	"whitenoise",
+	"qrcode",
 ]
 
 [project.urls]

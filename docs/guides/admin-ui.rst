@@ -142,17 +142,32 @@ built assets on port 3000.
 Authentication
 --------------
 
-The Admin UI uses session-based authentication:
+The Admin UI uses session-based authentication with optional Multi-Factor
+Authentication (MFA) support.
+
+.. figure:: /_static/screenshots/mfa-01-login.png
+   :alt: Login Page
+   :width: 100%
+
+   Styled login page with SUNET/Inmor branding
+
+Authentication Flow
+^^^^^^^^^^^^^^^^^^^
 
 1. **CSRF Token**: On page load, the frontend fetches a CSRF token from
    ``/api/auth/csrf``
 
 2. **Login**: Users authenticate via ``/api/auth/login`` with username/password
 
-3. **Session**: A session cookie is set for subsequent API requests
+3. **MFA Challenge**: If MFA is enabled, user must provide second factor
+   (TOTP code or security key)
 
-4. **Auth Check**: The router guard checks ``/api/auth/me`` before each
+4. **Session**: A session cookie is set for subsequent API requests
+
+5. **Auth Check**: The router guard checks ``/api/auth/me`` before each
    navigation to verify authentication
+
+For detailed MFA configuration, see :doc:`mfa`.
 
 Configuration
 -------------

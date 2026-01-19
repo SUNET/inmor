@@ -70,6 +70,7 @@ Documentation Contents
    :caption: User Guides
 
    guides/admin-ui
+   guides/mfa
    guides/trustmarks
    guides/subordinates
 
