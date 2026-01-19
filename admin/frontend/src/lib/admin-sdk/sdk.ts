@@ -1,9 +1,11 @@
 import { safeParse } from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import {
+    EntityConfigSchema,
     SubordinateCreateOptionsSchema,
     SubordinateSchema,
     SubordinatesSchema,
+    SubordinateUpdateOptionsSchema,
     TrustMarkCreateOptionsSchema,
     TrustMarkSchema,
     TrustMarksSchema,
@@ -12,10 +14,12 @@ import {
     TrustMarkTypesSchema,
     TrustMarkTypeUpdateOptionsSchema,
     TrustMarkUpdateOptionsSchema,
+    type EntityConfig,
     type HttpMethod,
     type Subordinate,
     type SubordinateCreateOptions,
     type Subordinates,
+    type SubordinateUpdateOptions,
     type TrustMark,
     type TrustMarkCreateOptions,
     type TrustMarks,
@@ -30,12 +34,87 @@ type Config = {
     apiUrl: URL;
 };
 
+export type User = {
+    id: number;
+    username: string;
+    email: string;
+    is_staff: boolean;
+    is_superuser: boolean;
+};
+
 export class AdminSDK {
     readonly #apiUrl: URL;
+    #csrfInitialized = false;
 
     constructor(config: Config) {
         const { apiUrl } = config;
         this.#apiUrl = apiUrl;
+    }
+
+    /**
+     * Initialize CSRF token by fetching the csrf endpoint.
+     * This sets the csrftoken cookie needed for subsequent requests.
+     */
+    async initCSRF(): Promise<void> {
+        if (this.#csrfInitialized) return;
+
+        const url = new URL('/api/v1/auth/csrf', this.#apiUrl);
+        await fetch(url, {
+            method: 'GET',
+            credentials: 'include',
+        });
+        this.#csrfInitialized = true;
+    }
+
+    /**
+     * Get CSRF token from cookies.
+     */
+    #getCSRFToken(): string | null {
+        const match = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('csrftoken='));
+        return match ? match.split('=')[1] : null;
+    }
+
+    /**
+     * Login with username and password.
+     */
+    async login(username: string, password: string): Promise<User> {
+        const res = await this.#fetch('POST', '/auth/login', {
+            body: JSON.stringify({ username, password }),
+        });
+        return res as User;
+    }
+
+    /**
+     * Logout current user.
+     */
+    async logout(): Promise<void> {
+        await this.#fetch('POST', '/auth/logout');
+    }
+
+    /**
+     * Get current authenticated user.
+     * Returns null if not authenticated.
+     */
+    async getCurrentUser(): Promise<User | null> {
+        try {
+            const res = await this.#fetch('GET', '/auth/me');
+            return res as User;
+        } catch (e) {
+            if (e instanceof FetchError && e.status === 401) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Get CSRF token for forms.
+     */
+    async getCSRFToken(): Promise<string> {
+        const res = await this.#fetch('GET', '/auth/csrf') as { csrf_token: string };
+        return res.csrf_token;
     }
 
     /**
@@ -223,7 +302,9 @@ export class AdminSDK {
             });
         }
 
-        const res = await this.#fetch('POST', `/trustmarks/${id}`);
+        const res = await this.#fetch('PUT', `/trustmarks/${id}`, {
+            body: JSON.stringify(body.output),
+        });
 
         const data = safeParse(TrustMarkSchema, res);
         if (!data.success) {
@@ -300,6 +381,69 @@ export class AdminSDK {
     }
 
     /**
+     * Update a Subordinate.
+     */
+    async updateSubordinate(id: number, options: SubordinateUpdateOptions): Promise<Subordinate> {
+        const body = safeParse(SubordinateUpdateOptionsSchema, options);
+        if (!body.success) {
+            throw new ValidationError({
+                message: 'Failed to validate subordinate update options',
+                issues: body.issues,
+            });
+        }
+
+        const res = await this.#fetch('POST', `/subordinates/${id}`, {
+            body: JSON.stringify(body.output),
+        });
+
+        const data = safeParse(SubordinateSchema, res);
+        if (!data.success) {
+            throw new ValidationError({
+                message: `Invalid response when updating subordinate with id ${id}`,
+                issues: data.issues,
+            });
+        }
+
+        return data.output;
+    }
+
+    /**
+     * Fetch and self-validate entity configuration from a URL.
+     * Returns the verified metadata and JWKS.
+     */
+    async fetchEntityConfig(url: string): Promise<EntityConfig> {
+        const res = await this.#fetch('POST', '/subordinates/fetch-config', {
+            body: JSON.stringify({ url }),
+        });
+
+        const data = safeParse(EntityConfigSchema, res);
+        if (!data.success) {
+            throw new ValidationError({
+                message: 'Invalid response when fetching entity configuration',
+                issues: data.issues,
+            });
+        }
+
+        return data.output;
+    }
+
+    /**
+     * Regenerate the server's entity configuration.
+     * This updates the entity statement in Redis.
+     */
+    async regenerateServerEntity(): Promise<{ entity_statement: string }> {
+        const res = await this.#fetch('POST', '/server/entity');
+        return res as { entity_statement: string };
+    }
+
+    /**
+     * Sync historical keys to Redis.
+     */
+    async syncHistoricalKeys(): Promise<void> {
+        await this.#fetch('POST', '/server/historical_keys');
+    }
+
+    /**
      * @throws {FetchError}
      */
     async #fetch(method: HttpMethod, path: string|URL, options: RequestInit & { filters?: Record<string, string|number|boolean> } = {}): Promise<unknown> {
@@ -315,19 +459,34 @@ export class AdminSDK {
             delete options.filters;
         }
 
+        // Build headers with CSRF token for non-GET requests
+        const headers: Record<string, string> = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...options.headers as Record<string, string>,
+        };
+
+        // Include CSRF token for state-changing requests
+        if (method !== 'GET') {
+            const csrfToken = this.#getCSRFToken();
+            if (csrfToken) {
+                headers['X-CSRFToken'] = csrfToken;
+            }
+        }
+
         const init: RequestInit = {
             ...options,
             method,
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                ...options.headers,
-            },
+            credentials: 'include', // Include cookies for session auth
+            headers,
         };
 
         try {
             const res = await fetch(input, init);
-            const data = await res.json();
+
+            // Handle empty responses (e.g., logout)
+            const text = await res.text();
+            const data = text ? JSON.parse(text) : {};
 
             if (!res.ok) {
                 const message = 'message' in data && typeof data.message === 'string' ? data.message : undefined;
