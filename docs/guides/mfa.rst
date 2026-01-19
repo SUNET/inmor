@@ -168,6 +168,88 @@ your Django settings:
 For production deployments, ensure your site is served over HTTPS as
 WebAuthn requires a secure context.
 
+TOTP Secret Encryption
+^^^^^^^^^^^^^^^^^^^^^^
+
+Inmor encrypts TOTP secrets before storing them in the database using
+Fernet symmetric encryption. This ensures that TOTP secrets are not
+stored in plain text.
+
+**Encryption Key Configuration**
+
+The encryption key is configured via the ``MFA_ENCRYPTION_KEY`` setting
+or environment variable:
+
+.. code-block:: python
+
+   # In settings.py (default development key - DO NOT USE IN PRODUCTION)
+   MFA_ENCRYPTION_KEY = os.environ.get(
+       "MFA_ENCRYPTION_KEY",
+       "s098x330cQk5XaIdRWI2-bRsWiiy7ggvJfPrq8OKmQE=",
+   )
+
+**Generating a Production Key**
+
+.. danger::
+
+   You **must** generate a new encryption key for production deployments.
+   The default key is for development only.
+
+Generate a new Fernet key:
+
+.. code-block:: bash
+
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+Set the key via environment variable in production:
+
+.. code-block:: bash
+
+   export MFA_ENCRYPTION_KEY="your-generated-key-here"
+
+Or in docker-compose.yml:
+
+.. code-block:: yaml
+
+   admin:
+     environment:
+       - MFA_ENCRYPTION_KEY=your-generated-key-here
+
+**Key Management Best Practices**
+
+* Store the encryption key securely (e.g., in a secrets manager)
+* Never commit production keys to version control
+* Rotate keys periodically by:
+
+  1. Decrypting all existing secrets with the old key
+  2. Re-encrypting with the new key
+  3. Updating the ``MFA_ENCRYPTION_KEY`` setting
+
+* Back up the encryption key - if lost, users will need to re-enroll MFA
+
+**How It Works**
+
+The custom ``EncryptedMFAAdapter`` in ``common/mfa_adapter.py`` overrides
+the default django-allauth adapter to encrypt/decrypt TOTP secrets:
+
+.. code-block:: python
+
+   from allauth.mfa.adapter import DefaultMFAAdapter
+   from cryptography.fernet import Fernet
+   from django.conf import settings
+
+   class EncryptedMFAAdapter(DefaultMFAAdapter):
+       def encrypt(self, text: str) -> str:
+           f = Fernet(settings.MFA_ENCRYPTION_KEY)
+           return f.encrypt(text.encode()).decode()
+
+       def decrypt(self, encrypted_text: str) -> str:
+           f = Fernet(settings.MFA_ENCRYPTION_KEY)
+           return f.decrypt(encrypted_text.encode()).decode()
+
+The encrypted secret is stored in the ``mfa_authenticator`` table's
+``data`` JSON field.
+
 Troubleshooting
 ---------------
 

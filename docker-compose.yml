@@ -73,11 +73,16 @@ services:
     command: /app/docker-entrypoint.sh
     environment:
       - INSIDE_CONTAINER=true
+      # MFA encryption key for TOTP secrets - generate a new key for production with:
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # - MFA_ENCRYPTION_KEY=your-production-key-here
     volumes:
       - ./admin/private.json:/app/private.json
       - ./admin/inmoradmin:/app/inmoradmin
       - ./admin/apikeys:/app/apikeys
       - ./admin/templates:/app/templates
+      - ./admin/common:/app/common
+      - ./admin/tests:/app/tests
       - ./publickeys:/app/publickeys
       - ./historical_keys:/app/historical_keys
     # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings

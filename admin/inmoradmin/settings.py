@@ -289,6 +289,18 @@ MFA_SUPPORTED_TYPES = ["totp", "webauthn"]
 MFA_TOTP_ISSUER = "Inmor Admin"
 MFA_WEBAUTHN_RP_NAME = "Inmor Admin"
 
+# Custom MFA adapter with encrypted secret storage
+MFA_ADAPTER = "common.mfa_adapter.EncryptedMFAAdapter"
+
+# Encryption key for MFA secrets (TOTP)
+# SECURITY WARNING: Change this in production! Generate a new key with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# This default key is for development only.
+MFA_ENCRYPTION_KEY = os.environ.get(
+    "MFA_ENCRYPTION_KEY",
+    "s098x330cQk5XaIdRWI2-bRsWiiy7ggvJfPrq8OKmQE=",  # Development default - DO NOT USE IN PRODUCTION
+)
+
 # now see if we need to override any settings
 for variable in dir(localsettings):
     if not variable.startswith("__"):

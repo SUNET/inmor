@@ -42,6 +42,7 @@ dependencies = [
 	"fido2",
 	"whitenoise",
 	"qrcode",
+	"cryptography",
 ]
 
 [project.urls]
