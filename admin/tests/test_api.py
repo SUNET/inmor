@@ -474,7 +474,7 @@ def test_add_subordinate(auth_client: Client, loadredis, conf_settings):  # type
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_key(auth_client: Client, loadredis):  # type: ignore
+def test_add_subordinate_with_key(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests adding subordinate"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
@@ -501,7 +501,7 @@ def test_add_subordinate_with_key(auth_client: Client, loadredis):  # type: igno
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_key_twice(auth_client: Client, loadredis):  # type: ignore
+def test_add_subordinate_with_key_twice(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests adding subordinate"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
@@ -535,7 +535,7 @@ def test_add_subordinate_with_key_twice(auth_client: Client, loadredis):  # type
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis):  # type: ignore
+def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests listing subordinates"
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
@@ -561,7 +561,7 @@ def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis):  
 
 
 @pytest.mark.django_db
-def test_list_subordinates(auth_client: Client, loadredis):  # type: ignore
+def test_list_subordinates(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests listing subordinates"
     # Get initial count (fixture may have existing subordinates)
     response = auth_client.get("/api/v1/subordinates")
@@ -596,7 +596,7 @@ def test_list_subordinates(auth_client: Client, loadredis):  # type: ignore
 
 
 @pytest.mark.django_db
-def test_get_subordinate_byid(auth_client: Client, loadredis):  # type: ignore
+def test_get_subordinate_byid(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests listing subordinates"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
@@ -627,7 +627,7 @@ def test_get_subordinate_byid(auth_client: Client, loadredis):  # type: ignore
 
 
 @pytest.mark.django_db
-def test_update_subordinate_autorenew(auth_client: Client, loadredis):
+def test_update_subordinate_autorenew(auth_client: Client, loadredis, clean_subordinate):
     """Test updating a subordinate's autorenew field to False and verify the update."""
     # Add a subordinate first
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:

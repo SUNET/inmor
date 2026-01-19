@@ -1,0 +1,97 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Activate Authenticator App" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Activate Authenticator App" %}</h1>
+
+<p style="text-align: center; margin-bottom: 1.5rem; color: #6b7280; font-size: 0.875rem;" id="totp-instructions">
+    {% trans "Scan the QR code below with your authenticator app, then enter the verification code." %}
+</p>
+
+{% if form.non_field_errors %}
+<div role="alert" aria-labelledby="error-heading">
+    <h2 id="error-heading" class="sr-only">{% trans "Form errors" %}</h2>
+    <ul class="errorlist">
+        {% for error in form.non_field_errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<form method="post" action="{% url 'mfa_activate_totp' %}" aria-labelledby="page-title" novalidate>
+    {% csrf_token %}
+
+    <div class="qr-container" role="img" aria-label="{% trans 'QR code for authenticator app' %}">
+        <img src="{{ totp_svg_data_uri }}" alt="{% trans 'Scan this QR code with your authenticator app' %}" class="qr-code">
+    </div>
+
+    <div class="field-group">
+        <label for="id_secret">{% trans "Secret Key" %}</label>
+        <input type="text"
+               id="id_secret"
+               value="{{ form.secret }}"
+               readonly
+               class="secret-field"
+               aria-describedby="secret-help">
+        <p id="secret-help" class="help-text">{% trans "Save this secret to reinstall your authenticator app later." %}</p>
+    </div>
+
+    <div class="field-group">
+        <label for="id_code">{% trans "Verification Code" %}</label>
+        <input type="text"
+               name="code"
+               id="id_code"
+               placeholder="{% trans '6-digit code' %}"
+               autocomplete="one-time-code"
+               inputmode="numeric"
+               pattern="[0-9]*"
+               maxlength="6"
+               required
+               autofocus
+               {% if form.code.errors %}aria-invalid="true" aria-describedby="code-error"{% endif %}>
+        {% if form.code.errors %}
+        <div id="code-error" role="alert">
+            <ul class="errorlist">
+                {% for error in form.code.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <button type="submit">{% trans "Activate" %}</button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="{% url 'mfa_index' %}">{% trans "Cancel" %}</a>
+</nav>
+
+<style>
+    .qr-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 1.5rem;
+        padding: 1rem;
+        background-color: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+    }
+
+    .qr-code {
+        max-width: 200px;
+        height: auto;
+    }
+
+    .secret-field {
+        font-family: monospace;
+        font-size: 0.75rem;
+        background-color: #f9fafb;
+        cursor: text;
+        user-select: all;
+    }
+</style>
+{% endblock %}

@@ -1,33 +1,37 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
 import Button from '../components/base/Button.vue';
-import Input from '../components/base/Input.vue';
 
 export default defineComponent({
     name: 'LoginView',
-    components: { Button, Input },
+    components: { Button },
     data() {
         return {
-            username: '',
-            password: '',
-            error: null as string | null,
-            loading: false,
+            checking: true,
         };
     },
-    methods: {
-        async handleLogin() {
-            this.loading = true;
-            this.error = null;
-            try {
-                await this.$sdk.login(this.username, this.password);
-                // Reset auth state so router guard re-checks authentication
-                this.$resetAuth();
+    async mounted() {
+        // Check if already authenticated
+        try {
+            const user = await this.$sdk.getCurrentUser();
+            if (user) {
+                // Already logged in, redirect to home
                 this.$router.push('/');
-            } catch (e: any) {
-                this.error = e.message || 'Invalid username or password';
-            } finally {
-                this.loading = false;
+            } else {
+                // Not authenticated, show login options
+                this.checking = false;
             }
+        } catch {
+            // Error occurred, show login options
+            this.checking = false;
+        }
+    },
+    methods: {
+        redirectToLogin() {
+            // Redirect to Django allauth login page
+            // After successful login (including MFA), Django redirects back to frontend
+            const backendUrl = import.meta.env.VITE_API_URL || '';
+            window.location.href = `${backendUrl}/accounts/login/?next=${encodeURIComponent(window.location.origin + '/')}`;
         },
     },
 });
@@ -42,30 +46,18 @@ export default defineComponent({
                 <p class="login-subtitle">Trust Anchor Admin</p>
             </header>
 
-            <form @submit.prevent="handleLogin" class="login-form" :aria-busy="loading">
-                <Input
-                    v-model="username"
-                    label="Username"
-                    type="text"
-                    placeholder="Enter your username"
-                    required
-                    :disabled="loading"
-                    id="username"
-                />
-                <Input
-                    v-model="password"
-                    label="Password"
-                    type="password"
-                    placeholder="Enter your password"
-                    required
-                    :disabled="loading"
-                    id="password"
-                />
-                <p v-if="error" class="login-error" role="alert" aria-live="polite">{{ error }}</p>
-                <Button type="submit" :loading="loading" class="login-button">
+            <div v-if="checking" class="login-checking">
+                Checking authentication...
+            </div>
+
+            <div v-else class="login-content">
+                <p class="login-message">
+                    Sign in to access the Trust Anchor administration panel.
+                </p>
+                <Button @click="redirectToLogin" class="login-button">
                     Sign In
                 </Button>
-            </form>
+            </div>
         </div>
     </main>
 </template>
@@ -115,24 +107,23 @@ export default defineComponent({
     margin: var(--ir--space--1) 0 0;
 }
 
-.login-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ir--space--3);
+.login-content {
+    text-align: center;
 }
 
-.login-error {
-    color: var(--ir--color--danger);
+.login-message {
+    color: var(--ir--color--gray-600);
     font-size: var(--ir--font-size--s);
+    margin-bottom: var(--ir--space--4);
+}
+
+.login-checking {
     text-align: center;
-    margin: 0;
-    padding: var(--ir--space--2);
-    background-color: var(--ir--color--danger-bg);
-    border-radius: var(--ir--space--1);
+    color: var(--ir--color--gray-500);
+    font-size: var(--ir--font-size--s);
 }
 
 .login-button {
     width: 100%;
-    margin-top: var(--ir--space--2);
 }
 </style>

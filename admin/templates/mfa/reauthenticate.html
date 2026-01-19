@@ -1,0 +1,57 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Confirm Access" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Confirm Access" %}</h1>
+
+<p style="text-align: center; margin-bottom: 1.5rem; color: #6b7280; font-size: 0.875rem;" id="reauth-instructions">
+    {% trans "For security, please verify your identity to continue." %}
+</p>
+
+{% if form.non_field_errors %}
+<div role="alert" aria-labelledby="error-heading">
+    <h2 id="error-heading" class="sr-only">{% trans "Authentication errors" %}</h2>
+    <ul class="errorlist">
+        {% for error in form.non_field_errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<form method="post" aria-labelledby="page-title" aria-describedby="reauth-instructions" novalidate>
+    {% csrf_token %}
+
+    <div class="field-group">
+        <label for="id_code">{% trans "Authentication Code" %}</label>
+        <input type="text"
+               name="code"
+               id="id_code"
+               placeholder="{% trans '6-digit code' %}"
+               autocomplete="one-time-code"
+               inputmode="numeric"
+               pattern="[0-9]*"
+               maxlength="6"
+               required
+               autofocus
+               {% if form.code.errors %}aria-invalid="true" aria-describedby="code-error"{% endif %}>
+        {% if form.code.errors %}
+        <div id="code-error" role="alert">
+            <ul class="errorlist">
+                {% for error in form.code.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <button type="submit">{% trans "Confirm" %}</button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="/">{% trans "Cancel" %}</a>
+</nav>
+{% endblock %}

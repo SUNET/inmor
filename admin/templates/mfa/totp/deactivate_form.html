@@ -1,0 +1,72 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Deactivate Authenticator App" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Deactivate Authenticator App" %}</h1>
+
+<div class="alert alert-warning" role="alert">
+    <p>{% trans "Are you sure you want to deactivate your authenticator app? This will remove two-factor authentication from your account." %}</p>
+</div>
+
+{% if form.non_field_errors %}
+<div role="alert">
+    <ul class="errorlist">
+        {% for error in form.non_field_errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<form method="post" aria-labelledby="page-title" novalidate>
+    {% csrf_token %}
+
+    {% for field in form %}
+    {% if field.name != 'csrfmiddlewaretoken' %}
+    <div class="field-group">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}
+        <p class="help-text">{{ field.help_text }}</p>
+        {% endif %}
+        {% if field.errors %}
+        <div role="alert">
+            <ul class="errorlist">
+                {% for error in field.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <button type="submit" class="btn-danger">{% trans "Deactivate" %}</button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="{% url 'mfa_index' %}">{% trans "Cancel" %}</a>
+</nav>
+
+<style>
+    .alert-warning {
+        padding: 1rem;
+        background-color: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-radius: 8px;
+        color: #92400e;
+        margin-bottom: 1.5rem;
+    }
+
+    .btn-danger {
+        background-color: #dc2626;
+    }
+
+    .btn-danger:hover {
+        background-color: #b91c1c;
+    }
+</style>
+{% endblock %}

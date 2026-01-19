@@ -19,9 +19,11 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 @pytest.fixture(scope="function")
-def db(request, django_db_setup, django_db_blocker):
+def db_with_fixtures(request, db, django_db_blocker):
+    """Load test fixture data into the database."""
     django_db_blocker.unblock()
     call_command("loaddata", "db.json")
+    yield
 
 
 @pytest.fixture(scope="function")
@@ -42,7 +44,7 @@ def conf_settings(settings):
 
 
 @pytest.fixture
-def user(db):
+def user(db_with_fixtures):
     """Create or get a test user for authentication."""
     user, created = User.objects.get_or_create(
         username="testuser",
@@ -64,3 +66,15 @@ def auth_client(user) -> Client:
     client = Client()
     client.login(username="testuser", password="testpass123")
     return client
+
+
+@pytest.fixture
+def clean_subordinate(db_with_fixtures):
+    """Clean up test subordinate before test to ensure isolation."""
+    from entities.models import Subordinate
+
+    # Delete the test subordinate if it exists
+    Subordinate.objects.filter(entityid="https://fakerp0.labb.sunet.se").delete()
+    yield
+    # Clean up after test as well
+    Subordinate.objects.filter(entityid="https://fakerp0.labb.sunet.se").delete()

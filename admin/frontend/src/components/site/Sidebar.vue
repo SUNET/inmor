@@ -40,13 +40,10 @@ export default defineComponent({
         };
     },
     methods: {
-        async handleLogout() {
-            try {
-                await this.$sdk.logout();
-                this.$router.push('/login');
-            } catch (e) {
-                console.error('Logout failed:', e);
-            }
+        handleLogout() {
+            // Redirect to Django allauth logout page
+            const backendUrl = import.meta.env.VITE_API_URL || '';
+            window.location.href = `${backendUrl}/accounts/logout/`;
         },
         async handleRegenerateEntity() {
             if (this.regenerating) return;

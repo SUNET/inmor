@@ -1,0 +1,42 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Remove Security Key" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Remove Security Key" %}</h1>
+
+<div class="alert alert-warning" role="alert">
+    <p>{% blocktrans with name=authenticator %}Are you sure you want to remove the security key "{{ name }}"?{% endblocktrans %}</p>
+</div>
+
+<form method="post" aria-labelledby="page-title" novalidate>
+    {% csrf_token %}
+    <button type="submit" class="btn-danger">{% trans "Remove" %}</button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="{% url 'mfa_list_webauthn' %}">{% trans "Cancel" %}</a>
+</nav>
+
+<style>
+    .alert-warning {
+        padding: 1rem;
+        background-color: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-radius: 8px;
+        color: #92400e;
+        margin-bottom: 1.5rem;
+        text-align: center;
+    }
+
+    .btn-danger {
+        width: 100%;
+        background-color: #dc2626;
+    }
+
+    .btn-danger:hover {
+        background-color: #b91c1c;
+    }
+</style>
+{% endblock %}

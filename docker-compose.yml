@@ -76,6 +76,8 @@ services:
     volumes:
       - ./admin/private.json:/app/private.json
       - ./admin/inmoradmin:/app/inmoradmin
+      - ./admin/apikeys:/app/apikeys
+      - ./admin/templates:/app/templates
       - ./publickeys:/app/publickeys
       - ./historical_keys:/app/historical_keys
     # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
@@ -86,14 +88,15 @@ services:
       context: ./admin/frontend/
       target: production
       args:
-        VITE_API_URL: http://localhost:8000
+        # Empty string means use same origin (nginx proxies API requests)
+        VITE_API_URL: ""
     image: docker.sunet.se/inmor-frontend:0.2.1
     networks:
       - inmor-net
     depends_on:
       - admin
     ports:
-      - "3000:80"
+      - "127.0.0.1:5173:80"
 networks:
   inmor-net:
     driver: bridge

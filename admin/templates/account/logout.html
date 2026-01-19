@@ -1,0 +1,24 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Sign Out" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Sign Out" %}</h1>
+
+<p style="text-align: center; margin-bottom: 1.5rem; color: #6b7280;" id="logout-message">
+    {% trans "Are you sure you want to sign out?" %}
+</p>
+
+<form method="post" action="{% url 'account_logout' %}" aria-labelledby="page-title" aria-describedby="logout-message">
+    {% csrf_token %}
+    {% if redirect_field_value %}
+    <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+    {% endif %}
+    <button type="submit">{% trans "Sign Out" %}</button>
+</form>
+
+<nav class="links" aria-label="{% trans 'Additional options' %}">
+    <a href="/">{% trans "Cancel" %}</a>
+</nav>
+{% endblock %}

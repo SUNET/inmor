@@ -30,9 +30,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-28am!-fa@e-j@#9*=a^$=60oc7o5!ggp=r-(+5zs_u*4ebe2k4"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS: list[str] = []
+ALLOWED_HOSTS: list[str] = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,admin").split(",")
 
 
 # Application definition
@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "django.contrib.humanize",
     "corsheaders",
     "allauth",
     "allauth.account",
@@ -58,6 +59,7 @@ SITE_ID = 1
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # Serve static files efficiently
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -69,21 +71,15 @@ MIDDLEWARE = [
 ]
 
 # CORS Configuration (for frontend)
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Vite dev server
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",  # Production frontend (Docker)
-    "http://127.0.0.1:3000",
-]
+# Default origins for development/Docker; override with CORS_ORIGINS env var
+_default_origins = (
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
+)
+CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", _default_origins).split(",")
 CORS_ALLOW_CREDENTIALS = True
 
 # CSRF trusted origins (for frontend making API requests)
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", _default_origins).split(",")
 
 # Authentication backends
 AUTHENTICATION_BACKENDS = [
@@ -96,6 +92,10 @@ ACCOUNT_LOGIN_METHODS = {"email", "username"}
 ACCOUNT_SIGNUP_FIELDS = ["email", "username*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "none"  # For development; set to "mandatory" in production
 ACCOUNT_ALLOW_SIGNUPS = False  # Disable public registration; only admins can create users
+
+# Login/logout redirect URLs (relative paths work with nginx proxy)
+LOGIN_REDIRECT_URL = os.environ.get("LOGIN_REDIRECT_URL", "/")
+LOGOUT_REDIRECT_URL = os.environ.get("LOGOUT_REDIRECT_URL", "/login")
 
 ROOT_URLCONF = "inmoradmin.urls"
 
@@ -167,14 +167,26 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"  # Where collectstatic puts files
+
+# Whitenoise configuration for efficient static file serving
+# Use CompressedManifestStaticFilesStorage in production (requires collectstatic)
+# Use CompressedStaticFilesStorage in development (no manifest needed)
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"
+        if DEBUG
+        else "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "/"
 
 REDIS_LOCATION: str = os.environ.get("REDIS_LOCATION", "redis://redis:6379/0")
 

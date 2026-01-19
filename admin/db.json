@@ -1,1 +1,195 @@
-[{"model": "trustmarks.trustmarktype", "pk": 1, "fields": {"tmtype": "https://sunet.se/does_not_exist_trustmark", "autorenew": true, "valid_for": 8760, "renewal_time": 48, "active": true}}, {"model": "trustmarks.trustmarktype", "pk": 2, "fields": {"tmtype": "https://example.com/trust_mark_type", "autorenew": true, "valid_for": 720, "renewal_time": 48, "active": true}}, {"model": "auth.permission", "pk": 1, "fields": {"name": "Can add trust mark type", "content_type": 1, "codename": "add_trustmarktype"}}, {"model": "auth.permission", "pk": 2, "fields": {"name": "Can change trust mark type", "content_type": 1, "codename": "change_trustmarktype"}}, {"model": "auth.permission", "pk": 3, "fields": {"name": "Can delete trust mark type", "content_type": 1, "codename": "delete_trustmarktype"}}, {"model": "auth.permission", "pk": 4, "fields": {"name": "Can view trust mark type", "content_type": 1, "codename": "view_trustmarktype"}}, {"model": "auth.permission", "pk": 5, "fields": {"name": "Can add trust mark", "content_type": 2, "codename": "add_trustmark"}}, {"model": "auth.permission", "pk": 6, "fields": {"name": "Can change trust mark", "content_type": 2, "codename": "change_trustmark"}}, {"model": "auth.permission", "pk": 7, "fields": {"name": "Can delete trust mark", "content_type": 2, "codename": "delete_trustmark"}}, {"model": "auth.permission", "pk": 8, "fields": {"name": "Can view trust mark", "content_type": 2, "codename": "view_trustmark"}}, {"model": "auth.permission", "pk": 9, "fields": {"name": "Can add subordinate", "content_type": 3, "codename": "add_subordinate"}}, {"model": "auth.permission", "pk": 10, "fields": {"name": "Can change subordinate", "content_type": 3, "codename": "change_subordinate"}}, {"model": "auth.permission", "pk": 11, "fields": {"name": "Can delete subordinate", "content_type": 3, "codename": "delete_subordinate"}}, {"model": "auth.permission", "pk": 12, "fields": {"name": "Can view subordinate", "content_type": 3, "codename": "view_subordinate"}}, {"model": "auth.permission", "pk": 13, "fields": {"name": "Can add log entry", "content_type": 4, "codename": "add_logentry"}}, {"model": "auth.permission", "pk": 14, "fields": {"name": "Can change log entry", "content_type": 4, "codename": "change_logentry"}}, {"model": "auth.permission", "pk": 15, "fields": {"name": "Can delete log entry", "content_type": 4, "codename": "delete_logentry"}}, {"model": "auth.permission", "pk": 16, "fields": {"name": "Can view log entry", "content_type": 4, "codename": "view_logentry"}}, {"model": "auth.permission", "pk": 17, "fields": {"name": "Can add permission", "content_type": 5, "codename": "add_permission"}}, {"model": "auth.permission", "pk": 18, "fields": {"name": "Can change permission", "content_type": 5, "codename": "change_permission"}}, {"model": "auth.permission", "pk": 19, "fields": {"name": "Can delete permission", "content_type": 5, "codename": "delete_permission"}}, {"model": "auth.permission", "pk": 20, "fields": {"name": "Can view permission", "content_type": 5, "codename": "view_permission"}}, {"model": "auth.permission", "pk": 21, "fields": {"name": "Can add group", "content_type": 6, "codename": "add_group"}}, {"model": "auth.permission", "pk": 22, "fields": {"name": "Can change group", "content_type": 6, "codename": "change_group"}}, {"model": "auth.permission", "pk": 23, "fields": {"name": "Can delete group", "content_type": 6, "codename": "delete_group"}}, {"model": "auth.permission", "pk": 24, "fields": {"name": "Can view group", "content_type": 6, "codename": "view_group"}}, {"model": "auth.permission", "pk": 25, "fields": {"name": "Can add user", "content_type": 7, "codename": "add_user"}}, {"model": "auth.permission", "pk": 26, "fields": {"name": "Can change user", "content_type": 7, "codename": "change_user"}}, {"model": "auth.permission", "pk": 27, "fields": {"name": "Can delete user", "content_type": 7, "codename": "delete_user"}}, {"model": "auth.permission", "pk": 28, "fields": {"name": "Can view user", "content_type": 7, "codename": "view_user"}}, {"model": "auth.permission", "pk": 29, "fields": {"name": "Can add content type", "content_type": 8, "codename": "add_contenttype"}}, {"model": "auth.permission", "pk": 30, "fields": {"name": "Can change content type", "content_type": 8, "codename": "change_contenttype"}}, {"model": "auth.permission", "pk": 31, "fields": {"name": "Can delete content type", "content_type": 8, "codename": "delete_contenttype"}}, {"model": "auth.permission", "pk": 32, "fields": {"name": "Can view content type", "content_type": 8, "codename": "view_contenttype"}}, {"model": "auth.permission", "pk": 33, "fields": {"name": "Can add session", "content_type": 9, "codename": "add_session"}}, {"model": "auth.permission", "pk": 34, "fields": {"name": "Can change session", "content_type": 9, "codename": "change_session"}}, {"model": "auth.permission", "pk": 35, "fields": {"name": "Can delete session", "content_type": 9, "codename": "delete_session"}}, {"model": "auth.permission", "pk": 36, "fields": {"name": "Can view session", "content_type": 9, "codename": "view_session"}}, {"model": "contenttypes.contenttype", "pk": 1, "fields": {"app_label": "trustmarks", "model": "trustmarktype"}}, {"model": "contenttypes.contenttype", "pk": 2, "fields": {"app_label": "trustmarks", "model": "trustmark"}}, {"model": "contenttypes.contenttype", "pk": 3, "fields": {"app_label": "entities", "model": "subordinate"}}, {"model": "contenttypes.contenttype", "pk": 4, "fields": {"app_label": "admin", "model": "logentry"}}, {"model": "contenttypes.contenttype", "pk": 5, "fields": {"app_label": "auth", "model": "permission"}}, {"model": "contenttypes.contenttype", "pk": 6, "fields": {"app_label": "auth", "model": "group"}}, {"model": "contenttypes.contenttype", "pk": 7, "fields": {"app_label": "auth", "model": "user"}}, {"model": "contenttypes.contenttype", "pk": 8, "fields": {"app_label": "contenttypes", "model": "contenttype"}}, {"model": "contenttypes.contenttype", "pk": 9, "fields": {"app_label": "sessions", "model": "session"}}]
+[
+{
+  "model": "trustmarks.trustmarktype",
+  "pk": 1,
+  "fields": {
+    "tmtype": "https://sunet.se/does_not_exist_trustmark",
+    "autorenew": true,
+    "valid_for": 8760,
+    "renewal_time": 48,
+    "active": true
+  }
+},
+{
+  "model": "trustmarks.trustmarktype",
+  "pk": 2,
+  "fields": {
+    "tmtype": "https://example.com/trust_mark_type",
+    "autorenew": true,
+    "valid_for": 720,
+    "renewal_time": 48,
+    "active": true
+  }
+},
+{
+  "model": "trustmarks.trustmark",
+  "pk": 1,
+  "fields": {
+    "tmt": 1,
+    "added": "2026-01-18T10:31:35.504Z",
+    "domain": "https://fakerp0.labb.sunet.se",
+    "active": true,
+    "autorenew": true,
+    "valid_for": 8760,
+    "renewal_time": 48,
+    "mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE4MDAyNjgyOTUuNTE3OTkyLCJpYXQiOjE3Njg3MzIyOTUuNTE3OTkyLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9mYWtlcnAwLmxhYmIuc3VuZXQuc2UiLCJ0cnVzdF9tYXJrX3R5cGUiOiJodHRwczovL3N1bmV0LnNlL2RvZXNfbm90X2V4aXN0X3RydXN0bWFyayJ9.dUZhMBxe06MKVAyl9MMm67yTgvrs9LrV-yCJ-kK6XddYhzj042G6Xjpm9AGBptg3onXLSXwTV-K4wUypoDd9YtZCICja9k0y4nb26uRckqWVTKGbYRP0DO-FwwkVjc9P0USRBdpr7dXdijVZPRjMQFC8RdC7L-fx2ALd4bjCpi-3faUIZVhpP0CsjI7ARXLfD3XiRZb0Z9z_GKn5cCZIljyu4Dk1FhxtoIJjy5mgOUwVBRszBw_GfmALP86PjGjFBVgcUi76qUOOvhjZMSLs_roWmDkRmkhtF0pmZXvU35YpDuyJtBbKrV2zLe56ew772IhzhXzDKuYzv0ec3FjpWg",
+    "expire_at": "2027-01-18T10:31:35.517Z",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "trustmarks.trustmark",
+  "pk": 2,
+  "fields": {
+    "tmt": 1,
+    "added": "2026-01-18T10:31:40.972Z",
+    "domain": "https://fakeop0.labb.sunet.se",
+    "active": true,
+    "autorenew": true,
+    "valid_for": 8760,
+    "renewal_time": 48,
+    "mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE4MDAyNjgzMDAuOTg3MDI1LCJpYXQiOjE3Njg3MzIzMDAuOTg3MDI1LCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9mYWtlb3AwLmxhYmIuc3VuZXQuc2UiLCJ0cnVzdF9tYXJrX3R5cGUiOiJodHRwczovL3N1bmV0LnNlL2RvZXNfbm90X2V4aXN0X3RydXN0bWFyayJ9.mgiyldbrprv2HSyKglhD0LRswolMp-nr2UziX2V8XGBN36e29BRJlBCuka181ICQ1b2P4hQ2QkZkfSq06_pmMHhVeu4pIH2NswknqLVwwG_LQuerPfcdidA2rq7-hR2srRYAp_lgsjQQLLcsL7OSPN6yyME9dz7he3lXs6OKRJa9H84akyW_oJZKX5Sl-OmvOxTw4R9iA6FpEzzs-ppjgITxiduhUtBpx1SrJKtfLZMysGOiiNArzYC743a54f12HIzhNlG_9nZnWtNOPZmgb2YOuR1m6pyiuzy9nHugPm9SHVsNAqYrTov34l_hwi4dGEKQPAUysaWtPB8adKlN5Q",
+    "expire_at": "2027-01-18T10:31:40.987Z",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "trustmarks.trustmark",
+  "pk": 3,
+  "fields": {
+    "tmt": 1,
+    "added": "2026-01-18T10:31:46.486Z",
+    "domain": "https://fakerp1.labb.sunet.se",
+    "active": true,
+    "autorenew": true,
+    "valid_for": 8760,
+    "renewal_time": 48,
+    "mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE4MDAyNjgzMDYuNDk4NzExLCJpYXQiOjE3Njg3MzIzMDYuNDk4NzExLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9mYWtlcnAxLmxhYmIuc3VuZXQuc2UiLCJ0cnVzdF9tYXJrX3R5cGUiOiJodHRwczovL3N1bmV0LnNlL2RvZXNfbm90X2V4aXN0X3RydXN0bWFyayJ9.otdm67Y13mwh87QGJycARL1JV8b1_f6zk4OhXdlw4O1BydG5OMSDtjMueoyeuIR1y2fSyeUMpAd53wFKAsmM79pYyPQuMmzmnhD4C9_D5P6PbaFaBGZzNmuvNxbmvInsxKcbVcPLjfgizew_SZOKvN9-J_jtsC9qMcZPVULdubndHeh-1aGwUGDNwbEMa8IeP4CZk7Scik_plddPMBT7f--iTqwfgLlq3BSK0HR-4kVLb-iVLsNku2zQ6DilEx61wNFN8D7lRtcKzz_pzm419r5CxLvwR8amDV55fyOFP3hmqDOzNodY7YAkOOg0AJD6M-5wRR0jFJjJOdh0RNvoSA",
+    "expire_at": "2027-01-18T10:31:46.498Z",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "trustmarks.trustmark",
+  "pk": 4,
+  "fields": {
+    "tmt": 1,
+    "added": "2026-01-18T10:31:51.714Z",
+    "domain": "https://localhost:8080",
+    "active": true,
+    "autorenew": true,
+    "valid_for": 8760,
+    "renewal_time": 48,
+    "mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE4MDAyNjgzMTEuNzI4ODk5LCJpYXQiOjE3Njg3MzIzMTEuNzI4ODk5LCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9sb2NhbGhvc3Q6ODA4MCIsInRydXN0X21hcmtfdHlwZSI6Imh0dHBzOi8vc3VuZXQuc2UvZG9lc19ub3RfZXhpc3RfdHJ1c3RtYXJrIn0.ISTHtR2jwCECmKhQ1pQ_lJEODZTlhRuTncw3DLtfQmEhvOn8qewaC0DNujhNGH5f-5_ZNlZ-s11IaUhDYBg_TVa-E-YZqjVCPj0nkufQYkUMOx2EqJ38HY-SUnaZDgHKmYN4xflvPgCR3UHo64X9kgvH-W6QOpf0o6MDTzdKx_3K5ISyR1jHQmfRR2UH4UEu_dPMb0BzoYJbbdEKw548AcKT82LYj0xZp1p3PDXTgSICPte6X4G2Sr-iQ3gyvu4wTM-grNyc1COnnBI9q-z1qhDrI9jdT1PCiK0EtRNnbTPhx7y0uyHZu0ol0VrVT8rmdJPXvOchndr1FXpwAuHe5w",
+    "expire_at": "2027-01-18T10:31:51.728Z",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "trustmarks.trustmark",
+  "pk": 5,
+  "fields": {
+    "tmt": 2,
+    "added": "2026-01-18T10:31:57.207Z",
+    "domain": "https://fakerp0.labb.sunet.se",
+    "active": true,
+    "autorenew": true,
+    "valid_for": 720,
+    "renewal_time": 48,
+    "mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE3NzEzMjQzMTcuMjE0NDQzLCJpYXQiOjE3Njg3MzIzMTcuMjE0NDQzLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9mYWtlcnAwLmxhYmIuc3VuZXQuc2UiLCJ0cnVzdF9tYXJrX3R5cGUiOiJodHRwczovL2V4YW1wbGUuY29tL3RydXN0X21hcmtfdHlwZSJ9.dnLwuv3Mx8dwNiItrj6CcE4VqklQz6seTd3cXRuPiXr3HPo0FTEmHLgojXKN6iJSgoqoaq842ga8DTbHDiH7hDlXasfCnKr0aD1hRSlPw33q0N56Rl12pXus7L6XUKw_QcGgLTWFb3gaN_Y7HrJY-uOfheh6H61TXBQE9dMVMpqV8X1vftt6j0XqgAUCLmsvInFLAzP-Q4PkQLouyUS7b7FFCZ7ZgCzVugEprVO2cFa3X8AwMboG_iQuxrw9hkLIPLbFWfzfgFav1xlFcCIR3hxLk6dm2VGI1ii6rK8INtzTJuYuitn4uFbdBQA5bsdqbXheQ3RG_IG3A1wYwQrTyg",
+    "expire_at": "2026-02-17T10:31:57.214Z",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "trustmarks.trustmark",
+  "pk": 6,
+  "fields": {
+    "tmt": 2,
+    "added": "2026-01-18T10:32:02.705Z",
+    "domain": "https://fakerp1.labb.sunet.se",
+    "active": true,
+    "autorenew": true,
+    "valid_for": 720,
+    "renewal_time": 48,
+    "mark": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kifQ.eyJleHAiOjE3NzEzMjQzMjIuNzE2NDY5LCJpYXQiOjE3Njg3MzIzMjIuNzE2NDY5LCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwic3ViIjoiaHR0cHM6Ly9mYWtlcnAxLmxhYmIuc3VuZXQuc2UiLCJ0cnVzdF9tYXJrX3R5cGUiOiJodHRwczovL2V4YW1wbGUuY29tL3RydXN0X21hcmtfdHlwZSJ9.LGDV5cwjAayjumv4k_2igrFjY-7v5FEMXLz3by0T_v6CpMziekMsWXpgWhJbRtIPeBIIbAduRk2tOEba471fiQ2IgIY_Dlm-uMPQu5FidsnjIgDKCOCTBDiglS4dol3U-RGTC2ttINNu_1hNim1SCh3omjgmvZcL6ChkgpCmcv0xxAcexYfbsxNu3SKpJezzocsl8weYr1KBTYvJ1v1GOvA3sqCiG_yaslpJ7pxQ0O8JxPL9v11VU0JgMB2d_XeYpOvb87tqSM74q4iGsqBtNIqyu3lBliNCxwzw6km1jXQJDDQeEo8mgHdf81v_IL0WqJsOyvKRRK8D4rrgj4v_2w",
+    "expire_at": "2026-02-17T10:32:02.716Z",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "entities.subordinate",
+  "pk": 1,
+  "fields": {
+    "added": "2026-01-18T10:32:20.164Z",
+    "entityid": "https://fakerp0.labb.sunet.se",
+    "valid_for": 8760,
+    "autorenew": true,
+    "metadata": "{\"federation_entity\": {\"logo_uri\": \"https://fakerp0.labb.sunet.se/fake.png\", \"organization_name\": \"Fake Organization\"}, \"openid_relying_party\": {\"application_type\": \"web\", \"client_name\": \"Fake RP0\", \"client_registration_types\": [\"automatic\"], \"grant_types\": [\"authorization_code\"], \"jwks\": {\"keys\": [{\"e\": \"AQAB\", \"kid\": \"nZpmHzIxlT7bH7qi46s42rXoesJ1_cHbbVTH5vNage4\", \"kty\": \"RSA\", \"n\": \"0nQUVcKXFqn4UWWp6lBiziRw_SisPSJbCBuAkafQlB8_g3RPqO8I8kTtgaTEQeR07-OakTIhC0mkbF_9TxsAisVmj9V9f_Se_4X7fqvbOxFLwOkqDQJLexGyhQVL14_GMAWw_srpL_KkW11vZ3eA0z_V0-vFDoBvBCoHaYpUDJ9fMP_us2opMcuUryTBP-Hhsr69SDoYLGBW85NLLXWVM2V51QR6Dvw4dHr8zyTu-uG5IPvB8JmlCLZ_pQI99JgC1WT4PMwI-mpvImI-vYQRrRVsvZ2BdNk4CJ39kczPv0L_uNFcIc6umZ0KMAe3JPETzqLSKQG3j2nLBET8fh8h1w\", \"use\": \"sig\"}]}, \"logo_uri\": \"https://fakerp0.labb.sunet.se/fake.png\", \"organization_name\": \"Fake Organization\", \"redirect_uris\": [\"https://fakerp0.labb.sunet.se/redirect\"], \"response_types\": [\"code\"]}}",
+    "forced_metadata": "{}",
+    "jwks": "{\"keys\": [{\"e\": \"AQAB\", \"kid\": \"nZpmHzIxlT7bH7qi46s42rXoesJ1_cHbbVTH5vNage4\", \"kty\": \"RSA\", \"n\": \"0nQUVcKXFqn4UWWp6lBiziRw_SisPSJbCBuAkafQlB8_g3RPqO8I8kTtgaTEQeR07-OakTIhC0mkbF_9TxsAisVmj9V9f_Se_4X7fqvbOxFLwOkqDQJLexGyhQVL14_GMAWw_srpL_KkW11vZ3eA0z_V0-vFDoBvBCoHaYpUDJ9fMP_us2opMcuUryTBP-Hhsr69SDoYLGBW85NLLXWVM2V51QR6Dvw4dHr8zyTu-uG5IPvB8JmlCLZ_pQI99JgC1WT4PMwI-mpvImI-vYQRrRVsvZ2BdNk4CJ39kczPv0L_uNFcIc6umZ0KMAe3JPETzqLSKQG3j2nLBET8fh8h1w\", \"use\": \"sig\"}]}",
+    "required_trustmarks": null,
+    "active": true,
+    "statement": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kiLCJ0eXAiOiJlbnRpdHktc3RhdGVtZW50K2p3dCJ9.eyJleHAiOjE4MDAyNjgzNDAuMTQxNzUyLCJpYXQiOjE3Njg3MzIzNDAuMTQxNzUyLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwiandrcyI6eyJrZXlzIjpbeyJlIjoiQVFBQiIsImtpZCI6Im5acG1Iekl4bFQ3Ykg3cWk0NnM0MnJYb2VzSjFfY0hiYlZUSDV2TmFnZTQiLCJrdHkiOiJSU0EiLCJuIjoiMG5RVVZjS1hGcW40VVdXcDZsQml6aVJ3X1Npc1BTSmJDQnVBa2FmUWxCOF9nM1JQcU84SThrVHRnYVRFUWVSMDctT2FrVEloQzBta2JGXzlUeHNBaXNWbWo5VjlmX1NlXzRYN2ZxdmJPeEZMd09rcURRSkxleEd5aFFWTDE0X0dNQVd3X3NycExfS2tXMTF2WjNlQTB6X1YwLXZGRG9CdkJDb0hhWXBVREo5Zk1QX3VzMm9wTWN1VXJ5VEJQLUhoc3I2OVNEb1lMR0JXODVOTExYV1ZNMlY1MVFSNkR2dzRkSHI4enlUdS11RzVJUHZCOEptbENMWl9wUUk5OUpnQzFXVDRQTXdJLW1wdkltSS12WVFSclJWc3ZaMkJkTms0Q0ozOWtjelB2MExfdU5GY0ljNnVtWjBLTUFlM0pQRVR6cUxTS1FHM2oybkxCRVQ4Zmg4aDF3IiwidXNlIjoic2lnIn1dfSwibWV0YWRhdGEiOnt9LCJzdWIiOiJodHRwczovL2Zha2VycDAubGFiYi5zdW5ldC5zZSJ9.eomaFFcG3IGGwO9vZnJKHvlMBuQ_kgh-vwjdNYawbkUb1cCa0biOV2WswNwerB04NSjMkErWeWItIX9r3JpkhI_sVMUg8ZpygGrnuJjhEX0IIE7YThWewm3Tam9uOLEcoyWiaS330NOqIYhX0MqzpwYB-aQ4ihRVOOPFW2vF0GXFOCJc3JxQkwlI0unGv6qX2oXZYEoZDPIipATMCizbSFnOK3lxI6Ml6sI_cpnQXQoowh_NlvUDAV7SbswpgwEWYk61HqvG63r1EHyXol9mWlyTv8rw8bms-dFpkNuU6kjR04TitSIILG9UqKuTojUpnROJAeSJdobEg7E4VkzDOQ",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "entities.subordinate",
+  "pk": 2,
+  "fields": {
+    "added": "2026-01-18T10:32:33.395Z",
+    "entityid": "https://fakeop0.labb.sunet.se",
+    "valid_for": 8760,
+    "autorenew": true,
+    "metadata": "{\"federation_entity\": {\"logo_uri\": \"https://fakeop0.labb.sunet.se/fake.png\", \"organization_name\": \"Fake Organization\"}, \"openid_provider\": {\"authorization_endpoint\": \"https://fakeop0.labb.sunet.se/authorization\", \"client_registration_types_supported\": [\"automatic\", \"explicit\"], \"federation_registration_endpoint\": \"https://op.umu.se/openid/fedreg\", \"grant_types_supported\": [\"authorization_code\"], \"id_token_signing_alg_values_supported\": [\"ES256\", \"RS256\"], \"issuer\": \"https://fakeop0.labb.sunet.se\", \"logo_uri\": \"https://fakeop0.labb.sunet.se/fake.png\", \"op_policy_uri\": \"https://www.umu.se/en/website/legal-information/\", \"response_types_supported\": [\"code\"], \"signed_jwks_uri\": \"https://fakeop0.labbsunet.se/jwks.jose\", \"subject_types_supported\": [\"pairwise\", \"public\"], \"token_endpoint\": \"https://fakeop0.labb.sunet.se/token\", \"token_endpoint_auth_methods_supported\": [\"private_key_jwt\"]}}",
+    "forced_metadata": "{\"openid_provider\": {\"application_type\": \"mutant\"}}",
+    "jwks": "{\"keys\": [{\"e\": \"AQAB\", \"kid\": \"nZpmHzIxlT7bH7qi46s42rXoesJ1_cHbbVTH5vNage4\", \"kty\": \"RSA\", \"n\": \"0nQUVcKXFqn4UWWp6lBiziRw_SisPSJbCBuAkafQlB8_g3RPqO8I8kTtgaTEQeR07-OakTIhC0mkbF_9TxsAisVmj9V9f_Se_4X7fqvbOxFLwOkqDQJLexGyhQVL14_GMAWw_srpL_KkW11vZ3eA0z_V0-vFDoBvBCoHaYpUDJ9fMP_us2opMcuUryTBP-Hhsr69SDoYLGBW85NLLXWVM2V51QR6Dvw4dHr8zyTu-uG5IPvB8JmlCLZ_pQI99JgC1WT4PMwI-mpvImI-vYQRrRVsvZ2BdNk4CJ39kczPv0L_uNFcIc6umZ0KMAe3JPETzqLSKQG3j2nLBET8fh8h1w\", \"use\": \"sig\"}]}",
+    "required_trustmarks": null,
+    "active": true,
+    "statement": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kiLCJ0eXAiOiJlbnRpdHktc3RhdGVtZW50K2p3dCJ9.eyJleHAiOjE4MDAyNjgzNTMuMzgwMDE3LCJpYXQiOjE3Njg3MzIzNTMuMzgwMDE3LCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwiandrcyI6eyJrZXlzIjpbeyJlIjoiQVFBQiIsImtpZCI6Im5acG1Iekl4bFQ3Ykg3cWk0NnM0MnJYb2VzSjFfY0hiYlZUSDV2TmFnZTQiLCJrdHkiOiJSU0EiLCJuIjoiMG5RVVZjS1hGcW40VVdXcDZsQml6aVJ3X1Npc1BTSmJDQnVBa2FmUWxCOF9nM1JQcU84SThrVHRnYVRFUWVSMDctT2FrVEloQzBta2JGXzlUeHNBaXNWbWo5VjlmX1NlXzRYN2ZxdmJPeEZMd09rcURRSkxleEd5aFFWTDE0X0dNQVd3X3NycExfS2tXMTF2WjNlQTB6X1YwLXZGRG9CdkJDb0hhWXBVREo5Zk1QX3VzMm9wTWN1VXJ5VEJQLUhoc3I2OVNEb1lMR0JXODVOTExYV1ZNMlY1MVFSNkR2dzRkSHI4enlUdS11RzVJUHZCOEptbENMWl9wUUk5OUpnQzFXVDRQTXdJLW1wdkltSS12WVFSclJWc3ZaMkJkTms0Q0ozOWtjelB2MExfdU5GY0ljNnVtWjBLTUFlM0pQRVR6cUxTS1FHM2oybkxCRVQ4Zmg4aDF3IiwidXNlIjoic2lnIn1dfSwibWV0YWRhdGEiOnsib3BlbmlkX3Byb3ZpZGVyIjp7ImFwcGxpY2F0aW9uX3R5cGUiOiJtdXRhbnQifX0sInN1YiI6Imh0dHBzOi8vZmFrZW9wMC5sYWJiLnN1bmV0LnNlIn0.PUoYE08gFFj7qFjCX2vz9aOdhKTwz5aoQAhGIxFp2zxL1i_Se6aFrdfYTQVoZWYCyBHIgPih3h8VqSmJ-GzYLOnYvoYVwdkUTwYPOWf8P_yyNbL693ui3z0xeWtD-CS1fXkwrH_ONdGU77VkC3smISt3rnGD7Fmr53LOdcwBOSRwx8UKJ8wyBeo_znnu1tdVDmvCJbTkNKtaClKMipKMZevAsDA9Ur4_DznVAf6CnhIt4TzKTrR9alFY3C2QdQ9OoN251-KFbuobrOIQFwHeBP4uk1wd312FQragiJ6jWbZWINt86X5BoxiCEeVtI-nDU2AYBB0Ce0YPsuf9ZHk61A",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "entities.subordinate",
+  "pk": 3,
+  "fields": {
+    "added": "2026-01-18T10:32:42.401Z",
+    "entityid": "https://fakerp1.labb.sunet.se",
+    "valid_for": 8760,
+    "autorenew": true,
+    "metadata": "{\"federation_entity\": {\"logo_uri\": \"https://fakerp1.labb.sunet.se/fake.png\", \"organization_name\": \"Fake Organization\"}, \"openid_relying_party\": {\"application_type\": \"web\", \"client_name\": \"Fake RP0\", \"client_registration_types\": [\"automatic\"], \"grant_types\": [\"authorization_code\"], \"jwks\": {\"keys\": [{\"e\": \"AQAB\", \"kid\": \"nZpmHzIxlT7bH7qi46s42rXoesJ1_cHbbVTH5vNage4\", \"kty\": \"RSA\", \"n\": \"0nQUVcKXFqn4UWWp6lBiziRw_SisPSJbCBuAkafQlB8_g3RPqO8I8kTtgaTEQeR07-OakTIhC0mkbF_9TxsAisVmj9V9f_Se_4X7fqvbOxFLwOkqDQJLexGyhQVL14_GMAWw_srpL_KkW11vZ3eA0z_V0-vFDoBvBCoHaYpUDJ9fMP_us2opMcuUryTBP-Hhsr69SDoYLGBW85NLLXWVM2V51QR6Dvw4dHr8zyTu-uG5IPvB8JmlCLZ_pQI99JgC1WT4PMwI-mpvImI-vYQRrRVsvZ2BdNk4CJ39kczPv0L_uNFcIc6umZ0KMAe3JPETzqLSKQG3j2nLBET8fh8h1w\", \"use\": \"sig\"}]}, \"logo_uri\": \"https://fakerp1.labb.sunet.se/fake.png\", \"organization_name\": \"Fake Organization\", \"redirect_uris\": [\"https://fakerp1.labb.sunet.se/redirect\"], \"response_types\": [\"code\"]}}",
+    "forced_metadata": "{}",
+    "jwks": "{\"keys\": [{\"e\": \"AQAB\", \"kid\": \"nZpmHzIxlT7bH7qi46s42rXoesJ1_cHbbVTH5vNage4\", \"kty\": \"RSA\", \"n\": \"0nQUVcKXFqn4UWWp6lBiziRw_SisPSJbCBuAkafQlB8_g3RPqO8I8kTtgaTEQeR07-OakTIhC0mkbF_9TxsAisVmj9V9f_Se_4X7fqvbOxFLwOkqDQJLexGyhQVL14_GMAWw_srpL_KkW11vZ3eA0z_V0-vFDoBvBCoHaYpUDJ9fMP_us2opMcuUryTBP-Hhsr69SDoYLGBW85NLLXWVM2V51QR6Dvw4dHr8zyTu-uG5IPvB8JmlCLZ_pQI99JgC1WT4PMwI-mpvImI-vYQRrRVsvZ2BdNk4CJ39kczPv0L_uNFcIc6umZ0KMAe3JPETzqLSKQG3j2nLBET8fh8h1w\", \"use\": \"sig\"}]}",
+    "required_trustmarks": null,
+    "active": true,
+    "statement": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ik5iWjJQX0xIT3BidEVvV1EzdWtQUl9wbmlpM1lpOGhFN2o0Z2haYUdMT0kiLCJ0eXAiOiJlbnRpdHktc3RhdGVtZW50K2p3dCJ9.eyJleHAiOjE4MDAyNjgzNjIuMzk0MTQ2LCJpYXQiOjE3Njg3MzIzNjIuMzk0MTQ2LCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4MDgwIiwiandrcyI6eyJrZXlzIjpbeyJlIjoiQVFBQiIsImtpZCI6Im5acG1Iekl4bFQ3Ykg3cWk0NnM0MnJYb2VzSjFfY0hiYlZUSDV2TmFnZTQiLCJrdHkiOiJSU0EiLCJuIjoiMG5RVVZjS1hGcW40VVdXcDZsQml6aVJ3X1Npc1BTSmJDQnVBa2FmUWxCOF9nM1JQcU84SThrVHRnYVRFUWVSMDctT2FrVEloQzBta2JGXzlUeHNBaXNWbWo5VjlmX1NlXzRYN2ZxdmJPeEZMd09rcURRSkxleEd5aFFWTDE0X0dNQVd3X3NycExfS2tXMTF2WjNlQTB6X1YwLXZGRG9CdkJDb0hhWXBVREo5Zk1QX3VzMm9wTWN1VXJ5VEJQLUhoc3I2OVNEb1lMR0JXODVOTExYV1ZNMlY1MVFSNkR2dzRkSHI4enlUdS11RzVJUHZCOEptbENMWl9wUUk5OUpnQzFXVDRQTXdJLW1wdkltSS12WVFSclJWc3ZaMkJkTms0Q0ozOWtjelB2MExfdU5GY0ljNnVtWjBLTUFlM0pQRVR6cUxTS1FHM2oybkxCRVQ4Zmg4aDF3IiwidXNlIjoic2lnIn1dfSwibWV0YWRhdGEiOnt9LCJzdWIiOiJodHRwczovL2Zha2VycDEubGFiYi5zdW5ldC5zZSJ9.cl7eyrHLJc1RAoCY8PrSqvB-MO4EOvWFsUG7kmjY3eTyYlmL0wMvBLxAulDNOFZ28pwv79NZoKvbFjnY6cBCDPjK0_ua-o3RoFjsOcmhdL-En9RchsdBmnTXKkZ00xlzhF4s_YHsV2gZjK1g4rreUzjhYCqjN2X2_28VLOjq-Xfc_eHT6l3K0h5CuJZJWntMOiOiDdYu18eyoLDiPb4zy6ygNPH1s6IeNIOkgg_AgPt-BMy9J-NSedcI331GsK2j95GcDxZoGy9DDDYFxfQe_HSIZfPfBN-ZZZLhxdtX7Klsh1In8e3lNnPZNmdjxMS1KPowwt3CJg13pYmOnl1big",
+    "additional_claims": {}
+  }
+},
+{
+  "model": "sites.site",
+  "fields": {
+    "domain": "example.com",
+    "name": "example.com"
+  }
+},
+{
+  "model": "auth.user",
+  "fields": {
+    "password": "pbkdf2_sha256$1000000$VAkPzxl8I92JiX5JpEQZiz$gMSRANZuzhpui/Mijqdyc4a6ECjbgWEbUz4TH9+F2P4=",
+    "last_login": "2026-01-18T10:37:07.031Z",
+    "is_superuser": true,
+    "username": "kushal",
+    "first_name": "",
+    "last_name": "",
+    "email": "kushal@example.com",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-01-18T10:30:48.747Z",
+    "groups": [],
+    "user_permissions": []
+  }
+}
+]

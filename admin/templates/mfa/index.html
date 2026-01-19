@@ -1,0 +1,208 @@
+{% extends "account/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Two-Factor Authentication" %}{% endblock %}
+
+{% block content %}
+<h1 id="page-title">{% trans "Two-Factor Authentication" %}</h1>
+
+<div class="mfa-sections" role="region" aria-labelledby="page-title">
+    {% if "totp" in MFA_SUPPORTED_TYPES %}
+    <section class="mfa-section" aria-labelledby="totp-title">
+        <h2 id="totp-title">{% trans "Authenticator App" %}</h2>
+        {% if authenticators.totp %}
+        <p class="status status--active">
+            <span class="status-indicator" aria-hidden="true"></span>
+            {% trans "Authentication using an authenticator app is active." %}
+        </p>
+        <div class="actions">
+            <a href="{% url 'mfa_deactivate_totp' %}" class="btn-secondary btn-danger">
+                {% trans "Deactivate" %}
+            </a>
+        </div>
+        {% else %}
+        <p class="status status--inactive">
+            {% trans "An authenticator app is not active." %}
+        </p>
+        <div class="actions">
+            <a href="{% url 'mfa_activate_totp' %}" class="btn-primary">
+                {% trans "Activate" %}
+            </a>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {% if "webauthn" in MFA_SUPPORTED_TYPES %}
+    <section class="mfa-section" aria-labelledby="webauthn-title">
+        <h2 id="webauthn-title">{% trans "Security Keys" %}</h2>
+        {% if authenticators.webauthn|length %}
+        <p class="status status--active">
+            <span class="status-indicator" aria-hidden="true"></span>
+            {% blocktrans count count=authenticators.webauthn|length %}
+            You have added {{ count }} security key.
+            {% plural %}
+            You have added {{ count }} security keys.
+            {% endblocktrans %}
+        </p>
+        <div class="actions">
+            <a href="{% url 'mfa_list_webauthn' %}" class="btn-primary">
+                {% trans "Manage" %}
+            </a>
+        </div>
+        {% else %}
+        <p class="status status--inactive">
+            {% trans "No security keys have been added." %}
+        </p>
+        <div class="actions">
+            <a href="{% url 'mfa_add_webauthn' %}" class="btn-primary">
+                {% trans "Add" %}
+            </a>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {% if "recovery_codes" in MFA_SUPPORTED_TYPES %}
+    <section class="mfa-section" aria-labelledby="recovery-title">
+        <h2 id="recovery-title">{% trans "Recovery Codes" %}</h2>
+        {% with total_count=authenticators.recovery_codes.generate_codes|length unused_count=authenticators.recovery_codes.get_unused_codes|length %}
+        {% if authenticators.recovery_codes %}
+        <p class="status">
+            {% blocktrans count unused_count=unused_count %}
+            There is {{ unused_count }} out of {{ total_count }} recovery codes available.
+            {% plural %}
+            There are {{ unused_count }} out of {{ total_count }} recovery codes available.
+            {% endblocktrans %}
+        </p>
+        {% if is_mfa_enabled and unused_count > 0 %}
+        <div class="actions">
+            <a href="{% url 'mfa_view_recovery_codes' %}" class="btn-primary">
+                {% trans "View" %}
+            </a>
+            <a href="{% url 'mfa_download_recovery_codes' %}" class="btn-secondary">
+                {% trans "Download" %}
+            </a>
+        </div>
+        {% endif %}
+        {% else %}
+        <p class="status status--inactive">
+            {% trans "No recovery codes set up." %}
+        </p>
+        {% endif %}
+        {% if is_mfa_enabled %}
+        <div class="actions">
+            <a href="{% url 'mfa_generate_recovery_codes' %}" class="btn-secondary">
+                {% trans "Generate" %}
+            </a>
+        </div>
+        {% endif %}
+        {% endwith %}
+    </section>
+    {% endif %}
+</div>
+
+<nav class="links" aria-label="{% trans 'Navigation' %}">
+    <a href="/">{% trans "Back to Dashboard" %}</a>
+</nav>
+
+<style>
+    .mfa-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .mfa-section {
+        padding: 1rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background-color: #fafafa;
+    }
+
+    .mfa-section h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #111827;
+        margin-bottom: 0.75rem;
+    }
+
+    .status {
+        font-size: 0.875rem;
+        color: #6b7280;
+        margin-bottom: 1rem;
+    }
+
+    .status--active {
+        color: #059669;
+    }
+
+    .status--inactive {
+        color: #6b7280;
+    }
+
+    .status-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #10b981;
+        margin-right: 0.5rem;
+    }
+
+    .actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-primary {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        background-color: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.15s;
+    }
+
+    .btn-primary:hover {
+        background-color: #1d4ed8;
+        text-decoration: none;
+    }
+
+    .btn-secondary {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        background-color: #f3f4f6;
+        color: #374151;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.15s;
+    }
+
+    .btn-secondary:hover {
+        background-color: #e5e7eb;
+        text-decoration: none;
+    }
+
+    .btn-danger {
+        background-color: #fef2f2;
+        color: #dc2626;
+        border-color: #fecaca;
+    }
+
+    .btn-danger:hover {
+        background-color: #fee2e2;
+    }
+</style>
+{% endblock %}
