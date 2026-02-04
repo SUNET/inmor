@@ -197,6 +197,7 @@ async fn main() -> io::Result<()> {
             .run()
             .await
     } else {
-        http_server.run().await
+        eprintln!("Starting HTTP server on 0.0.0.0:{}", port);
+        http_server.bind(("0.0.0.0", port))?.run().await
     }
 }
