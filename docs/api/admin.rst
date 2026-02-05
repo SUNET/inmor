@@ -539,7 +539,10 @@ Registers a new subordinate entity.
      },
      "valid_for": 8760,
      "autorenew": true,
-     "active": true
+     "active": true,
+     "additional_claims": {
+       "organization_name": "Example Corp"
+     }
    }
 
 **Parameters:**
@@ -634,8 +637,8 @@ The API will:
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
-       "metadata": {...},
-       "jwks": {"keys": [...]},
+       "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
+       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
        "forced_metadata": {}
      }'
 

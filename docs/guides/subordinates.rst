@@ -169,7 +169,7 @@ enforces for all statements:
            "token_endpoint": "https://example-op.com/token"
          }
        },
-       "jwks": {...},
+       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
        "forced_metadata": {
          "openid_provider": {
            "subject_types_supported": ["public", "pairwise"],
@@ -192,8 +192,8 @@ Add custom claims to the subordinate statement:
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
-       "metadata": {...},
-       "jwks": {...},
+       "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
+       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
        "forced_metadata": {},
        "additional_claims": {
          "organization_name": "Example Corp",
@@ -213,8 +213,8 @@ Set a custom validity period (cannot exceed system default):
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
-       "metadata": {...},
-       "jwks": {...},
+       "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
+       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
        "forced_metadata": {},
        "valid_for": 720
      }'
@@ -318,9 +318,9 @@ Disable a subordinate without removing it:
    curl -X POST http://localhost:8000/api/v1/subordinates/1 \
      -H "Content-Type: application/json" \
      -d '{
-       "metadata": {...},
-       "forced_metadata": {...},
-       "jwks": {...},
+       "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
+       "forced_metadata": {},
+       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
        "active": false
      }'
 
