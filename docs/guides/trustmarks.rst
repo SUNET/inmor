@@ -97,13 +97,15 @@ Issue a trust mark to an entity:
 
    {
      "id": 1,
+     "tmt_id": 1,
      "domain": "https://example-rp.com",
      "expire_at": "2027-01-15T12:00:00Z",
      "autorenew": true,
      "valid_for": 8760,
      "renewal_time": 48,
      "active": true,
-     "mark": "eyJhbGciOiJFUzI1NiIsInR5cCI6InRydXN0LW1hcmsrand0In0..."
+     "mark": "eyJhbGciOiJFUzI1NiIsInR5cCI6InRydXN0LW1hcmsrand0In0...",
+     "additional_claims": null
    }
 
 Trust Mark with Additional Claims
