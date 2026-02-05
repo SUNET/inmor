@@ -124,9 +124,12 @@ Fetch the entity's configuration and register it:
      "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
      "forced_metadata": {},
      "jwks": {"keys": ["..."]},
+     "required_trustmarks": null,
      "valid_for": 8760,
+     "expire_at": "2027-01-15T12:00:00Z",
      "autorenew": true,
-     "active": true
+     "active": true,
+     "additional_claims": null
    }
 
 Validation Process
@@ -239,9 +242,12 @@ List All Subordinates
          "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
          "forced_metadata": {},
          "jwks": {"keys": ["..."]},
+         "required_trustmarks": null,
          "valid_for": 8760,
+         "expire_at": "2027-01-15T12:00:00Z",
          "autorenew": true,
-         "active": true
+         "active": true,
+         "additional_claims": null
        }
      ]
    }
@@ -275,21 +281,24 @@ External parties can list subordinates via the Trust Anchor API:
 Updating Subordinates
 ---------------------
 
-Update a subordinate's configuration:
+Update a subordinate's configuration. The ``metadata``, ``forced_metadata``,
+and ``jwks`` fields are required for every update:
 
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1 \
      -H "Content-Type: application/json" \
      -d '{
-       "metadata": {...},
+       "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
        "forced_metadata": {
          "openid_relying_party": {
            "application_type": "web"
          }
        },
-       "jwks": {...},
-       "autorenew": false
+       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
+       "autorenew": false,
+       "valid_for": 8760,
+       "active": true
      }'
 
 The update process:
@@ -517,24 +526,36 @@ Complete workflow for onboarding a new subordinate:
 
    Verify the entity meets your federation's requirements before registration.
 
-3. **Registration**
+3. **Fetch Entity Configuration**
+
+   Use the fetch-config endpoint to retrieve and validate the entity's
+   metadata and keys:
 
    .. code-block:: bash
 
-      # Fetch entity's published configuration
-      curl -s https://new-entity.example.com/.well-known/openid-federation
+      curl -X POST http://localhost:8000/api/v1/subordinates/fetch-config \
+        -H "Content-Type: application/json" \
+        -d '{"url": "https://new-entity.example.com"}'
 
-      # Register with the TA
+   This returns the entity's ``metadata``, ``jwks``, ``authority_hints``,
+   and ``trust_marks`` after signature validation.
+
+4. **Registration**
+
+   Use the metadata and JWKS from the fetch-config response:
+
+   .. code-block:: bash
+
       curl -X POST http://localhost:8000/api/v1/subordinates \
         -H "Content-Type: application/json" \
         -d '{
           "entityid": "https://new-entity.example.com",
-          "metadata": {...},
-          "jwks": {...},
+          "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
+          "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
           "forced_metadata": {}
         }'
 
-4. **Issue Trust Marks** (optional)
+5. **Issue Trust Marks** (optional)
 
    .. code-block:: bash
 
@@ -545,7 +566,7 @@ Complete workflow for onboarding a new subordinate:
           "domain": "https://new-entity.example.com"
         }'
 
-5. **Verification**
+6. **Verification**
 
    Confirm the entity appears in listings:
 

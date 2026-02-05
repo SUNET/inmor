@@ -8,14 +8,63 @@ Base URL: ``http://localhost:8000/api/v1/``
 
 API Documentation UI: ``http://localhost:8000/api/v1/docs``
 
-.. danger::
+Authentication
+--------------
 
-   **Production Security Requirement**
+All ``/api/v1/`` endpoints (except auth endpoints) require authentication.
+The API accepts two authentication methods:
 
-   The Admin API provides full management access to the Trust Anchor.
-   In production, you **MUST** secure all ``/api/v1/`` endpoints behind
-   authentication. At minimum, configure HTTP Basic Authentication at
-   your reverse proxy. See :doc:`../reverse-proxy` for configuration examples.
+* **Session authentication** -- Login via ``/api/v1/auth/login`` and use the
+  session cookie for subsequent requests
+* **API key authentication** -- Pass an ``X-API-Key`` header (see
+  :doc:`../guides/api-keys`)
+
+Both methods grant the same access. Session auth is used by the Vue frontend;
+API keys are intended for scripts and integrations.
+
+Auth Endpoints
+^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 30 60
+
+   * - Method
+     - Endpoint
+     - Description
+   * - GET
+     - ``/api/v1/auth/csrf``
+     - Get CSRF token (sets cookie)
+   * - POST
+     - ``/api/v1/auth/login``
+     - Login with ``{"username": "...", "password": "..."}``
+   * - POST
+     - ``/api/v1/auth/logout``
+     - Logout and clear session
+   * - GET
+     - ``/api/v1/auth/me``
+     - Get current authenticated user info
+
+**Login Example:**
+
+.. code-block:: bash
+
+   # Get CSRF token
+   curl -c cookies.txt http://localhost:8000/api/v1/auth/csrf
+
+   # Login
+   curl -b cookies.txt -c cookies.txt \
+     -H "Content-Type: application/json" \
+     -H "X-CSRFToken: <token-from-cookie>" \
+     -X POST http://localhost:8000/api/v1/auth/login \
+     -d '{"username": "admin", "password": "password"}'
+
+**API Key Example:**
+
+.. code-block:: bash
+
+   curl -H "X-API-Key: YOUR_KEY_HERE" \
+        http://localhost:8000/api/v1/trustmarktypes
 
 Trust Mark Types
 ----------------
@@ -193,8 +242,36 @@ Update Trust Mark Type
    {
      "autorenew": false,
      "valid_for": 720,
+     "renewal_time": 24,
      "active": false
    }
+
+**Parameters:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 10 10 60
+
+   * - Field
+     - Type
+     - Required
+     - Description
+   * - ``autorenew``
+     - boolean
+     - No
+     - Whether trust marks of this type auto-renew
+   * - ``valid_for``
+     - integer
+     - No
+     - Validity period in hours
+   * - ``renewal_time``
+     - integer
+     - No
+     - Hours before expiry to trigger renewal
+   * - ``active``
+     - boolean
+     - No
+     - Whether this type is active
 
 All fields are optional. Only provided fields will be updated.
 
@@ -244,14 +321,22 @@ Issues a new trust mark to an entity.
      - string
      - Yes
      - Entity ID (URL) to issue the trust mark to
-   * - ``valid_for``
-     - integer
-     - No
-     - Override validity period in hours
    * - ``autorenew``
      - boolean
      - No
-     - Override auto-renewal setting
+     - Override auto-renewal setting (defaults to trust mark type value)
+   * - ``valid_for``
+     - integer
+     - No
+     - Override validity period in hours (cannot exceed trust mark type value)
+   * - ``renewal_time``
+     - integer
+     - No
+     - Override renewal time in hours (cannot exceed trust mark type value)
+   * - ``active``
+     - boolean
+     - No
+     - Whether the trust mark is active (defaults to trust mark type value)
    * - ``additional_claims``
      - object
      - No
@@ -263,6 +348,7 @@ Issues a new trust mark to an entity.
 
    {
      "id": 1,
+     "tmt_id": 1,
      "domain": "https://example-rp.com",
      "expire_at": "2026-01-15T12:00:00Z",
      "autorenew": true,
@@ -306,6 +392,7 @@ Returns a paginated list of all issued trust marks.
      "items": [
        {
          "id": 1,
+         "tmt_id": 1,
          "domain": "https://example-rp.com",
          "expire_at": "2026-01-15T12:00:00Z",
          "autorenew": true,
@@ -348,9 +435,15 @@ Generates a new JWT with extended expiry for an existing trust mark.
 
    {
      "id": 1,
+     "tmt_id": 1,
      "domain": "https://example-rp.com",
      "expire_at": "2027-01-15T12:00:00Z",
-     "mark": "eyJ..."
+     "autorenew": true,
+     "valid_for": 8760,
+     "renewal_time": 48,
+     "active": true,
+     "mark": "eyJ...",
+     "additional_claims": null
    }
 
 Update Trust Mark
@@ -372,8 +465,34 @@ Update Trust Mark
      }
    }
 
+**Parameters:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 10 10 60
+
+   * - Field
+     - Type
+     - Required
+     - Description
+   * - ``autorenew``
+     - boolean
+     - No
+     - Whether the trust mark auto-renews
+   * - ``active``
+     - boolean
+     - No
+     - Whether the trust mark is active
+   * - ``additional_claims``
+     - object
+     - No
+     - Extra claims to include in the JWT (triggers re-signing)
+
 Setting ``active`` to ``false`` revokes the trust mark. The entity will
 no longer appear in trust mark lists, and status checks will return "revoked".
+
+Changing ``additional_claims`` triggers re-signing of the trust mark JWT
+with the updated claims.
 
 Subordinates
 ------------
@@ -441,18 +560,22 @@ Registers a new subordinate entity.
      - object
      - Yes
      - Entity metadata (from their entity configuration)
+   * - ``forced_metadata``
+     - object
+     - Yes
+     - Metadata to merge/override (TA-enforced values). Pass ``{}`` if none.
    * - ``jwks``
      - object
      - Yes
      - Entity's public keys (JWKS)
-   * - ``forced_metadata``
-     - object
+   * - ``required_trustmarks``
+     - string
      - No
-     - Metadata to merge/override (TA-enforced values)
+     - Required trust mark type URL for this subordinate
    * - ``valid_for``
      - integer
      - No
-     - Statement validity in hours (max: system default)
+     - Statement validity in hours (cannot exceed system default)
    * - ``autorenew``
      - boolean
      - No
@@ -479,17 +602,20 @@ The API will:
 
 **Response (201 Created):**
 
-.. code-block:: text
+.. code-block:: json
 
    {
      "id": 1,
      "entityid": "https://example-rp.com",
-     "metadata": {...},
-     "forced_metadata": {...},
-     "jwks": {...},
+     "metadata": {},
+     "forced_metadata": {},
+     "jwks": {},
+     "required_trustmarks": null,
      "valid_for": 8760,
+     "expire_at": "2027-01-15T12:00:00Z",
      "autorenew": true,
-     "active": true
+     "active": true,
+     "additional_claims": null
    }
 
 **Response (400 Bad Request):** Validation errors, missing authority_hints, etc.
@@ -522,7 +648,7 @@ List Subordinates
 
 **Response (200 OK):**
 
-.. code-block:: text
+.. code-block:: json
 
    {
      "count": 3,
@@ -530,12 +656,15 @@ List Subordinates
        {
          "id": 1,
          "entityid": "https://example-rp.com",
-         "metadata": {...},
+         "metadata": {},
          "forced_metadata": {},
-         "jwks": {...},
+         "jwks": {},
+         "required_trustmarks": null,
          "valid_for": 8760,
+         "expire_at": "2027-01-15T12:00:00Z",
          "autorenew": true,
-         "active": true
+         "active": true,
+         "additional_claims": null
        }
      ]
    }
@@ -559,15 +688,128 @@ the entity configuration before creating a new signed statement.
 
 **Request Body:**
 
-.. code-block:: text
+.. code-block:: json
 
    {
-     "metadata": {...},
-     "forced_metadata": {...},
-     "jwks": {...},
-     "autorenew": false,
-     "active": true
+     "metadata": {},
+     "forced_metadata": {},
+     "jwks": {},
+     "required_trustmarks": null,
+     "valid_for": 8760,
+     "autorenew": true,
+     "active": true,
+     "additional_claims": null
    }
+
+**Parameters:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 10 10 60
+
+   * - Field
+     - Type
+     - Required
+     - Description
+   * - ``metadata``
+     - object
+     - Yes
+     - Entity metadata
+   * - ``forced_metadata``
+     - object
+     - Yes
+     - TA-enforced metadata overrides. Pass ``{}`` if none.
+   * - ``jwks``
+     - object
+     - Yes
+     - Entity's public keys (JWKS)
+   * - ``required_trustmarks``
+     - string
+     - No
+     - Required trust mark type URL
+   * - ``valid_for``
+     - integer
+     - No
+     - Statement validity in hours (cannot exceed system default)
+   * - ``autorenew``
+     - boolean
+     - No
+     - Auto-renew the subordinate statement (default: true)
+   * - ``active``
+     - boolean
+     - No
+     - Whether the subordinate is active (default: true)
+   * - ``additional_claims``
+     - object
+     - No
+     - Extra claims for the subordinate statement
+
+Fetch Entity Configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   POST /api/v1/subordinates/fetch-config
+
+Fetches and self-validates an entity's OpenID Federation configuration from
+their ``/.well-known/openid-federation`` endpoint. Use this before adding a
+subordinate to inspect their metadata and keys.
+
+**Request Body:**
+
+.. code-block:: json
+
+   {
+     "url": "https://example-rp.com"
+   }
+
+**Parameters:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 10 10 60
+
+   * - Field
+     - Type
+     - Required
+     - Description
+   * - ``url``
+     - string
+     - Yes
+     - The entity URL to fetch configuration from
+
+**Response (200 OK):**
+
+.. code-block:: json
+
+   {
+     "metadata": {
+       "openid_relying_party": {
+         "redirect_uris": ["https://example-rp.com/callback"]
+       }
+     },
+     "jwks": {
+       "keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]
+     },
+     "authority_hints": ["https://federation.example.com"],
+     "trust_marks": [
+       {
+         "trust_mark_type": "https://example.com/trustmarks/member",
+         "trust_mark": "eyJ..."
+       }
+     ]
+   }
+
+**Response (400 Bad Request):** Connection errors, invalid URL, signature
+validation failure, or no OpenID Federation configuration found.
+
+**Example:**
+
+.. code-block:: bash
+
+   curl -X POST http://localhost:8000/api/v1/subordinates/fetch-config \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://example-rp.com"}'
 
 Server Operations
 -----------------
