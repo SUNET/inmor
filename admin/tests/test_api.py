@@ -22,6 +22,15 @@ def get_payload(token_str: str):
     return json_decode(jose.token.objects.get("payload", ""))
 
 
+def get_header(token_str: str):
+    "Helper method to get JWT header"
+    jose = jwt.JWT.from_jose_token(token_str)
+    protected = jose.token.objects.get("protected", "")
+    if isinstance(protected, bytes):
+        protected = protected.decode("utf-8")
+    return json.loads(protected)
+
+
 def test_trustmarktypes_list(auth_client: Client):
     trustmark_list = [
         {
@@ -195,6 +204,9 @@ def test_trustmark_create(auth_client: Client, loadredis):
     payload = get_payload(jwt_token)
     assert domain == payload.get("sub")
     assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
+    # Verify JWT header has correct typ per spec
+    header = get_header(jwt_token)
+    assert header.get("typ") == "trust-mark+jwt"
     # Here data is signed JWT
     redis_data = loadredis.hget(f"inmor:tm:{domain}", payload["trust_mark_type"])
     assert redis_data is not None
@@ -226,6 +238,9 @@ def test_trustmark_create_with_additional_claims(auth_client: Client, loadredis)
     payload = get_payload(jwt_token)
     assert domain == payload.get("sub")
     assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
+    # Verify JWT header has correct typ per spec
+    header = get_header(jwt_token)
+    assert header.get("typ") == "trust-mark+jwt"
     # Verify the additional claim is present in the JWT payload
     assert "https://github.com/SUNET/inmor" == payload.get("ref")
 
@@ -296,6 +311,9 @@ def test_trustmark_create_twice(auth_client: Client, loadredis):
     payload = get_payload(jwt_token)
     assert domain == payload.get("sub")
     assert "https://example.com/trust_mark_type" == payload.get("trust_mark_type")
+    # Verify JWT header has correct typ per spec
+    header = get_header(jwt_token)
+    assert header.get("typ") == "trust-mark+jwt"
     response = auth_client.post(
         "/api/v1/trustmarks",
         data=json.dumps(data),

@@ -1129,6 +1129,8 @@ pub async fn resolve_entity_to_trustanchor(
 }
 
 /// To create the signed JWT for resolve response
+/// Per spec Section 8.3.2, the `exp` MUST be the minimum of the `exp` values
+/// from the Trust Chain and any Trust Marks included in the response.
 fn create_resolve_response_jwt(
     state: &web::Data<AppState>,
     sub: &str,
@@ -1141,9 +1143,17 @@ fn create_resolve_response_jwt(
     payload.set_subject(sub);
     payload.set_issued_at(&SystemTime::now());
 
-    // Set expiry after 24 horus
-    let exp = SystemTime::now() + Duration::from_secs(86400);
-    payload.set_expires_at(&exp);
+    // Per spec Section 8.3.2: exp "MUST be the minimum of the exp value of
+    // the Trust Chain from which the resolve response was derived, as well as
+    // any Trust Mark included in the response."
+    let fallback_exp = SystemTime::now() + Duration::from_secs(86400);
+    let min_exp = result
+        .iter()
+        .filter_map(|v| v.payload.expires_at())
+        .min()
+        .unwrap_or(fallback_exp);
+    payload.set_expires_at(&min_exp);
+
     if let Some(metadata_val) = metadata {
         payload.set_claim("metadata", Some(json!(metadata_val)));
     }

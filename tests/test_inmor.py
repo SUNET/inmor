@@ -309,6 +309,39 @@ def test_resolve_without_entity_type(loaddata: Redis, start_server: int, http_cl
     )
 
 
+def test_resolve_exp_is_minimum_of_trust_chain(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /resolve response exp is the minimum exp from the trust chain (spec 8.3.2)"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/resolve?sub=https://fakeop0.labb.sunet.se&trust_anchor=https://localhost:8080"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    resolve_payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    resolve_exp = resolve_payload.get("exp")
+    assert resolve_exp is not None, "resolve response must have exp"
+
+    # Extract exp from each entry in the trust chain
+    trust_chain = resolve_payload.get("trust_chain", [])
+    assert len(trust_chain) > 0, "trust chain must not be empty"
+    chain_exps = []
+    for entry in trust_chain:
+        entry_jwt: jwt.JWT = jwt.JWT.from_jose_token(entry)
+        entry_payload = json.loads(entry_jwt.token.objects.get("payload").decode("utf-8"))
+        entry_exp = entry_payload.get("exp")
+        if entry_exp is not None:
+            chain_exps.append(entry_exp)
+
+    assert len(chain_exps) > 0, "at least one trust chain entry must have exp"
+    min_chain_exp = min(chain_exps)
+    # Per spec Section 8.3.2: resolve exp MUST be <= minimum exp of the trust chain
+    assert resolve_exp <= min_chain_exp, (
+        f"resolve exp ({resolve_exp}) must be <= minimum trust chain exp ({min_chain_exp})"
+    )
+
+
 def test_ta_entity_configuration(loaddata: Redis, start_server: int, http_client: Client):
     "Tests /resolve endpoint"
     _rdb = loaddata
