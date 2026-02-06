@@ -494,7 +494,7 @@ async fn list_subordinates(
         });
     }
 
-    if let Some(trust_marked) = trust_marked {
+    if let Some(true) = trust_marked {
         // Means check if at least one trustmark exists
         results.retain(|x| x.has_trustmark);
     }

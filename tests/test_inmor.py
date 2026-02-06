@@ -159,6 +159,26 @@ def test_ta_list_subordinates(loaddata: Redis, start_server: int, http_client: C
     assert set(data) == subs
 
 
+def test_ta_list_subordinates_trust_marked_false(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /list?trust_marked=false returns all subordinates (spec 8.2.1)"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/list?trust_marked=false"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    # trust_marked=false should NOT filter — return all subordinates
+    assert len(data) == 3
+    subs = {
+        "https://fakerp0.labb.sunet.se",
+        "https://fakeop0.labb.sunet.se",
+        "https://fakerp1.labb.sunet.se",
+    }
+    assert set(data) == subs
+
+
 def test_ta_list_subordinates_bytrustmark(loaddata: Redis, start_server: int, http_client: Client):
     "Tests /list endpoint for given trust_mark_type"
     _rdb = loaddata
