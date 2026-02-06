@@ -110,7 +110,8 @@ recreate-fedora: down
 recreate-data: recreate-fedora up
   echo "Sleeping for 5 seconds"
   sleep 5
-  python scripts/create_redis_db_data.py
+  docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=testpass admin python manage.py setup_admin --username admin --noinput --skip-checks
+  INMOR_API_KEY=$(docker compose exec -T admin python manage.py create_api_key --username admin --skip-checks) python scripts/create_redis_db_data.py
 
 # To dump the redis data locally
 dump-redis:

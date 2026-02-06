@@ -1,9 +1,18 @@
 import json
+import os
+import sys
 from pprint import pprint
 from typing import Any
 
 import httpx
 from jwcrypto import jwt
+
+api_key = os.environ.get("INMOR_API_KEY")
+if not api_key:
+    print("Error: Set INMOR_API_KEY environment variable")
+    sys.exit(1)
+
+auth_headers = {"X-API-Key": api_key}
 
 tmts = [
     {
@@ -25,15 +34,15 @@ tmts = [
 ]
 
 print("First let us create the server entity configuration")
-_ = httpx.post("http://localhost:8000/api/v1/server/entity")
+_ = httpx.post("http://localhost:8000/api/v1/server/entity", headers=auth_headers)
 
 print("Creating historical_keys if any")
-_ = httpx.post("http://localhost:8000/api/v1/server/historical_keys")
+_ = httpx.post("http://localhost:8000/api/v1/server/historical_keys", headers=auth_headers)
 
 
 # Then let us create the trustmark types
 for tm in tmts:
-    resp = httpx.post("http://localhost:8000/api/v1/trustmarktypes", json=tm)
+    resp = httpx.post("http://localhost:8000/api/v1/trustmarktypes", json=tm, headers=auth_headers)
     pprint(resp.json())
 
 # Now create the Trustmarks
@@ -48,7 +57,7 @@ tms = [
 subs = tms[:3]
 for tm in tms:
     data: dict[str, Any] = {"tmt": 1, "domain": tm}
-    resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data)
+    resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data, headers=auth_headers)
     pprint(resp.json())
 
 
@@ -57,7 +66,7 @@ print("Extra trustmarks for RPs")
 # One extra trustmark for only RPs
 for tm in ["https://fakerp0.labb.sunet.se", "https://fakerp1.labb.sunet.se"]:
     data = {"tmt": 2, "domain": tm}
-    resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data)
+    resp = httpx.post("http://localhost:8000/api/v1/trustmarks", json=data, headers=auth_headers)
     pprint(resp.json())
 print("--" * 30)
 
@@ -90,7 +99,7 @@ for tm in subs:
             "forced_metadata": forced_metadata,
             "jwks": payload["jwks"],
         },
-        headers={"Content-Type": "application/json", "accept": "application/json"},
+        headers={**auth_headers, "Content-Type": "application/json", "accept": "application/json"},
     )
     print("--" * 30)
     pprint(resp.json())

@@ -3,9 +3,11 @@
 Usage:
     python manage.py setup_admin
     python manage.py setup_admin --username admin --email admin@example.com
+    DJANGO_SUPERUSER_PASSWORD=secret python manage.py setup_admin --username admin --noinput
 """
 
 import getpass
+import os
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -51,10 +53,24 @@ class Command(BaseCommand):
             return
 
         if noinput:
-            raise CommandError(
-                "Non-interactive mode requires --username. "
-                "Set password via DJANGO_SUPERUSER_PASSWORD environment variable."
+            if not username:
+                raise CommandError("Non-interactive mode requires --username.")
+            password = os.environ.get("DJANGO_SUPERUSER_PASSWORD")
+            if not password:
+                raise CommandError(
+                    "Non-interactive mode requires DJANGO_SUPERUSER_PASSWORD environment variable."
+                )
+            if User.objects.filter(username=username).exists():
+                raise CommandError(f"User '{username}' already exists")
+            user = User.objects.create_superuser(
+                username=username,
+                email=email,
+                password=password,
             )
+            self.stdout.write(
+                self.style.SUCCESS(f"Successfully created admin user: {user.username}")
+            )
+            return
 
         # Interactive mode
         if not username:

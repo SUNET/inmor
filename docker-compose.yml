@@ -3,7 +3,7 @@ services:
   ta:
     restart: always
     build: .
-    image: docker.sunet.se/inmor:0.2.1
+    image: docker.sunet.se/inmor:0.3.0
     networks:
       - inmor-net
     healthcheck:
@@ -17,8 +17,8 @@ services:
       - ./private.json:/app/private.json
       - ./publickeys:/app/publickeys
       - ./historical_keys:/app/historical_keys
-      - ./localhost+2.pem:/app/localhost+2.pem 
-      - ./localhost+2-key.pem:/app/localhost+2-key.pem 
+      - ./localhost+2.pem:/app/localhost+2.pem
+      - ./localhost+2-key.pem:/app/localhost+2-key.pem
     depends_on:
       redis:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
       - ./redis:/data
   admin:
     build: ./admin/
-    image: docker.sunet.se/inmor-admin:0.2.1
+    image: docker.sunet.se/inmor-admin:0.3.0
     networks:
       - inmor-net
     depends_on:
@@ -80,6 +80,8 @@ services:
       - ./admin/private.json:/app/private.json
       - ./admin/inmoradmin:/app/inmoradmin
       - ./admin/apikeys:/app/apikeys
+      - ./admin/entities:/app/entities
+      - ./admin/trustmarks:/app/trustmarks
       - ./admin/templates:/app/templates
       - ./admin/common:/app/common
       - ./admin/tests:/app/tests
@@ -95,7 +97,7 @@ services:
       args:
         # Empty string means use same origin (nginx proxies API requests)
         VITE_API_URL: ""
-    image: docker.sunet.se/inmor-frontend:0.2.1
+    image: docker.sunet.se/inmor-frontend:0.3.0
     networks:
       - inmor-net
     depends_on:

@@ -1,3 +1,18 @@
+<a id='changelog-0.2.2'></a>
+# 0.2.2 — 2026-02-06
+
+## Fixed
+
+- Fixes #144, `typ` and claim name is correct the trustmark endpoints.
+
+
+<a id='changelog-0.2.1'></a>
+# 0.2.1 — 2026-02-05
+
+## Fixed
+
+- TA bind address: Fixed the TA server bind address when TLS is not configured (#136).
+- Docker: Fixed missing common module in admin container and corrected version tags in docker-compose.yml.
 
 <a id='changelog-0.2.0'></a>
 # 0.2.0 — 2026-01-12

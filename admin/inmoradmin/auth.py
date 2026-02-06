@@ -7,42 +7,66 @@ Designed to be extensible for future SAML/OAuth providers.
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
+from django.middleware.csrf import CsrfViewMiddleware
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from ninja import Router, Schema
-from ninja.security import APIKeyHeader, SessionAuth
+from ninja.security.apikey import APIKeyBase
 
 
-class SessionAuthentication(SessionAuth):
-    """Session-based authentication for API endpoints."""
+class _CSRFCheck(CsrfViewMiddleware):
+    """CSRF check that doesn't reject — just records the result."""
+
+    def _reject(self, request, reason):
+        return reason
+
+
+class CombinedAuthentication(APIKeyBase):
+    """Authenticates via API key (X-API-Key header) or Django session.
+
+    API key is tried first and does not require CSRF.
+    Session auth falls back and enforces CSRF for unsafe methods (POST, PUT, DELETE, PATCH).
+    """
+
+    # Disable Django Ninja's built-in CSRF enforcement so we can
+    # handle it ourselves: skip CSRF for API key, enforce for session.
+    csrf = False
+    openapi_type: str = "apiKey"
+    param_name: str = "X-API-Key"
+
+    def _get_key(self, request: HttpRequest) -> str | None:
+        return request.META.get("HTTP_X_API_KEY")
 
     def authenticate(self, request: HttpRequest, key: str | None = None):
-        if request.user.is_authenticated:
-            return request.user
-        return None
-
-
-class APIKeyAuthentication(APIKeyHeader):
-    """API Key authentication via X-API-Key header."""
-
-    param_name = "X-API-Key"
-
-    def authenticate(self, request: HttpRequest, key: str | None):
+        # 1. Try API key authentication (no CSRF needed)
         if key:
-            # Import here to avoid circular imports
             from apikeys.models import APIKey
 
             user = APIKey.authenticate(key)
             if user:
                 return user
+
+        # 2. Fall back to session authentication with CSRF enforcement
+        if request.user.is_authenticated:
+            self._enforce_csrf(request)
+            return request.user
+
         return None
 
+    def _enforce_csrf(self, request: HttpRequest):
+        """Enforce CSRF for session-based requests on unsafe methods."""
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            check = _CSRFCheck(lambda req: None)
+            # populates request.META["CSRF_COOKIE"] from the cookie
+            check.process_request(request)
+            reason = check.process_view(request, None, (), {})
+            if reason:
+                from ninja.errors import HttpError
 
-# Create reusable auth instances
-session_auth = SessionAuthentication()
-api_key_auth = APIKeyAuthentication()
+                raise HttpError(403, f"CSRF check Failed: {reason}")
 
-# Combined auth - accepts either session or API key
-combined_auth = [session_auth, api_key_auth]
+
+# Single auth instance used by the protected router
+combined_auth = [CombinedAuthentication()]
 
 
 class LoginSchema(Schema):

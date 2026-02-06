@@ -57,7 +57,12 @@ def test_trust_mark_for_entity(loaddata: Redis, start_server: int, http_client: 
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("trust_mark_type") == "https://sunet.se/does_not_exist_trustmark"
     assert payload.get("sub") == "https://fakerp0.labb.sunet.se"
-    # TODO:What else should we test here?
+    # Verify JWT header has correct typ per spec
+    protected = jwt_net.token.objects.get("protected")
+    if isinstance(protected, bytes):
+        protected = protected.decode("utf-8")
+    header = json.loads(protected)
+    assert header.get("typ") == "trust-mark+jwt"
 
 
 def test_trust_mark_for_missing_entity(loaddata: Redis, start_server: int, http_client: Client):
@@ -79,13 +84,16 @@ def test_trust_mark_status(loaddata: Redis, start_server: int, http_client: Clie
     url = f"https://localhost:{port}/trust_mark?trust_mark_type=https://sunet.se/does_not_exist_trustmark&sub=https://fakerp0.labb.sunet.se"
     resp = http_client.get(url)
     assert resp.status_code == 200
+    original_trust_mark = resp.text
     url = f"https://localhost:{port}/trust_mark_status"
-    resp = http_client.post(url, data={"trust_mark": resp.text})
+    resp = http_client.post(url, data={"trust_mark": original_trust_mark})
     assert resp.status_code == 200
     jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("iss") == "https://localhost:8080"
     assert payload.get("status") == "active"
+    # Per spec Section 8.4.2, trust_mark claim contains the full trust mark JWT
+    assert payload.get("trust_mark") == original_trust_mark
 
 
 def test_trust_mark_status_invalid(loaddata: Redis, start_server: int, http_client: Client):
@@ -108,6 +116,8 @@ def test_trust_mark_status_invalid(loaddata: Redis, start_server: int, http_clie
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("iss") == "https://localhost:8080"
     assert payload.get("status") == "invalid"
+    # Per spec Section 8.4.2, trust_mark claim echoes back the original JWT
+    assert payload.get("trust_mark") == jwt_text
 
 
 def test_trust_mark_status_invalid_jwt(loaddata: Redis, start_server: int, http_client: Client):
@@ -126,6 +136,8 @@ def test_trust_mark_status_invalid_jwt(loaddata: Redis, start_server: int, http_
     payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
     assert payload.get("iss") == "https://localhost:8080"
     assert payload.get("status") == "invalid"
+    # Per spec Section 8.4.2, trust_mark claim echoes back the original JWT
+    assert payload.get("trust_mark") == jwt_text
 
 
 def test_ta_list_subordinates(loaddata: Redis, start_server: int, http_client: Client):
@@ -135,6 +147,7 @@ def test_ta_list_subordinates(loaddata: Redis, start_server: int, http_client: C
     url = f"https://localhost:{port}/list"
     resp = http_client.get(url)
     assert resp.status_code == 200
+    assert resp.headers.get("content-type") == "application/json"
     data = resp.json()
     assert len(data) == 3
     subs = {
@@ -146,6 +159,26 @@ def test_ta_list_subordinates(loaddata: Redis, start_server: int, http_client: C
     assert set(data) == subs
 
 
+def test_ta_list_subordinates_trust_marked_false(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /list?trust_marked=false returns all subordinates (spec 8.2.1)"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/list?trust_marked=false"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    # trust_marked=false should NOT filter — return all subordinates
+    assert len(data) == 3
+    subs = {
+        "https://fakerp0.labb.sunet.se",
+        "https://fakeop0.labb.sunet.se",
+        "https://fakerp1.labb.sunet.se",
+    }
+    assert set(data) == subs
+
+
 def test_ta_list_subordinates_bytrustmark(loaddata: Redis, start_server: int, http_client: Client):
     "Tests /list endpoint for given trust_mark_type"
     _rdb = loaddata
@@ -153,6 +186,7 @@ def test_ta_list_subordinates_bytrustmark(loaddata: Redis, start_server: int, ht
     url = f"https://localhost:{port}/list?trust_mark_type=https://example.com/trust_mark_type"
     resp = http_client.get(url)
     assert resp.status_code == 200
+    assert resp.headers.get("content-type") == "application/json"
     data = resp.json()
     assert len(data) == 2
     subs = {
@@ -292,6 +326,39 @@ def test_resolve_without_entity_type(loaddata: Redis, start_server: int, http_cl
     assert "federation_entity" in metadata, "federation_entity should be in metadata"
     assert set(metadata.keys()) == {"openid_provider", "federation_entity"}, (
         "All metadata should be returned when entity_type is not specified"
+    )
+
+
+def test_resolve_exp_is_minimum_of_trust_chain(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /resolve response exp is the minimum exp from the trust chain (spec 8.3.2)"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/resolve?sub=https://fakeop0.labb.sunet.se&trust_anchor=https://localhost:8080"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
+    resolve_payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    resolve_exp = resolve_payload.get("exp")
+    assert resolve_exp is not None, "resolve response must have exp"
+
+    # Extract exp from each entry in the trust chain
+    trust_chain = resolve_payload.get("trust_chain", [])
+    assert len(trust_chain) > 0, "trust chain must not be empty"
+    chain_exps = []
+    for entry in trust_chain:
+        entry_jwt: jwt.JWT = jwt.JWT.from_jose_token(entry)
+        entry_payload = json.loads(entry_jwt.token.objects.get("payload").decode("utf-8"))
+        entry_exp = entry_payload.get("exp")
+        if entry_exp is not None:
+            chain_exps.append(entry_exp)
+
+    assert len(chain_exps) > 0, "at least one trust chain entry must have exp"
+    min_chain_exp = min(chain_exps)
+    # Per spec Section 8.3.2: resolve exp MUST be <= minimum exp of the trust chain
+    assert resolve_exp <= min_chain_exp, (
+        f"resolve exp ({resolve_exp}) must be <= minimum trust chain exp ({min_chain_exp})"
     )
 
 
