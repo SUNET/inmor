@@ -599,7 +599,7 @@ pub async fn fetch_subordinates(
     };
     let sub = match params.get("sub") {
         Some(data) => data,
-        None => return Err(error::ErrorInternalServerError("Missing sub parameter")),
+        None => return error_response_400("invalid_request", "Missing required parameter: sub"),
     };
 
     // After we have the query

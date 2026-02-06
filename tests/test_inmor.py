@@ -197,6 +197,19 @@ def test_ta_list_subordinates_bytrustmark(loaddata: Redis, start_server: int, ht
     assert set(data) == subs
 
 
+def test_ta_fetch_missing_sub_returns_400(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /fetch without sub parameter returns 400, not 500 (spec 8.9)"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/fetch"
+    resp = http_client.get(url)
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data.get("error") == "invalid_request"
+
+
 def test_ta_fetch_subordinate(loaddata: Redis, start_server: int, http_client: Client):
     "Tests /fetch endpoint"
     _rdb = loaddata
