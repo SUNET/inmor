@@ -1373,9 +1373,10 @@ fn merge_objects(v1: &mut Value, v2: &Value) {
 }
 
 /// To create the signed JWT for trust mark status response
+/// Per spec Section 8.4.2, the response includes `trust_mark` (the full JWT) and `status`.
 fn create_trustmark_status_response_jwt(
     state: &web::Data<AppState>,
-    trustmark: &str,
+    trust_mark: &str,
     status: &str,
 ) -> Result<String, JoseError> {
     let mut payload = JwtPayload::new();
@@ -1383,11 +1384,11 @@ fn create_trustmark_status_response_jwt(
     payload.set_issuer(iss);
     payload.set_issued_at(&SystemTime::now());
 
-    // Set expiry after 24 horus
+    // Set expiry after 24 hours
     let exp = SystemTime::now() + Duration::from_secs(86400);
     payload.set_expires_at(&exp);
-    payload.set_claim("trustmark", Some(json!(trustmark)));
-    payload.set_claim("status", Some(json!(status)));
+    payload.set_claim("trust_mark", Some(json!(trust_mark)))?;
+    payload.set_claim("status", Some(json!(status)))?;
 
     // Signing JWT
     let keydata = &*PRIVATE_KEY.clone();
