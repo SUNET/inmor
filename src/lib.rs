@@ -1544,15 +1544,13 @@ pub async fn trust_mark_list(
         .map_err(error::ErrorInternalServerError);
     match res {
         Ok(mut result) => {
-            //let mut result = res.unwrap();
             if let Some(sub_entity) = sub {
-                // Means we have a sub value to check
-                //let sub_entity = sub.unwrap();
+                // Per spec Section 8.5.1: filter to only the Entity matching sub
                 if result.contains(&sub_entity) {
                     result = vec![sub_entity];
                 } else {
-                    // Means so such sub for the trust_mark_type in redis
-                    return Ok(HttpResponse::NotFound().body(""));
+                    // Filtering to nothing = empty array
+                    result = vec![];
                 }
             }
 
@@ -1564,7 +1562,7 @@ pub async fn trust_mark_list(
                 .insert_header(("content-type", "application/json"))
                 .body(body))
         }
-        Err(_) => Ok(HttpResponse::NotFound().body("")),
+        Err(_) => error_response_404("not_found", "Trust mark type not found."),
     }
 }
 

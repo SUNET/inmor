@@ -46,6 +46,30 @@ def test_trust_mark_list(loaddata: Redis, start_server: int, http_client: Client
     assert set(data) == subs
 
 
+def test_trust_mark_list_with_sub_filter(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /trust_mark_list with sub filter returns single-element array"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/trust_mark_list?trust_mark_type=https://sunet.se/does_not_exist_trustmark&sub=https://fakeop0.labb.sunet.se"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == ["https://fakeop0.labb.sunet.se"]
+
+
+def test_trust_mark_list_with_unknown_sub_returns_empty(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Tests /trust_mark_list with unknown sub returns empty array (spec 8.5.1)"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/trust_mark_list?trust_mark_type=https://sunet.se/does_not_exist_trustmark&sub=https://nobody.example.com"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == []
+
+
 def test_trust_mark_for_entity(loaddata: Redis, start_server: int, http_client: Client):
     "Tests /trust_mark"
     _rdb = loaddata
