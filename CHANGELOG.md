@@ -1,3 +1,11 @@
+<a id='changelog-0.2.2'></a>
+# 0.2.2 — 2026-02-06
+
+## Fixed
+
+- Fixes #144, `typ` and claim name is correct the trustmark endpoints.
+
+
 <a id='changelog-0.2.1'></a>
 # 0.2.1 — 2026-02-05
 

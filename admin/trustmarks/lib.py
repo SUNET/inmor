@@ -50,7 +50,7 @@ def add_trustmark(
     sub_data["trust_mark_type"] = trustmarktype
 
     key = settings.SIGNING_PRIVATE_KEY
-    token_data = create_signed_jwt(sub_data, key)
+    token_data = create_signed_jwt(sub_data, key, "trust-mark+jwt")
     # Now we should set it in the redis
     # First, the trustmark for the entity and that trustmarktype
     _ = r.hset(f"inmor:tm:{entity}", trustmarktype, token_data)
