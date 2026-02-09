@@ -323,10 +323,11 @@ pub fn create_signed_jwt(
 
     header.set_claim("alg", Some(json!(normalized_alg)))?;
 
-    // Set kid from the key
-    if let Some(kid) = key.key_id() {
-        header.set_key_id(kid);
-    }
+    // Set kid from the key — spec requires kid in all signed JWTs
+    let kid = key.key_id().ok_or_else(|| {
+        JoseError::InvalidKeyFormat(anyhow::anyhow!("Signing key must have a 'kid' field"))
+    })?;
+    header.set_key_id(kid);
 
     // For EdDSA keys, we need to create a modified key with alg="EdDSA"
     // because josekit's signer_from_jwk checks the alg field
