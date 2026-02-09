@@ -710,6 +710,10 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
     let algorithm = header
         .algorithm()
         .ok_or_else(|| anyhow::Error::msg("Missing algorithm in JWT header"))?;
+    // Per spec Section 7.3: alg MUST NOT be "none"
+    if algorithm == "none" {
+        return Err(anyhow::Error::msg("Algorithm 'none' is not permitted"));
+    }
     let boxed_verifier: Box<dyn JwsVerifier> = match algorithm {
         "RS256" => Box::new(RS256.verifier_from_jwk(key)?),
         "PS256" => Box::new(PS256.verifier_from_jwk(key)?),
