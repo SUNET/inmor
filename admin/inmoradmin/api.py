@@ -167,7 +167,6 @@ def process_keys_fromdb(v: str | None) -> dict[str, Any]:
     return {}
 
 
-MyDict = Annotated[dict[str, Any], BeforeValidator(lambda v: json.loads(v))]
 InternalJWKS = Annotated[dict[str, Any], BeforeValidator(lambda v: process_keys_fromdb(v))]
 
 
@@ -203,8 +202,8 @@ class EntityTypeUpdateSchema(Schema):
 class EntityOutSchema(Schema):
     id: int = 0
     entityid: str
-    metadata: MyDict
-    forced_metadata: MyDict
+    metadata: dict[str, Any]
+    forced_metadata: dict[str, Any]
     jwks: InternalJWKS
     required_trustmarks: str | None = None
     valid_for: int | None = None
@@ -565,8 +564,8 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
         sub_statement, created = Subordinate.objects.get_or_create(
             entityid=data.entityid,
             autorenew=data.autorenew,
-            metadata=json.dumps(data.metadata),
-            forced_metadata=json.dumps(data.forced_metadata),
+            metadata=data.metadata,
+            forced_metadata=data.forced_metadata,
             jwks=keys_for_db,
             valid_for=expiry,
             active=data.active,
@@ -696,8 +695,8 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     try:
         # Set each value from the input
         sub.autorenew = bool(data.autorenew)
-        sub.metadata = json.dumps(data.metadata)
-        sub.forced_metadata = json.dumps(data.forced_metadata)
+        sub.metadata = data.metadata
+        sub.forced_metadata = data.forced_metadata
         sub.jwks = keys_for_db
         sub.valid_for = expiry
         sub.active = bool(data.active)
