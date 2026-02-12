@@ -245,18 +245,20 @@ export default defineComponent({
                 this.formLoading = false;
             }
         },
-        async fetchConfiguration() {
+        async fetchConfiguration(skipDuplicateCheck = false) {
             if (!this.formData.entityid) {
                 this.formError = 'Please enter an Entity ID (URL) first';
                 return;
             }
-            // Check if this entity ID already exists as a subordinate
-            const existingSubordinate = this.subordinates?.items.find(
-                (sub) => sub.entityid === this.formData.entityid
-            );
-            if (existingSubordinate) {
-                this.formError = 'This entity is already registered as a subordinate.';
-                return;
+            if (!skipDuplicateCheck) {
+                // Check if this entity ID already exists as a subordinate
+                const existingSubordinate = this.subordinates?.items.find(
+                    (sub) => sub.entityid === this.formData.entityid
+                );
+                if (existingSubordinate) {
+                    this.formError = 'This entity is already registered as a subordinate.';
+                    return;
+                }
             }
             this.fetchLoading = true;
             this.formError = null;
@@ -401,12 +403,25 @@ export default defineComponent({
         <!-- Edit Modal -->
         <Modal :open="showEditModal" title="Edit Subordinate" size="lg" @close="closeModals">
             <form @submit.prevent="handleUpdate" class="form">
-                <Input
-                    :model-value="formData.entityid"
-                    label="Entity ID (URL)"
-                    type="url"
-                    disabled
-                />
+                <div class="entity-id-row">
+                    <Input
+                        :model-value="formData.entityid"
+                        label="Entity ID (URL)"
+                        type="url"
+                        disabled
+                        class="entity-id-input"
+                    />
+                    <Button
+                        type="button"
+                        :loading="fetchLoading"
+                        @click="fetchConfiguration(true)"
+                        class="fetch-config-btn"
+                    >
+                        <Download :size="16" />
+                        Fetch config
+                    </Button>
+                </div>
+                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
                 <JsonEditor
                     v-model="formData.metadata"
                     label="Metadata"
@@ -443,7 +458,6 @@ export default defineComponent({
                     :rows="4"
                     @error="(e) => setJsonError('additional_claims', e)"
                 />
-                <p v-if="formError" class="form-error" role="alert" aria-live="assertive">{{ formError }}</p>
             </form>
             <template #footer>
                 <Button variant="secondary" @click="closeModals">Cancel</Button>

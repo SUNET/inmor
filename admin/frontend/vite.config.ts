@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => {
     define: {
       // Make the API URL available at runtime
       // Use same origin for dev (proxy configured above), or explicit URL for production
-      __API_URL__: JSON.stringify(env.VITE_API_URL || (mode === 'development' ? '' : 'http://localhost:8000')),
+      __API_URL__: JSON.stringify(env.VITE_API_URL || ''),
     },
   }
 })
