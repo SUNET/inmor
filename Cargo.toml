@@ -3,6 +3,14 @@ name = "inmor"
 version = "0.3.0"
 edition = "2024"
 
+[[bin]]
+name = "inmor"
+path = "src/bin/inmor/main.rs"
+
+[[bin]]
+name = "inmor-collection"
+path = "src/bin/inmor-collection/main.rs"
+
 [dependencies]
 actix-web = { version = "4.10.2", features = ["rustls-0_23"] }
 josekit = "0.10.3"

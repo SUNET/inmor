@@ -257,6 +257,7 @@ FEDERATION_ENTITY = {
     "federation_trust_mark_list_endpoint": f"{TA_DOMAIN}/trust_mark_list",
     "federation_trust_mark_endpoint": f"{TA_DOMAIN}/trust_mark",
     "federation_historical_keys_endpoint": f"{TA_DOMAIN}/historical_keys",
+    "federation_collection_endpoint": f"{TA_DOMAIN}/collection",
 }
 
 HISTORICAL_KEYS_DIR = os.environ.get("HISTORICAL_KEYS_DIR", "./historical_keys")

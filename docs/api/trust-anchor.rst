@@ -496,14 +496,87 @@ This allows verification of old signatures after key rotation.
 Other Endpoints
 ---------------
 
-Collection Endpoint
-^^^^^^^^^^^^^^^^^^^
+Entity Collection
+^^^^^^^^^^^^^^^^^
 
 .. code-block:: text
 
    GET /collection
 
-Entity collection endpoint (per draft specification).
+Returns a list of all entities discovered in the federation tree, per the
+`Entity Collection Endpoint specification <https://openid.net/specs/openid-federation-entity-collection-endpoint-1_0.html>`_
+(draft 00).
+
+This endpoint reads pre-populated data from Redis. The data is populated by running the
+``inmor-collection`` CLI tool, which walks the federation tree from a trust anchor and
+stores entity information. See :ref:`collection-cli` for details.
+
+**Response (200 OK):**
+
+* Content-Type: ``application/json``
+
+.. code-block:: json
+
+   {
+     "entities": [
+       {
+         "entity_id": "https://op.example.com",
+         "entity_types": ["openid_provider", "federation_entity"],
+         "ui_infos": {
+           "openid_provider": {
+             "display_name": "Example OP",
+             "logo_uri": "https://op.example.com/logo.png"
+           },
+           "federation_entity": {
+             "display_name": "Example Organization"
+           }
+         },
+         "trust_marks": [
+           {"id": "https://ta.example.com/tm/member", "trust_mark": "eyJ..."}
+         ]
+       },
+       {
+         "entity_id": "https://rp.example.com",
+         "entity_types": ["openid_relying_party", "federation_entity"],
+         "ui_infos": {
+           "openid_relying_party": {
+             "display_name": "Example RP"
+           }
+         }
+       }
+     ],
+     "last_updated": 1770983002
+   }
+
+**Response Fields:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Field
+     - Description
+   * - ``entities``
+     - Array of entity objects discovered in the federation tree
+   * - ``entities[].entity_id``
+     - The entity identifier (URL)
+   * - ``entities[].entity_types``
+     - Array of entity types (``openid_provider``, ``openid_relying_party``, ``federation_entity``, ``oauth_authorization_server``, ``oauth_client``, ``oauth_resource``)
+   * - ``entities[].ui_infos``
+     - Optional. UI information per entity type (display_name, logo_uri, policy_uri)
+   * - ``entities[].trust_marks``
+     - Optional. Array of trust marks attached to the entity
+   * - ``last_updated``
+     - Unix timestamp of the last collection walk
+
+**Example:**
+
+.. code-block:: bash
+
+   curl https://federation.example.com/collection
+
+If no collection data has been populated yet, the response will be an empty entity list
+with ``last_updated: 0``.
 
 Index Page
 ^^^^^^^^^^
