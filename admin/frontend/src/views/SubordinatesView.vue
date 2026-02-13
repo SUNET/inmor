@@ -1,6 +1,6 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { Plus, Pencil, Eye, Trash2, Download } from 'lucide-vue-next';
+import { Plus, Pencil, Eye, Trash2, Download, RefreshCw } from 'lucide-vue-next';
 import Heading from '../components/base/Heading.vue';
 import Button from '../components/base/Button.vue';
 import Badge from '../components/base/Badge.vue';
@@ -49,6 +49,7 @@ export default defineComponent({
         Eye,
         Trash2,
         Download,
+        RefreshCw,
     },
     data() {
         return {
@@ -74,6 +75,7 @@ export default defineComponent({
             formLoading: false,
             formError: null as string | null,
             fetchLoading: false,
+            renewingItemId: null as number | null,
             jsonErrors: {
                 metadata: null as string | null,
                 forced_metadata: null as string | null,
@@ -245,6 +247,18 @@ export default defineComponent({
                 this.formLoading = false;
             }
         },
+        async handleRenew(item: Subordinate) {
+            this.renewingItemId = item.id;
+            try {
+                await this.$sdk.renewSubordinate(item.id);
+                await this.loadData();
+            } catch (e: any) {
+                this.error = e.message || 'Failed to renew subordinate statement';
+                console.error(e);
+            } finally {
+                this.renewingItemId = null;
+            }
+        },
         async fetchConfiguration(skipDuplicateCheck = false) {
             if (!this.formData.entityid) {
                 this.formError = 'Please enter an Entity ID (URL) first';
@@ -323,6 +337,10 @@ export default defineComponent({
                     <Button variant="ghost" size="sm" @click="openEditModal(row as Subordinate)">
                         <Pencil :size="16" />
                         Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" @click="handleRenew(row as Subordinate)" :loading="renewingItemId === (row as Subordinate).id" v-if="(row as Subordinate).active">
+                        <RefreshCw :size="16" />
+                        Renew
                     </Button>
                     <Button variant="ghost" size="sm" @click="openDeactivateModal(row as Subordinate)" v-if="(row as Subordinate).active">
                         <Trash2 :size="16" />

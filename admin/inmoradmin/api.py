@@ -714,6 +714,95 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     return 200, sub
 
 
+@router.post(
+    "/subordinates/{int:subid}/renew",
+    response={200: EntityOutSchema, 404: Message, 400: Message, 500: Message},
+    tags=["Subordinates"],
+)
+def renew_subordinate(request: HttpRequest, subid: int):
+    """Renews a subordinate by re-fetching and verifying its entity configuration."""
+
+    try:
+        sub = Subordinate.objects.get(id=subid)
+    except Subordinate.DoesNotExist:
+        return 404, {"message": "Subordinate could not be found.", "id": subid}
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Failed to get Subordinate.", "id": subid}
+
+    if not sub.active:
+        return 400, {"message": "Cannot renew an inactive subordinate."}
+
+    # Use stored JWKS to verify the entity's current configuration
+    keys: dict[Any, Any] | None = None
+    if sub.jwks:
+        keys = json.loads(sub.jwks) if isinstance(sub.jwks, str) else sub.jwks
+
+    try:
+        entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(sub.entityid, keys)
+    except ValueError as e:
+        return 400, {"message": f"Failed to verify entity configuration: {e}"}
+    except Exception as e:
+        print(e)
+        return 400, {"message": f"Failed to fetch entity configuration: {e}"}
+
+    claims: dict[str, Any] = json.loads(entity_jwt.claims)
+    # Verify that our TA_DOMAIN is in the authority_hints of the subordinate
+    authority_hints = claims.get("authority_hints", [])
+    if settings.TA_DOMAIN not in authority_hints:
+        return 400, {
+            "message": f"TA domain {settings.TA_DOMAIN} is not in the authority_hints of the entity configuration."
+        }
+    # If the entity has policy, then we should try to merge to verify.
+    if "metadata_policy" in claims:
+        sub_policy = claims.get("metadata_policy", {})
+        try:
+            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
+        except Exception as e:
+            print(e)
+            return 400, {
+                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
+            }
+
+    metadata: dict[str, Any] = claims["metadata"]
+    try:
+        _ = apply_server_policy(json.dumps(metadata))
+    except Exception as e:
+        print(e)
+        return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}
+
+    expiry = sub.valid_for or settings.SUBORDINATE_DEFAULT_VALID_FOR
+
+    # Now we can build the subordinate statement.
+    now = datetime.now()
+    exp = now + timedelta(hours=expiry)
+    signed_statement = create_subordinate_statement(
+        sub.entityid,
+        keyset,
+        now,
+        exp,
+        sub.forced_metadata,
+        additional_claims=sub.additional_claims,
+    )
+
+    # Update the database with fresh metadata and JWKS from the fetched config
+    fresh_jwks = claims.get("jwks", None)
+    try:
+        sub.metadata = metadata
+        if fresh_jwks:
+            sub.jwks = json.dumps(fresh_jwks)
+        sub.statement = signed_statement
+        sub.save()
+    except Exception as e:
+        print(e)
+        return 500, {"message": "Error while renewing the subordinate.", "id": subid}
+
+    # Update Redis
+    con: Redis = get_redis_connection("default")
+    update_redis_with_subordinate(sub.entityid, entity_jwt_str, metadata, signed_statement, con)
+    return 200, sub
+
+
 class FetchConfigSchema(Schema):
     url: Annotated[str, Field(description="The entity URL to fetch configuration from.")]
 

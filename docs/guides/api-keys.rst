@@ -48,13 +48,6 @@ Only Django superusers can create API keys through the admin interface.
    The plaintext API key is displayed **only once** after creation. If you
    lose it, you must create a new key.
 
-Or you can generate it via command line for the cases where you don't have frontend enabled.
-
-.. code-block:: bash
-
-    docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=UPDATETOalargePASSPHRASE_HERE admin python manage.py setup_admin --username admin --noinput --skip-checks
-    docker compose exec -T admin python manage.py create_api_key --username admin --skip-checks
-
 Using an API Key
 ----------------
 
