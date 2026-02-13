@@ -1801,9 +1801,9 @@ dependencies = [
 
 [[package]]
 name = "oidfed_metadata_policy"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a40da4e41067d290fa7ec4b67335c979a7c48faaef4c53dfe05e119a4d2f0a2b"
+checksum = "04d654e0192cd6e14a2aa6e7f6a62e7a463f2862906d8b6e7e9ec5fbef5c08d9"
 dependencies = [
  "anyhow",
  "env_logger",
@@ -2244,7 +2244,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
