@@ -77,7 +77,7 @@ services:
       # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       # - MFA_ENCRYPTION_KEY=your-production-key-here
     volumes:
-      - ./admin/private.json:/app/private.json
+      - ./private.json:/app/private.json
       - ./admin/inmoradmin:/app/inmoradmin
       - ./admin/apikeys:/app/apikeys
       - ./admin/entities:/app/entities
