@@ -1266,7 +1266,10 @@ pub async fn resolve_entity(
                             "metadata is not an object",
                         );
                     };
-                    let full_policy = json!({"metadata_policy": val.clone(), "metadata": forced_metadata.clone()});
+                    let full_policy = match forced_metadata {
+                        Some(fm) => json!({"metadata_policy": val.clone(), "metadata": fm.clone()}),
+                        None => json!({"metadata_policy": val.clone()}),
+                    };
                     let Some(full_policy_document) = full_policy.as_object() else {
                         return error_response_400(
                             "invalid_trust_chain",
