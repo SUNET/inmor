@@ -7,6 +7,7 @@ It provides a complete solution for managing OpenID Federation trust chains, sub
 The system consists of two components:
 
 * **Trust Anchor (Rust)**: High-performance federation server handling entity statements, trust marks, and resolution
+* **Collection CLI (Rust)**: ``inmor-collection`` tool that walks federation trees and populates the collection endpoint data
 * **Admin Portal (Python/Django)**: REST API for managing subordinates, trust mark types, and trust marks
 
 .. note::
@@ -117,6 +118,7 @@ Inmor implements the following OpenID Federation endpoints:
 * ``/trust_mark_list`` - List entities with trust marks
 * ``/trust_mark_status`` - Validate trust marks
 * ``/historical_keys`` - Historical/expired key set
+* ``/collection`` - Entity collection (populated by ``inmor-collection`` CLI)
 
 Indices and tables
 ==================

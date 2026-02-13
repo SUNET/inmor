@@ -1,4 +1,5 @@
 #![allow(unused)]
+pub mod tree;
 use anyhow::{Result, anyhow, bail};
 
 use lazy_static::lazy_static;
@@ -175,7 +176,10 @@ pub struct UiInfo {
 pub struct EntityCollectionResponse {
     pub entity_id: String,
     pub entity_types: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_infos: Option<HashMap<String, UiInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_marks: Option<Vec<Value>>,
 }
 
 impl EntityCollectionResponse {
@@ -184,6 +188,7 @@ impl EntityCollectionResponse {
             entity_id,
             entity_types,
             ui_infos: None,
+            trust_marks: None,
         }
     }
 }
@@ -357,66 +362,48 @@ pub fn create_signed_jwt(
     Ok(jwt)
 }
 
-/// This method returns the corresponding entitys based on given
-/// entity type. Used in fetch_collection endpoint.
-pub async fn get_entitycollectionresponse(
-    entity_type: &str,
-    redis: web::Data<redis::Client>,
+/// Returns entities from the collection data populated by inmor-collection.
+/// If entity_type filter is given, reads from `inmor:collection:by_type:{type}` sets,
+/// otherwise reads all from `inmor:collection:entities` hash.
+async fn get_collection_entities(
+    conn: &mut redis::aio::ConnectionManager,
+    entity_types: &[String],
 ) -> Result<Vec<EntityCollectionResponse>> {
-    let mut conn = redis
-        .get_connection_manager()
-        .await
-        .map_err(|e| anyhow::Error::msg(format!("Failed to get Redis connection: {}", e)))?;
-    let mut result: Vec<EntityCollectionResponse> = Vec::new();
-    match entity_type {
-        "openid_provider" => {
-            let mut res = (redis::Cmd::smembers("inmor:op")
-                .query_async::<Vec<String>>(&mut conn)
-                .await)
-                .unwrap_or_default();
-            // Now loop over
-            for entry in res {
-                let entry_struct = EntityCollectionResponse::new(
-                    entry,
-                    vec![
-                        "federation_entity".to_string(),
-                        "openid_provider".to_string(),
-                    ],
-                );
-                result.push(entry_struct);
-            }
+    let entity_ids: Vec<String> = if entity_types.is_empty() {
+        // No filter: get all entity_ids from the hash
+        redis::Cmd::hkeys("inmor:collection:entities")
+            .query_async(conn)
+            .await
+            .unwrap_or_default()
+    } else {
+        // Get union of entity_ids across requested types
+        let mut ids = HashSet::new();
+        for etype in entity_types {
+            let type_ids: Vec<String> =
+                redis::Cmd::smembers(format!("inmor:collection:by_type:{etype}"))
+                    .query_async(conn)
+                    .await
+                    .unwrap_or_default();
+            ids.extend(type_ids);
         }
-        "openid_relying_party" => {
-            let mut res = (redis::Cmd::smembers("inmor:rp")
-                .query_async::<Vec<String>>(&mut conn)
-                .await)
-                .unwrap_or_default();
-            // Now loop over
-            for entry in res {
-                let entry_struct = EntityCollectionResponse::new(
-                    entry,
-                    vec![
-                        "federation_entity".to_string(),
-                        "openid_relying_party".to_string(),
-                    ],
-                );
-                result.push(entry_struct);
-            }
+        ids.into_iter().collect()
+    };
+
+    let mut result = Vec::new();
+    for eid in &entity_ids {
+        let json_str: Option<String> = redis::Cmd::hget("inmor:collection:entities", eid)
+            .query_async(conn)
+            .await
+            .ok();
+        if let Some(json_str) = json_str
+            && let Ok(entry) = serde_json::from_str::<EntityCollectionResponse>(&json_str)
+        {
+            result.push(entry);
         }
-        "taia" => {
-            let mut res = (redis::Cmd::smembers("inmor:taia")
-                .query_async::<Vec<String>>(&mut conn)
-                .await)
-                .unwrap_or_default();
-            // Now loop over
-            for entry in res {
-                let entry_struct =
-                    EntityCollectionResponse::new(entry, vec!["federation_entity".to_string()]);
-                result.push(entry_struct);
-            }
-        }
-        _ => (),
     }
+
+    // Sort by entity_id for consistent ordering
+    result.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
     Ok(result)
 }
 
@@ -514,8 +501,8 @@ async fn list_subordinates(
     Ok(HttpResponse::Ok().json(res))
 }
 
-///https://zachmann.github.io/openid-federation-entity-collection/main.html
-/// Entity collection endpoint, from Zachmann's draft.
+/// https://zachmann.github.io/openid-federation-entity-collection/main.html
+/// Entity collection endpoint. Reads data populated by inmor-collection CLI.
 #[get("/collection")]
 pub async fn fetch_collections(
     req: HttpRequest,
@@ -524,7 +511,7 @@ pub async fn fetch_collections(
     let params: Vec<(String, String)> =
         match web::Query::<Vec<(String, String)>>::from_query(req.query_string()) {
             Ok(data) => data.to_vec(),
-            Err(_) => return Err(error::ErrorBadRequest("Missing params")),
+            Err(_) => Vec::new(),
         };
 
     let mut conn = redis
@@ -532,59 +519,38 @@ pub async fn fetch_collections(
         .await
         .map_err(error::ErrorInternalServerError)?;
 
-    let mut entity_type_asked = false;
+    let mut entity_types: Vec<String> = Vec::new();
 
-    let mut result: Vec<EntityCollectionResponse> = Vec::new();
+    // Parse query parameters
     for (q, p) in params.iter() {
-        if (q == "entity_type") {
-            // Means we were asked an entity type
-            entity_type_asked = true;
-            match p.as_str() {
-                "openid_provider" => {
-                    let internal = get_entitycollectionresponse("openid_provider", redis.clone())
-                        .await
-                        .map_err(error::ErrorInternalServerError)?;
-                    result.extend(internal);
-                }
-                "openid_relying_party" => {
-                    let internal =
-                        get_entitycollectionresponse("openid_relying_party", redis.clone())
-                            .await
-                            .map_err(error::ErrorInternalServerError)?;
-                    result.extend(internal);
-                }
-
-                _ => (),
+        match q.as_str() {
+            "entity_type" => {
+                entity_types.push(p.clone());
             }
-        } else {
-            // We don't support the other query parameters yet.
-            // https://zachmann.github.io/openid-federation-entity-collection/main.html#section-2.2.1 has all
-            // the details.
-            eprintln!("Unsupported query parameter in /collection: {}", q);
-            return error_response_400("unsupported_parameter", "{q}");
+            _ => {
+                return error_response_400("unsupported_parameter", q);
+            }
         }
     }
 
-    // If no entity type was asked, we should return all types.
-    if !entity_type_asked {
-        let internal = get_entitycollectionresponse("openid_provider", redis.clone())
-            .await
-            .map_err(error::ErrorInternalServerError)?;
-        result.extend(internal);
-        let internal = get_entitycollectionresponse("openid_relying_party", redis.clone())
-            .await
-            .map_err(error::ErrorInternalServerError)?;
-        result.extend(internal);
+    let result = get_collection_entities(&mut conn, &entity_types)
+        .await
+        .map_err(error::ErrorInternalServerError)?;
 
-        let internal = get_entitycollectionresponse("taia", redis)
-            .await
-            .map_err(error::ErrorInternalServerError)?;
-        result.extend(internal);
-    }
+    // Get last_updated timestamp
+    let last_updated: Option<u64> = redis::Cmd::get("inmor:collection:last_updated")
+        .query_async(&mut conn)
+        .await
+        .ok();
+
+    let response = json!({
+        "entities": result,
+        "last_updated": last_updated,
+    });
 
     Ok(HttpResponse::Ok()
         .content_type("application/json")
-        .body(json!(result).to_string()))
+        .body(response.to_string()))
 }
 
 /// https://openid.net/specs/openid-federation-1_0.html#name-fetch-subordinate-statement-
@@ -745,219 +711,6 @@ pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
     let jwks = get_jwks_from_payload(&payload)?;
     let (payload, header) = verify_jwt_with_jwks(data, Some(jwks))?;
     Ok((payload, header))
-}
-
-/// This function will walk through a subordinate's tree of entities.
-/// Means you point it to a TA/IA and it will traverse the whole tree.
-pub fn tree_walking(entity_id: &str, conn: &mut redis::Connection) {
-    // First let us get the entity configuration
-    let jwt_net = match get_jwt_sync(entity_id) {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!(
-                "Failed to fetch entity configuration for {}: {}",
-                entity_id, e
-            );
-            return;
-        }
-    };
-
-    // Verify and get the payload
-    let (entity_payload, _) = match self_verify_jwt(&jwt_net) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!(
-                "Failed to verify entity configuration for {}: {}",
-                entity_id, e
-            );
-            return;
-        }
-    };
-
-    // Add to the visisted list
-    match redis::Cmd::sadd("inmor:current_visited", entity_id).query::<String>(conn) {
-        Ok(_) => (),
-        Err(e) => return,
-    }
-    // Add to the entity hash in redis
-    match redis::Cmd::hset("inmor:entities", entity_id, jwt_net.as_bytes()).query::<String>(conn) {
-        Ok(_) => (),
-        Err(e) => return,
-    }
-
-    // Visit authorities for authority statements
-    if let Some(value) = entity_payload.claim("authority_hints") {
-        // We need to traverse the authorities
-        fetch_all_subordinate_statements(value, entity_id, conn);
-    }
-
-    // Now the actual discovery
-    let metadata = match entity_payload.claim("metadata") {
-        Some(value) => match value.as_object() {
-            Some(obj) => obj,
-            None => return,
-        },
-        None => return,
-    };
-
-    if metadata.get("openid_relying_party").is_some() {
-        // Means RP
-        let _ = redis::Cmd::sadd("inmor:rp", entity_id).query::<String>(conn);
-    } else if metadata.get("openid_provider").is_some() {
-        // Means OP
-
-        let _ = redis::Cmd::sadd("inmor:op", entity_id).query::<String>(conn);
-    } else {
-        // Means a TA/IA.
-        match redis::Cmd::sadd("inmor:taia", entity_id).query::<String>(conn) {
-            Ok(_) => (),
-            Err(_) => return,
-        }
-        // Getting the list endpoint if any
-        let list_endpoint = match metadata.get("federation_entity") {
-            Some(f_entity) => f_entity.get("federation_list_endpoint"),
-            None => None,
-        };
-
-        if list_endpoint.is_none() {
-            // Means no list endpoint avaiable
-            // TODO: add debug point here
-            return;
-        }
-        if let Some(endpoint) = list_endpoint.and_then(|e| e.as_str())
-            && let Ok(resp) = get_query_sync(endpoint)
-        {
-            // Here we will loop through the subordinates
-            if let Ok(subs) = serde_json::from_str::<Value>(&resp)
-                && let Some(sub_array) = subs.as_array()
-            {
-                for sub in sub_array {
-                    if let Some(sub_str) = sub.as_str() {
-                        let ismember = redis::Cmd::sismember("inmor:current_visited", sub_str)
-                            .query::<bool>(conn)
-                            .unwrap_or_default();
-                        if ismember {
-                            // Means we already visited it, it is a loop
-                            // We should skip it.
-                            info!("We have a loop: {sub_str}");
-                            continue;
-                        }
-                        // Means we have a new subordinate
-                        info!("Found new subordinate: {sub_str}");
-                        queue_lpush(sub_str, conn);
-                    }
-                }
-            }
-        }
-    }
-}
-
-// To push to the queue for the next set of visists
-pub fn queue_lpush(entity_id: &str, conn: &mut redis::Connection) {
-    redis::Cmd::lpush("inmor:visit_subordinate", entity_id)
-        .query::<bool>(conn)
-        .unwrap_or_default();
-}
-
-// To blocked wait on the queue
-pub fn queue_wait(conn: &mut redis::Connection) -> String {
-    match redis::Cmd::brpop("inmor:visit_subordinate", 0.0).query::<(String, String)>(conn) {
-        Ok(val) => {
-            println!("Received {val:?} inside.");
-            val.1
-        }
-        Err(e) => {
-            println!("{e:?}");
-            "".to_string()
-        }
-    }
-}
-
-/// Fetches the subordinate statements and stores on memory as required.
-pub fn fetch_all_subordinate_statements(
-    authority_hints: &Value,
-    entity_id: &str,
-    conn: &mut redis::Connection,
-) {
-    let Some(ahints) = authority_hints.as_array() else {
-        return; // Skip if not an array
-    };
-    for ahint in ahints.iter() {
-        let Some(ahint_str) = ahint.as_str() else {
-            continue; // Skip if not a string
-        };
-        // HACK: Enable TA hack here
-        // TODO: ^^
-        println!("Fetching {ahint_str:?}");
-        let jwt_net = match get_jwt_sync(ahint_str) {
-            Ok(res) => res,
-            Err(e) => {
-                eprintln!("Failed to fetch authority hint {}: {}", ahint_str, e);
-                return;
-            }
-        };
-
-        // Verify and get the payload
-        let (entity_payload, _) = match self_verify_jwt(&jwt_net) {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!(
-                    "Failed to verify authority hint JWT for {}: {}",
-                    ahint_str, e
-                );
-                return;
-            }
-        };
-
-        let metadata = match entity_payload.claim("metadata") {
-            Some(value) => match value.as_object() {
-                Some(obj) => obj,
-                None => {
-                    eprintln!("Metadata is not an object for authority: {}", ahint_str);
-                    continue;
-                }
-            },
-            None => {
-                eprintln!("Missing metadata claim for authority: {}", ahint_str);
-                continue;
-            }
-        };
-
-        // First get the federation_entity map inside of the JSOn
-        let fed_entity = match metadata.get("federation_entity") {
-            Some(value) => match value.as_object() {
-                Some(obj) => obj,
-                None => {
-                    eprintln!("federation_entity is not an object for: {}", ahint_str);
-                    continue;
-                }
-            },
-            None => {
-                eprintln!("Missing federation_entity in metadata for: {}", ahint_str);
-                continue;
-            }
-        };
-        // Then the fetch_end_point
-        let fetch_endpoint = fed_entity.get("federation_fetch_endpoint");
-
-        println!("SEE {fetch_endpoint:?}");
-        if let Some(fetch_endpoint) = fetch_endpoint {
-            // HACK: Enable TA hack here
-            // TODO: ^^
-            //let fetch_endpoint = fetch_endpoint.unwrap();
-            let sub_statement =
-                fetch_sub_statement_sync(fetch_endpoint.as_str().unwrap(), entity_id);
-            if let Ok((jwt_str, url)) = sub_statement {
-                // Store it on memeory
-                match redis::Cmd::hset("inmor:subordinate_query", url, jwt_str.as_bytes())
-                    .query::<String>(conn)
-                {
-                    Ok(_) => (),
-                    Err(e) => return,
-                }
-            }
-        }
-    }
 }
 
 pub async fn resolve_entity_to_trustanchor(
@@ -1624,31 +1377,6 @@ pub async fn get_entity_configruation_as_jwt(entity_id: &str) -> Result<String> 
     let url = format!("{entity_id}/{WELL_KNOWN}");
     debug!("EC {url}");
     return get_query(&url).await;
-}
-
-/// Gets subordinate statement in sync
-pub fn fetch_sub_statement_sync(fetch_url: &str, entity_id: &str) -> Result<(String, String)> {
-    let url = format!("{fetch_url}?sub={entity_id}");
-    debug!("FETCH {url}");
-    match get_query_sync(&url) {
-        Ok(res) => Ok((res, url)),
-        Err(e) => Err(e),
-    }
-}
-
-/// Gets the enitity configuration of a given entity_id for sync code.
-pub fn get_jwt_sync(entity_id: &str) -> Result<String> {
-    let url = format!("{entity_id}/{WELL_KNOWN}");
-    get_query_sync(&url)
-}
-
-/// GET call for sync code
-pub fn get_query_sync(url: &str) -> Result<String> {
-    let resp = match ureq::get(url).call() {
-        Ok(mut body) => body.body_mut().read_to_string()?,
-        Err(e) => return Err(anyhow::Error::new(e)),
-    };
-    Ok(resp)
 }
 
 /// To do a GET query

@@ -226,6 +226,7 @@ Redis stores the federation runtime data:
 * Trust marks by entity (``inmor:tm:{domain}``)
 * Trust mark type memberships (``inmor:tmtype:{type}``)
 * Entity type sets (``inmor:rp``, ``inmor:op``, ``inmor:taia``)
+* Collection data (``inmor:collection:*``) — populated by ``inmor-collection``
 
 Redis data is ephemeral and can be rebuilt from the database::
 
@@ -237,6 +238,89 @@ Redis data is ephemeral and can be rebuilt from the database::
 
    # Reload trust marks from database
    docker compose exec admin python manage.py reload_issued_tms
+
+   # Rebuild collection data (walks the federation tree)
+   docker compose exec ta ./inmor-collection -c taconfig.toml https://ta.example.com
+
+.. _collection-cli:
+
+Entity Collection CLI (``inmor-collection``)
+--------------------------------------------
+
+The ``inmor-collection`` binary walks a federation tree starting from a trust anchor,
+discovers all subordinate entities, and stores their collection data in Redis.
+The ``/collection`` endpoint on the Trust Anchor reads this data.
+
+**Usage:**
+
+.. code-block:: bash
+
+   inmor-collection -c <config-file> <trust-anchor-entity-id>
+
+**Arguments:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Argument
+     - Description
+   * - ``-c, --config <FILE>``
+     - Path to ``taconfig.toml`` (used for Redis URI)
+   * - ``<trust_anchor>``
+     - Entity ID of the trust anchor to walk (e.g., ``https://ta.example.com``)
+
+**Example:**
+
+.. code-block:: bash
+
+   # Run inside the Docker container
+   docker compose exec ta ./inmor-collection -c taconfig.toml https://ta.example.com
+
+   # With debug logging
+   docker compose exec ta sh -c 'RUST_LOG=debug ./inmor-collection -c taconfig.toml https://ta.example.com'
+
+**How it works:**
+
+1. Connects to Redis using the URI from ``taconfig.toml``
+2. Fetches the trust anchor's entity configuration
+3. Recursively discovers all subordinates by following ``federation_list_endpoint`` links
+4. For each entity, extracts entity types, UI info (display name, logo, policy URI), and trust marks
+5. Writes all data to **staging Redis keys** (``inmor:collection:staging:*``) during the walk
+6. On completion, atomically swaps staging keys to live keys using a Redis RENAME pipeline
+
+The staging-to-live swap ensures the ``/collection`` endpoint never serves partial data
+during a walk.
+
+**Redis keys populated:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 15 45
+
+   * - Key
+     - Type
+     - Content
+   * - ``inmor:collection:entities``
+     - Hash
+     - entity_id → JSON entity object
+   * - ``inmor:collection:by_type:{type}``
+     - Set
+     - entity_ids of that type
+   * - ``inmor:collection:all_sorted``
+     - ZSet
+     - entity_ids for ordering
+   * - ``inmor:collection:last_updated``
+     - String
+     - Unix timestamp of last walk
+
+**Scheduling:**
+
+The tool is designed to run periodically via cron or systemd-timer. For example,
+to run every 5 minutes::
+
+   # crontab entry
+   */5 * * * * docker compose -f /path/to/docker-compose.yml exec -T ta ./inmor-collection -c taconfig.toml https://ta.example.com 2>&1 | logger -t inmor-collection
 
 Health Checks
 -------------
