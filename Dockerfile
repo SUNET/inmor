@@ -30,6 +30,7 @@ EOT
 # Copy from the build container
 COPY --from=build --chown=app:app /app/target/debug/inmor /app/
 COPY --from=build --chown=app:app /app/target/debug/inmor-collection /app/
+COPY --chown=app:app templates/ /app/templates/
 
 USER app
 WORKDIR /app

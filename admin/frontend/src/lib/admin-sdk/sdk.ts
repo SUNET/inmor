@@ -345,6 +345,23 @@ export class AdminSDK {
     }
 
     /**
+     * Renew a subordinate by re-fetching and verifying its entity configuration.
+     */
+    async renewSubordinate(id: number): Promise<Subordinate> {
+        const res = await this.#fetch('POST', `/subordinates/${id}/renew`);
+
+        const data = safeParse(SubordinateSchema, res);
+        if (!data.success) {
+            throw new ValidationError({
+                message: 'Invalid response when renewing subordinate',
+                issues: data.issues,
+            });
+        }
+
+        return data.output;
+    }
+
+    /**
      * Lists all existing subordinates.
      */
     async listSubordinates(filters?: { limit?: number; offset?: number; }): Promise<Subordinates> {

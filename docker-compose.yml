@@ -17,6 +17,7 @@ services:
       - ./private.json:/app/private.json
       - ./publickeys:/app/publickeys
       - ./historical_keys:/app/historical_keys
+      - ./templates:/app/templates
       - ./localhost+2.pem:/app/localhost+2.pem
       - ./localhost+2-key.pem:/app/localhost+2-key.pem
     depends_on:

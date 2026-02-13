@@ -316,11 +316,128 @@ during a walk.
 
 **Scheduling:**
 
-The tool is designed to run periodically via cron or systemd-timer. For example,
-to run every 5 minutes::
+The tool is designed to run periodically via cron or systemd-timer.
+See :ref:`scheduled-tasks` for cron and systemd timer configuration examples.
 
-   # crontab entry
-   */5 * * * * docker compose -f /path/to/docker-compose.yml exec -T ta ./inmor-collection -c taconfig.toml https://ta.example.com 2>&1 | logger -t inmor-collection
+.. _scheduled-tasks:
+
+Scheduled Tasks
+---------------
+
+Inmor requires two periodic tasks for production operation:
+
+1. **Entity configuration regeneration** — keeps the TA's entity statement up to date
+   (e.g. after adding subordinates, trust marks, or changing metadata via the Admin portal)
+2. **Collection walk** — discovers all entities in the federation tree and populates
+   the ``/collection`` endpoint
+
+.. _regenerate-entity:
+
+Entity Configuration Regeneration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``regenerate_entity`` management command regenerates the Trust Anchor's entity
+configuration JWT and stores it in Redis. Run this periodically so that changes made
+via the Admin portal (new subordinates, trust marks, metadata) are reflected in the
+entity statement served at ``/.well-known/openid-federation``.
+
+**Manual run:**
+
+.. code-block:: bash
+
+   # Via just
+   just regenerate-entity
+
+   # Or directly
+   docker compose exec admin python manage.py regenerate_entity
+
+**Cron (recommended for production):**
+
+.. code-block:: bash
+
+   # Run every minute
+   * * * * * cd /path/to/inmor && /usr/bin/docker compose exec -T admin python manage.py regenerate_entity >> /tmp/inmor-regenerate.log 2>&1
+
+**Systemd timer (alternative):**
+
+Create ``~/.config/systemd/user/inmor-regenerate-entity.service``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Regenerate inmor Trust Anchor entity configuration
+
+   [Service]
+   Type=oneshot
+   WorkingDirectory=/path/to/inmor
+   ExecStart=/usr/bin/docker compose exec -T admin python manage.py regenerate_entity
+
+Create ``~/.config/systemd/user/inmor-regenerate-entity.timer``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Regenerate inmor entity configuration every minute
+
+   [Timer]
+   OnCalendar=*-*-* *:*:00
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+
+Enable the timer::
+
+   systemctl --user daemon-reload
+   systemctl --user enable --now inmor-regenerate-entity.timer
+
+   # Ensure timers survive logout/reboot
+   loginctl enable-linger $(whoami)
+
+Collection Walk Scheduling
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+See :ref:`collection-cli` above for details on ``inmor-collection``.
+
+**Cron:**
+
+.. code-block:: bash
+
+   # Run every 5 minutes
+   */5 * * * * cd /path/to/inmor && /usr/bin/docker compose exec -T ta ./inmor-collection -c taconfig.toml https://ta.example.com >> /tmp/inmor-collection.log 2>&1
+
+**Systemd timer:**
+
+Create ``~/.config/systemd/user/inmor-collection.service``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Walk federation tree and populate collection data
+
+   [Service]
+   Type=oneshot
+   WorkingDirectory=/path/to/inmor
+   ExecStart=/usr/bin/docker compose exec -T ta ./inmor-collection -c taconfig.toml https://ta.example.com
+
+Create ``~/.config/systemd/user/inmor-collection.timer``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Run inmor collection walk every 5 minutes
+
+   [Timer]
+   OnCalendar=*-*-* *:*:00/5
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+
+Enable::
+
+   systemctl --user daemon-reload
+   systemctl --user enable --now inmor-collection.timer
 
 Health Checks
 -------------
