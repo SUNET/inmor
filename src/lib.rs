@@ -165,11 +165,11 @@ pub struct SubListingParams {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UiInfo {
-    display_name: Option<String>,
-    description: Option<String>,
-    logo_uri: Option<String>,
-    policy_uri: Option<String>,
-    information_uri: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub logo_uri: Option<String>,
+    pub policy_uri: Option<String>,
+    pub information_uri: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

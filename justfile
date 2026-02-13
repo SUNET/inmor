@@ -113,6 +113,10 @@ recreate-data: recreate-fedora up
   docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=testpass admin python manage.py setup_admin --username admin --noinput --skip-checks
   INMOR_API_KEY=$(docker compose exec -T admin python manage.py create_api_key --username admin --skip-checks) python scripts/create_redis_db_data.py
 
+# To regenerate the TA entity configuration
+regenerate-entity:
+  docker compose exec admin python manage.py regenerate_entity
+
 # To run the collection walk inside the TA container
 collection TA="https://ta.tiime2026.aai.garr.it":
   docker compose exec ta ./inmor-collection -c taconfig.toml {{TA}}

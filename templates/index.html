@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__DISPLAY_TITLE__ — OpenID Federation Trust Anchor</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --c-bg: #ffffff;
+  --c-surface: #f8f9fb;
+  --c-border: #e2e5ea;
+  --c-border-light: #eef0f3;
+  --c-text: #1a1d23;
+  --c-text-secondary: #5f6572;
+  --c-text-tertiary: #8b91a0;
+  --c-accent: #1a56db;
+  --c-accent-soft: #eef2ff;
+  --c-op: #0e7c3a;
+  --c-op-bg: #ecfdf3;
+  --c-rp: #9333ea;
+  --c-rp-bg: #faf5ff;
+  --c-fe: #0369a1;
+  --c-fe-bg: #f0f9ff;
+  --c-other: #64748b;
+  --c-other-bg: #f8fafc;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+body {
+  font-family: var(--font);
+  background: var(--c-bg);
+  color: var(--c-text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* Header */
+header {
+  border-bottom: 1px solid var(--c-border);
+  padding: 40px 0 32px;
+}
+
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.header-left h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--c-text);
+  margin-bottom: 4px;
+}
+
+.header-left .entity-url {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--c-accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.header-left .entity-url:hover {
+  text-decoration: underline;
+}
+
+.version-tag {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-text-tertiary);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+
+/* Stats bar */
+.stats {
+  display: flex;
+  gap: 32px;
+  padding-top: 16px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--c-text);
+  line-height: 1.1;
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+/* Sections */
+.section {
+  padding: 32px 0;
+  border-bottom: 1px solid var(--c-border-light);
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.section h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-text);
+  margin-bottom: 16px;
+  letter-spacing: -0.01em;
+}
+
+.section-title-lg {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 20px;
+}
+
+/* Collapsible endpoints */
+.ep-details summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ep-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.ep-details summary::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  flex-shrink: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6572' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  transition: transform 0.15s;
+}
+
+.ep-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.ep-details summary h2 {
+  margin-bottom: 0;
+}
+
+.ep-details .ep-table {
+  margin-top: 16px;
+}
+
+/* Endpoints table */
+.ep-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ep-table tr {
+  border-bottom: 1px solid var(--c-border-light);
+}
+
+.ep-table tr:last-child {
+  border-bottom: none;
+}
+
+.ep-table td {
+  padding: 8px 0;
+  vertical-align: top;
+}
+
+.ep-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text-secondary);
+  width: 140px;
+  padding-right: 16px;
+}
+
+.ep-url {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--c-accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.ep-url:hover {
+  text-decoration: underline;
+}
+
+/* Entity cards */
+.entity-group {
+  margin-bottom: 32px;
+}
+
+.entity-group:last-child {
+  margin-bottom: 0;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.group-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.group-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-text-tertiary);
+  background: var(--c-surface);
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.entity-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  background: var(--c-bg);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.entity-card:hover {
+  border-color: #cbd0d8;
+  box-shadow: var(--shadow-sm);
+}
+
+.entity-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.entity-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: var(--c-surface);
+}
+
+.entity-initial {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text-secondary);
+}
+
+.entity-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.entity-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--c-text);
+  margin-bottom: 1px;
+}
+
+.entity-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.entity-id {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--c-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+  padding: 2px 10px;
+  border-radius: 20px;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.wk-pill:hover {
+  background: #dce5ff;
+  border-color: var(--c-accent);
+}
+
+.wk-pill svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.entity-types {
+  margin-top: 6px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.badge-op { background: var(--c-op-bg); color: var(--c-op); }
+.badge-rp { background: var(--c-rp-bg); color: var(--c-rp); }
+.badge-fe { background: var(--c-fe-bg); color: var(--c-fe); }
+.badge-other { background: var(--c-other-bg); color: var(--c-other); }
+
+/* Collection stats bar */
+.collection-stats {
+  display: flex;
+  gap: 32px;
+  padding-bottom: 20px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--c-border-light);
+}
+
+.empty-state {
+  font-size: 13px;
+  color: var(--c-text-tertiary);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+/* Authority hints & trust marks */
+.hint-list, .tm-list {
+  list-style: none;
+}
+
+.hint-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-border-light);
+}
+
+.hint-list li:last-child {
+  border-bottom: none;
+}
+
+.hint-list a {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--c-accent);
+  text-decoration: none;
+}
+
+.hint-list a:hover {
+  text-decoration: underline;
+}
+
+.tm-item {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--c-text-secondary);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-border-light);
+  word-break: break-all;
+}
+
+.tm-item:last-child {
+  border-bottom: none;
+}
+
+/* Footer */
+footer {
+  padding: 24px 0 40px;
+  border-top: 1px solid var(--c-border);
+  margin-top: 8px;
+}
+
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.footer-inner span {
+  font-size: 12px;
+  color: var(--c-text-tertiary);
+}
+
+.footer-inner a {
+  font-size: 12px;
+  color: var(--c-text-tertiary);
+  text-decoration: none;
+}
+
+.footer-inner a:hover {
+  color: var(--c-accent);
+}
+
+/* Well-known link */
+.wk-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+  padding: 5px 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 500;
+  margin-top: 12px;
+}
+
+.wk-link:hover {
+  background: #dce5ff;
+}
+
+.wk-link svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  header { padding: 24px 0 20px; }
+  .header-top { flex-direction: column; }
+  .stats { gap: 20px; flex-wrap: wrap; }
+  .ep-label { width: 100px; }
+  .entity-card { padding: 10px 12px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="header-top">
+    <div class="header-left">
+      <h1>__DISPLAY_TITLE__</h1>
+      <a href="__ENTITY_ID__" class="entity-url">__ENTITY_ID__</a>
+      <a href="__ENTITY_ID__/.well-known/openid-federation" class="wk-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        .well-known/openid-federation
+      </a>
+    </div>
+    <span class="version-tag">inmor v__VERSION__</span>
+  </div>
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-value">__DIRECT_SUB_COUNT__</span>
+      <span class="stat-label">Direct Subordinates</span>
+    </div>
+  </div>
+</header>
+
+__AUTHORITY_HINTS__
+
+__TRUST_MARKS__
+
+<details class="section ep-details">
+  <summary><h2>Federation Endpoints</h2></summary>
+  <table class="ep-table">
+    __ENDPOINT_ROWS__
+  </table>
+</details>
+
+__DIRECT_SUBS__
+
+<section class="section">
+  <h2 class="section-title-lg">Federation Details</h2>
+  <div class="collection-stats">
+    <div class="stat">
+      <span class="stat-value">__TOTAL_DISCOVERED__</span>
+      <span class="stat-label">Entities Discovered</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value">__OP_COUNT__</span>
+      <span class="stat-label">Providers</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value">__RP_COUNT__</span>
+      <span class="stat-label">Relying Parties</span>
+    </div>
+  </div>
+  <h2>Federation Entities</h2>
+  <p style="font-size:12px;color:var(--c-text-tertiary);margin-bottom:20px;">__LAST_UPDATED__</p>
+
+  <div class="entity-group">
+    <div class="group-header">
+      <h3>Intermediate Authorities</h3>
+      <span class="group-count">__IA_COUNT__</span>
+    </div>
+    __INTERMEDIATES__
+  </div>
+
+  <div class="entity-group">
+    <div class="group-header">
+      <h3>OpenID Providers</h3>
+      <span class="group-count">__OP_COUNT__</span>
+    </div>
+    __PROVIDERS__
+  </div>
+
+  <div class="entity-group">
+    <div class="group-header">
+      <h3>Relying Parties</h3>
+      <span class="group-count">__RP_COUNT__</span>
+    </div>
+    __RP__
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span>OpenID Federation Trust Anchor &middot; inmor v__VERSION__</span>
+    <a href="https://github.com/SUNET/inmor">github.com/SUNET/inmor</a>
+  </div>
+</footer>
+
+</div>
+
+<script>
+// Convert Unix timestamps to local time
+document.querySelectorAll('time').forEach(el => {
+  const ts = parseInt(el.textContent, 10);
+  if (!isNaN(ts) && ts > 0) {
+    const d = new Date(ts * 1000);
+    el.textContent = d.toLocaleString();
+  }
+});
+</script>
+</body>
+</html>
