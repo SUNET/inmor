@@ -1,0 +1,47 @@
+#!/bin/bash
+# Decodes and pretty-prints an OpenID Federation entity configuration JWT.
+#
+# Usage:
+#   curl -s https://ta.example.com/.well-known/openid-federation | ./scripts/entity-show
+#   curl -s https://ta.example.com/fetch?sub=https://rp.example.com | ./scripts/entity-show
+#   echo "eyJ..." | ./scripts/entity-show
+#   ./scripts/entity-show header   # show header instead of payload
+
+set -euo pipefail
+
+jwt=$(cat)
+
+if [ -z "$jwt" ]; then
+    echo "Error: no input. Pipe a JWT into this script." >&2
+    echo "Usage: curl -s https://example.com/.well-known/openid-federation | $0" >&2
+    exit 1
+fi
+
+# JWT has 3 parts: header.payload.signature
+part="${1:-payload}"
+
+case "$part" in
+    header|h)
+        index=1
+        ;;
+    payload|p|"")
+        index=2
+        ;;
+    *)
+        echo "Usage: $0 [header|payload]" >&2
+        exit 1
+        ;;
+esac
+
+encoded=$(echo "$jwt" | cut -d. -f"$index")
+
+# base64url -> base64: replace - with + and _ with /, add padding
+padded="$encoded"
+mod=$((${#padded} % 4))
+if [ "$mod" -eq 2 ]; then
+    padded="${padded}=="
+elif [ "$mod" -eq 3 ]; then
+    padded="${padded}="
+fi
+
+echo "$padded" | tr '_-' '/+' | base64 -d 2>/dev/null | jq .

@@ -1,0 +1,107 @@
+#!/bin/bash
+# Decodes and pretty-prints an OpenID Federation resolve response trust chain.
+# Each JWT in the trust_chain array is decoded and displayed with its position.
+#
+# Usage:
+#   curl -s "https://ta.example.com/resolve?sub=https://rp.example.com&trust_anchor=https://ta.example.com" | ./scripts/show-trustchain
+#
+# The trust chain order is:
+#   [0] Subject's entity configuration (self-signed, leaf)
+#   [1] Subordinate statement from the immediate superior
+#   [2..N-1] For deeper chains: alternating IA entity configs and subordinate statements
+#   [N] Trust anchor's entity configuration (self-signed)
+
+set -euo pipefail
+
+jwt=$(cat)
+
+if [ -z "$jwt" ]; then
+    echo "Error: no input. Pipe a resolve response JWT into this script." >&2
+    echo "Usage: curl -s 'https://ta.example.com/resolve?sub=...&trust_anchor=...' | $0" >&2
+    exit 1
+fi
+
+# Decode a single base64url-encoded JWT part
+decode_part() {
+    local encoded="$1"
+    local padded="$encoded"
+    local mod=$((${#padded} % 4))
+    if [ "$mod" -eq 2 ]; then
+        padded="${padded}=="
+    elif [ "$mod" -eq 3 ]; then
+        padded="${padded}="
+    fi
+    echo "$padded" | tr '_-' '/+' | base64 -d 2>/dev/null
+}
+
+# Decode the outer resolve response JWT payload
+outer_payload=$(decode_part "$(echo "$jwt" | cut -d. -f2)")
+
+# Extract iss, sub from outer payload
+iss=$(echo "$outer_payload" | jq -r '.iss // empty')
+sub=$(echo "$outer_payload" | jq -r '.sub // empty')
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Resolve Response"
+echo "  Subject: $sub"
+echo "  Issuer:  $iss"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Show resolved metadata
+echo "── Resolved Metadata ──"
+echo "$outer_payload" | jq '.metadata'
+echo ""
+
+# Extract and iterate over trust_chain
+chain_length=$(echo "$outer_payload" | jq '.trust_chain | length')
+
+if [ "$chain_length" -eq 0 ] || [ "$chain_length" = "null" ]; then
+    echo "No trust_chain found in resolve response."
+    exit 0
+fi
+
+echo "── Trust Chain ($chain_length JWTs) ──"
+echo ""
+
+for i in $(seq 0 $((chain_length - 1))); do
+    chain_jwt=$(echo "$outer_payload" | jq -r ".trust_chain[$i]")
+
+    # Decode header and payload
+    header=$(decode_part "$(echo "$chain_jwt" | cut -d. -f1)")
+    payload=$(decode_part "$(echo "$chain_jwt" | cut -d. -f2)")
+
+    chain_iss=$(echo "$payload" | jq -r '.iss // empty')
+    chain_sub=$(echo "$payload" | jq -r '.sub // empty')
+    typ=$(echo "$header" | jq -r '.typ // empty')
+    alg=$(echo "$header" | jq -r '.alg // empty')
+
+    # Determine what this JWT is: iss == sub means entity configuration (self-signed)
+    if [ "$chain_iss" = "$chain_sub" ]; then
+        if [ "$i" -eq 0 ]; then
+            label="Entity Configuration (leaf)"
+        elif [ "$i" -eq $((chain_length - 1)) ]; then
+            label="Entity Configuration (trust anchor)"
+        else
+            label="Entity Configuration (intermediate)"
+        fi
+    else
+        label="Subordinate Statement"
+    fi
+
+    echo "┌─ [$i] $label"
+    echo "│  iss: $chain_iss"
+    echo "│  sub: $chain_sub"
+    echo "│  alg: $alg  typ: $typ"
+    echo "│"
+
+    # Show payload (without jwks to reduce noise, unless it's short)
+    echo "$payload" | jq '
+        if .jwks.keys then
+            .jwks.keys = [.jwks.keys[] | {kty, kid, alg, crv, use}]
+        else . end
+    '
+
+    echo "└──"
+    echo ""
+done

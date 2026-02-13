@@ -23,7 +23,8 @@ def test_index_view(loaddata: Redis, start_server: int, http_client: Client):
     port = start_server
     resp = http_client.get(f"https://localhost:{port}")
     assert resp.status_code == 200
-    assert resp.text == "Index page."
+    assert "text/html" in resp.headers["content-type"]
+    assert "OpenID Federation Trust Anchor" in resp.text
 
 
 def test_trust_mark_list(loaddata: Redis, start_server: int, http_client: Client):
