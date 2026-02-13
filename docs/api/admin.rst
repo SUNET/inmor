@@ -747,6 +747,34 @@ the entity configuration before creating a new signed statement.
      - No
      - Extra claims for the subordinate statement
 
+Renew Subordinate
+^^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   POST /api/v1/subordinates/{id}/renew
+
+Renews a subordinate by re-fetching its entity configuration from the
+subordinate's ``/.well-known/openid-federation`` endpoint, verifying the
+response using the stored JWKS, and generating a new signed subordinate
+statement with a fresh expiry.
+
+This endpoint takes no request body. The subordinate's ``forced_metadata``,
+``additional_claims``, and ``valid_for`` settings are preserved from the
+existing record. The ``metadata`` and ``jwks`` fields are updated from the
+freshly fetched entity configuration.
+
+Returns 400 if the subordinate is inactive, the entity configuration cannot
+be fetched or verified, or if the TA domain is no longer in the entity's
+authority hints.
+
+**Example:**
+
+.. code-block:: bash
+
+   curl -X POST http://localhost:8000/api/v1/subordinates/1/renew \
+     -H "Cookie: sessionid=..."
+
 Fetch Entity Configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 

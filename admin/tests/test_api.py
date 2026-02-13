@@ -690,6 +690,87 @@ def test_update_subordinate_autorenew(auth_client: Client, loadredis, clean_subo
 
 
 @pytest.mark.django_db
+def test_renew_subordinate(auth_client: Client, loadredis, clean_subordinate):
+    """Test renewing a subordinate re-fetches and re-verifies its entity configuration."""
+    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
+        metadata = json.load(fobj)
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+
+    # Create a subordinate first
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    original = response.json()
+
+    # Now renew the subordinate
+    response = auth_client.post(f"/api/v1/subordinates/{original['id']}/renew")
+    assert response.status_code == 200
+    renewed = response.json()
+    assert renewed["entityid"] == original["entityid"]
+    assert renewed["id"] == original["id"]
+    assert renewed["active"] is True
+
+
+@pytest.mark.django_db
+def test_renew_inactive_subordinate(auth_client: Client, loadredis, clean_subordinate):
+    """Test that renewing an inactive subordinate returns 400."""
+    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
+        metadata = json.load(fobj)
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+
+    # Create and then deactivate a subordinate
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    original = response.json()
+
+    # Deactivate
+    update_data = {
+        "metadata": metadata,
+        "forced_metadata": {},
+        "jwks": keys,
+        "active": False,
+    }
+    response = auth_client.post(
+        f"/api/v1/subordinates/{original['id']}",
+        data=json.dumps(update_data),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+
+    # Try to renew - should fail
+    response = auth_client.post(f"/api/v1/subordinates/{original['id']}/renew")
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_renew_nonexistent_subordinate(auth_client: Client, loadredis):
+    """Test that renewing a non-existent subordinate returns 404."""
+    response = auth_client.post("/api/v1/subordinates/99999/renew")
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
 def test_create_server_entity(auth_client: Client, loadredis):
     """Tests creation of server's entity_id"""
     response = auth_client.post("/api/v1/server/entity")
