@@ -324,11 +324,13 @@ See :ref:`scheduled-tasks` for cron and systemd timer configuration examples.
 Scheduled Tasks
 ---------------
 
-Inmor requires two periodic tasks for production operation:
+Inmor requires three periodic tasks for production operation:
 
 1. **Entity configuration regeneration** — keeps the TA's entity statement up to date
    (e.g. after adding subordinates, trust marks, or changing metadata via the Admin portal)
-2. **Collection walk** — discovers all entities in the federation tree and populates
+2. **Subordinate renewal** — re-fetches and re-verifies all active subordinate entity
+   configurations, regenerates signed statements, and updates the database and Redis
+3. **Collection walk** — discovers all entities in the federation tree and populates
    the ``/collection`` endpoint
 
 .. _regenerate-entity:
@@ -393,6 +395,63 @@ Enable the timer::
 
    # Ensure timers survive logout/reboot
    loginctl enable-linger $(whoami)
+
+.. _renew-subordinates:
+
+Subordinate Renewal
+^^^^^^^^^^^^^^^^^^^
+
+The ``renew_subordinates`` management command renews all active subordinates by
+re-fetching and verifying their entity configurations, regenerating signed
+subordinate statements, and updating both the database and Redis. Each
+subordinate is processed independently — a failure on one does not stop the
+others.
+
+**Manual run:**
+
+.. code-block:: bash
+
+   docker compose exec admin python manage.py renew_subordinates
+
+**Cron (recommended for production):**
+
+.. code-block:: bash
+
+   # Run every 5 minutes
+   */5 * * * * cd /path/to/inmor && /usr/bin/docker compose exec -T admin python manage.py renew_subordinates >> /tmp/inmor-renew-subordinates.log 2>&1
+
+**Systemd timer (alternative):**
+
+Create ``~/.config/systemd/user/inmor-renew-subordinates.service``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Renew all active inmor subordinates
+
+   [Service]
+   Type=oneshot
+   WorkingDirectory=/path/to/inmor
+   ExecStart=/usr/bin/docker compose exec -T admin python manage.py renew_subordinates
+
+Create ``~/.config/systemd/user/inmor-renew-subordinates.timer``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Renew inmor subordinates every 5 minutes
+
+   [Timer]
+   OnCalendar=*-*-* *:*:00/5
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+
+Enable::
+
+   systemctl --user daemon-reload
+   systemctl --user enable --now inmor-renew-subordinates.timer
 
 Collection Walk Scheduling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
