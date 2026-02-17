@@ -29,8 +29,11 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 lazy_static! {
-    static ref INDEX_TEMPLATE: String =
-        fs::read_to_string("./templates/index.html").expect("Failed to read templates/index.html");
+    static ref TERA: tera::Tera = {
+        let mut tera = tera::Tera::new("templates/**/*").expect("Failed to load templates");
+        tera.autoescape_on(vec![".html"]);
+        tera
+    };
 }
 
 async fn get_from_cache(redis: web::Data<redis::Client>) -> actix_web::Result<impl Responder> {
@@ -212,7 +215,7 @@ async fn index(
         .unwrap_or_default();
     let direct_sub_count = direct_sub_ids.len();
 
-    // Build HTML
+    // Build Tera context
     let entity_id = &app_state.entity_id;
     let version = env!("CARGO_PKG_VERSION");
 
@@ -222,107 +225,14 @@ async fn index(
         ta_name.clone()
     };
 
-    // Helper to escape HTML
-    fn h(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-    }
+    // Sort direct subordinates
+    let mut sorted_sub_ids = direct_sub_ids.clone();
+    sorted_sub_ids.sort();
 
-    // Build endpoint rows
-    let endpoint_rows: String = endpoints
-        .iter()
-        .map(|(label, url)| {
-            format!(
-                r#"<tr><td class="ep-label">{}</td><td><a href="{}" class="ep-url">{}</a></td></tr>"#,
-                h(label),
-                h(url),
-                h(url)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Build entity card helper
-    fn entity_card(entry: &CollectionEntry) -> String {
-        fn h(s: &str) -> String {
-            s.replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;")
-                .replace('"', "&quot;")
-        }
-        let name_display = entry.display_name.as_deref().unwrap_or_default();
-        let logo_html = if let Some(ref uri) = entry.logo_uri {
-            format!(r#"<img src="{}" alt="" class="entity-logo" />"#, h(uri))
-        } else {
-            let initial = entry
-                .entity_id
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .chars()
-                .next()
-                .unwrap_or('?')
-                .to_uppercase()
-                .to_string();
-            format!(r#"<span class="entity-initial">{}</span>"#, initial)
-        };
-        let type_badges: String = entry
-            .entity_types
-            .iter()
-            .map(|t| {
-                let class = match t.as_str() {
-                    "openid_provider" => "badge-op",
-                    "openid_relying_party" => "badge-rp",
-                    "federation_entity" => "badge-fe",
-                    _ => "badge-other",
-                };
-                let short = match t.as_str() {
-                    "openid_provider" => "OP",
-                    "openid_relying_party" => "RP",
-                    "federation_entity" => "FE",
-                    "oauth_authorization_server" => "AS",
-                    "oauth_client" => "OC",
-                    "oauth_resource" => "OR",
-                    other => other,
-                };
-                format!(r#"<span class="badge {class}">{short}</span>"#)
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        format!(
-            r#"<div class="entity-card">
-  <div class="entity-icon">{logo_html}</div>
-  <div class="entity-info">
-    <div class="entity-name">{name}</div>
-    <div class="entity-url-row">
-      <span class="entity-id">{eid}</span>
-      <a href="{eid}/.well-known/openid-federation" class="wk-pill" title="Entity Configuration">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        .well-known/openid-federation
-      </a>
-    </div>
-    <div class="entity-types">{type_badges}</div>
-  </div>
-</div>"#,
-            name = if name_display.is_empty() {
-                h(&entry.entity_id)
-            } else {
-                h(name_display)
-            },
-            eid = h(&entry.entity_id),
-        )
-    }
-
-    // Build simple subordinate card (entity_id + .well-known pill only)
-    fn subordinate_card(entity_id: &str) -> String {
-        fn h(s: &str) -> String {
-            s.replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;")
-                .replace('"', "&quot;")
-        }
-        let initial = entity_id
+    // Build serializable entity data for template
+    let to_entry = |e: &&CollectionEntry| -> serde_json::Value {
+        let initial = e
+            .entity_id
             .trim_start_matches("https://")
             .trim_start_matches("http://")
             .chars()
@@ -330,145 +240,63 @@ async fn index(
             .unwrap_or('?')
             .to_uppercase()
             .to_string();
-        format!(
-            r#"<div class="entity-card">
-  <div class="entity-icon"><span class="entity-initial">{initial}</span></div>
-  <div class="entity-info">
-    <div class="entity-url-row">
-      <span class="entity-id">{eid}</span>
-      <a href="{eid}/.well-known/openid-federation" class="wk-pill" title="Entity Configuration">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        .well-known/openid-federation
-      </a>
-    </div>
-  </div>
-</div>"#,
-            eid = h(entity_id),
-        )
-    }
-
-    let intermediates_html = if intermediates.is_empty() {
-        r#"<p class="empty-state">No intermediate authorities discovered.</p>"#.to_string()
-    } else {
-        intermediates
+        let type_badges: Vec<serde_json::Value> = e
+            .entity_types
             .iter()
-            .map(|e| entity_card(e))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    let providers_html = if providers.is_empty() {
-        r#"<p class="empty-state">No OpenID Providers discovered.</p>"#.to_string()
-    } else {
-        providers
-            .iter()
-            .map(|e| entity_card(e))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    let rp_html = if relying_parties.is_empty() {
-        r#"<p class="empty-state">No Relying Parties discovered.</p>"#.to_string()
-    } else {
-        relying_parties
-            .iter()
-            .map(|e| entity_card(e))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    let last_updated_display = if let Some(ts) = last_updated {
-        if ts > 0 {
-            format!("Last walk: <time>{ts}</time>")
-        } else {
-            "Collection not yet populated".to_string()
-        }
-    } else {
-        "Collection not yet populated".to_string()
-    };
-
-    let authority_hints_html = if authority_hints.is_empty() {
-        String::new()
-    } else {
-        let items: String = authority_hints
-            .iter()
-            .map(|hint| {
-                format!(
-                    r#"<li><a href="{url}/.well-known/openid-federation">{url}</a></li>"#,
-                    url = h(hint)
-                )
+            .map(|t| {
+                let (class, short) = match t.as_str() {
+                    "openid_provider" => ("badge-op", "OP"),
+                    "openid_relying_party" => ("badge-rp", "RP"),
+                    "federation_entity" => ("badge-fe", "FE"),
+                    "oauth_authorization_server" => ("badge-other", "AS"),
+                    "oauth_client" => ("badge-other", "OC"),
+                    "oauth_resource" => ("badge-other", "OR"),
+                    other => ("badge-other", other),
+                };
+                json!({"class": class, "short": short})
             })
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!(
-            r#"<section class="section">
-  <h2>Authority Hints</h2>
-  <ul class="hint-list">{items}</ul>
-</section>"#
-        )
+            .collect();
+        json!({
+            "entity_id": e.entity_id,
+            "display_name": e.display_name.as_deref().unwrap_or(""),
+            "logo_uri": e.logo_uri,
+            "initial": initial,
+            "type_badges": type_badges,
+        })
     };
 
-    // Build direct subordinates section
-    let mut sorted_sub_ids = direct_sub_ids.clone();
-    sorted_sub_ids.sort();
-    let direct_subs_cards: String = sorted_sub_ids
-        .iter()
-        .map(|eid| subordinate_card(eid))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let last_updated_ts = last_updated.filter(|&ts| ts > 0);
 
-    let direct_subs_html = if direct_sub_ids.is_empty() {
-        String::new()
-    } else {
-        format!(
-            r#"<section class="section">
-  <h2>Direct Subordinates</h2>
-  <div class="entity-group">
-    <div class="group-header">
-      <h3>Registered Entities</h3>
-      <span class="group-count">{count}</span>
-    </div>
-    {cards}
-  </div>
-</section>"#,
-            count = direct_sub_count,
-            cards = direct_subs_cards,
-        )
-    };
+    let mut ctx = tera::Context::new();
+    ctx.insert("display_title", &display_title);
+    ctx.insert("entity_id", entity_id);
+    ctx.insert("version", version);
+    ctx.insert("direct_sub_count", &direct_sub_count);
+    ctx.insert("direct_subordinates", &sorted_sub_ids);
+    ctx.insert("total_discovered", &entries.len());
+    ctx.insert("op_count", &providers.len());
+    ctx.insert("rp_count", &relying_parties.len());
+    ctx.insert("ia_count", &intermediates.len());
+    ctx.insert("endpoints", &endpoints);
+    ctx.insert("authority_hints", &authority_hints);
+    ctx.insert("trust_marks", &ta_trust_marks);
+    ctx.insert(
+        "intermediates",
+        &intermediates.iter().map(to_entry).collect::<Vec<_>>(),
+    );
+    ctx.insert(
+        "providers",
+        &providers.iter().map(to_entry).collect::<Vec<_>>(),
+    );
+    ctx.insert(
+        "relying_parties",
+        &relying_parties.iter().map(to_entry).collect::<Vec<_>>(),
+    );
+    ctx.insert("last_updated_ts", &last_updated_ts);
 
-    let trust_marks_html = if ta_trust_marks.is_empty() {
-        String::new()
-    } else {
-        let items: String = ta_trust_marks
-            .iter()
-            .map(|(tm_type, _tm_id)| format!(r#"<li class="tm-item">{}</li>"#, h(tm_type)))
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!(
-            r#"<section class="section">
-  <h2>Trust Marks</h2>
-  <ul class="tm-list">{items}</ul>
-</section>"#
-        )
-    };
-
-    let html = INDEX_TEMPLATE
-        .replace("__DISPLAY_TITLE__", &h(&display_title))
-        .replace("__ENTITY_ID__", &h(entity_id))
-        .replace("__VERSION__", version)
-        .replace("__DIRECT_SUB_COUNT__", &direct_sub_count.to_string())
-        .replace("__TOTAL_DISCOVERED__", &entries.len().to_string())
-        .replace("__OP_COUNT__", &providers.len().to_string())
-        .replace("__RP_COUNT__", &relying_parties.len().to_string())
-        .replace("__IA_COUNT__", &intermediates.len().to_string())
-        .replace("__ENDPOINT_ROWS__", &endpoint_rows)
-        .replace("__AUTHORITY_HINTS__", &authority_hints_html)
-        .replace("__TRUST_MARKS__", &trust_marks_html)
-        .replace("__DIRECT_SUBS__", &direct_subs_html)
-        .replace("__INTERMEDIATES__", &intermediates_html)
-        .replace("__PROVIDERS__", &providers_html)
-        .replace("__RP__", &rp_html)
-        .replace("__LAST_UPDATED__", &last_updated_display);
+    let html = TERA
+        .render("index.html", &ctx)
+        .map_err(error::ErrorInternalServerError)?;
 
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }

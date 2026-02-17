@@ -1,9 +1,10 @@
+{% import "macros.html" as macros %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__DISPLAY_TITLE__ — OpenID Federation Trust Anchor</title>
+<title>{{ display_title }} — OpenID Federation Trust Anchor</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -49,7 +50,6 @@ body {
   padding: 0 24px;
 }
 
-/* Header */
 header {
   border-bottom: 1px solid var(--c-border);
   padding: 40px 0 32px;
@@ -79,9 +79,7 @@ header {
   word-break: break-all;
 }
 
-.header-left .entity-url:hover {
-  text-decoration: underline;
-}
+.header-left .entity-url:hover { text-decoration: underline; }
 
 .version-tag {
   font-size: 12px;
@@ -95,17 +93,13 @@ header {
   margin-top: 4px;
 }
 
-/* Stats bar */
 .stats {
   display: flex;
   gap: 32px;
   padding-top: 16px;
 }
 
-.stat {
-  display: flex;
-  flex-direction: column;
-}
+.stat { display: flex; flex-direction: column; }
 
 .stat-value {
   font-size: 28px;
@@ -124,15 +118,12 @@ header {
   margin-top: 2px;
 }
 
-/* Sections */
 .section {
   padding: 32px 0;
   border-bottom: 1px solid var(--c-border-light);
 }
 
-.section:last-child {
-  border-bottom: none;
-}
+.section:last-child { border-bottom: none; }
 
 .section h2 {
   font-size: 15px;
@@ -149,7 +140,6 @@ header {
   margin-bottom: 20px;
 }
 
-/* Collapsible endpoints */
 .ep-details summary {
   cursor: pointer;
   list-style: none;
@@ -158,9 +148,7 @@ header {
   gap: 6px;
 }
 
-.ep-details summary::-webkit-details-marker {
-  display: none;
-}
+.ep-details summary::-webkit-details-marker { display: none; }
 
 .ep-details summary::before {
   content: '';
@@ -177,36 +165,14 @@ header {
   transition: transform 0.15s;
 }
 
-.ep-details[open] summary::before {
-  transform: rotate(90deg);
-}
+.ep-details[open] summary::before { transform: rotate(90deg); }
+.ep-details summary h2 { margin-bottom: 0; }
+.ep-details .ep-table { margin-top: 16px; }
 
-.ep-details summary h2 {
-  margin-bottom: 0;
-}
-
-.ep-details .ep-table {
-  margin-top: 16px;
-}
-
-/* Endpoints table */
-.ep-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.ep-table tr {
-  border-bottom: 1px solid var(--c-border-light);
-}
-
-.ep-table tr:last-child {
-  border-bottom: none;
-}
-
-.ep-table td {
-  padding: 8px 0;
-  vertical-align: top;
-}
+.ep-table { width: 100%; border-collapse: collapse; }
+.ep-table tr { border-bottom: 1px solid var(--c-border-light); }
+.ep-table tr:last-child { border-bottom: none; }
+.ep-table td { padding: 8px 0; vertical-align: top; }
 
 .ep-label {
   font-size: 13px;
@@ -224,18 +190,10 @@ header {
   word-break: break-all;
 }
 
-.ep-url:hover {
-  text-decoration: underline;
-}
+.ep-url:hover { text-decoration: underline; }
 
-/* Entity cards */
-.entity-group {
-  margin-bottom: 32px;
-}
-
-.entity-group:last-child {
-  margin-bottom: 0;
-}
+.entity-group { margin-bottom: 32px; }
+.entity-group:last-child { margin-bottom: 0; }
 
 .group-header {
   display: flex;
@@ -307,10 +265,7 @@ header {
   color: var(--c-text-secondary);
 }
 
-.entity-info {
-  min-width: 0;
-  flex: 1;
-}
+.entity-info { min-width: 0; flex: 1; }
 
 .entity-name {
   font-size: 14px;
@@ -358,11 +313,7 @@ header {
   border-color: var(--c-accent);
 }
 
-.wk-pill svg {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-}
+.wk-pill svg { width: 12px; height: 12px; flex-shrink: 0; }
 
 .entity-types {
   margin-top: 6px;
@@ -384,7 +335,6 @@ header {
 .badge-fe { background: var(--c-fe-bg); color: var(--c-fe); }
 .badge-other { background: var(--c-other-bg); color: var(--c-other); }
 
-/* Collection stats bar */
 .collection-stats {
   display: flex;
   gap: 32px;
@@ -400,19 +350,9 @@ header {
   padding: 8px 0;
 }
 
-/* Authority hints & trust marks */
-.hint-list, .tm-list {
-  list-style: none;
-}
-
-.hint-list li {
-  padding: 6px 0;
-  border-bottom: 1px solid var(--c-border-light);
-}
-
-.hint-list li:last-child {
-  border-bottom: none;
-}
+.hint-list, .tm-list { list-style: none; }
+.hint-list li { padding: 6px 0; border-bottom: 1px solid var(--c-border-light); }
+.hint-list li:last-child { border-bottom: none; }
 
 .hint-list a {
   font-family: var(--mono);
@@ -421,9 +361,7 @@ header {
   text-decoration: none;
 }
 
-.hint-list a:hover {
-  text-decoration: underline;
-}
+.hint-list a:hover { text-decoration: underline; }
 
 .tm-item {
   font-family: var(--mono);
@@ -434,11 +372,8 @@ header {
   word-break: break-all;
 }
 
-.tm-item:last-child {
-  border-bottom: none;
-}
+.tm-item:last-child { border-bottom: none; }
 
-/* Footer */
 footer {
   padding: 24px 0 40px;
   border-top: 1px solid var(--c-border);
@@ -453,22 +388,10 @@ footer {
   flex-wrap: wrap;
 }
 
-.footer-inner span {
-  font-size: 12px;
-  color: var(--c-text-tertiary);
-}
+.footer-inner span { font-size: 12px; color: var(--c-text-tertiary); }
+.footer-inner a { font-size: 12px; color: var(--c-text-tertiary); text-decoration: none; }
+.footer-inner a:hover { color: var(--c-accent); }
 
-.footer-inner a {
-  font-size: 12px;
-  color: var(--c-text-tertiary);
-  text-decoration: none;
-}
-
-.footer-inner a:hover {
-  color: var(--c-accent);
-}
-
-/* Well-known link */
 .wk-link {
   display: inline-flex;
   align-items: center;
@@ -484,16 +407,9 @@ footer {
   margin-top: 12px;
 }
 
-.wk-link:hover {
-  background: #dce5ff;
-}
+.wk-link:hover { background: #dce5ff; }
+.wk-link svg { width: 14px; height: 14px; }
 
-.wk-link svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* Responsive */
 @media (max-width: 600px) {
   header { padding: 24px 0 20px; }
   .header-top { flex-direction: column; }
@@ -509,83 +425,134 @@ footer {
 <header>
   <div class="header-top">
     <div class="header-left">
-      <h1>__DISPLAY_TITLE__</h1>
-      <a href="__ENTITY_ID__" class="entity-url">__ENTITY_ID__</a>
-      <a href="__ENTITY_ID__/.well-known/openid-federation" class="wk-link">
+      <h1>{{ display_title }}</h1>
+      <a href="{{ entity_id }}" class="entity-url">{{ entity_id }}</a>
+      <a href="{{ entity_id }}/.well-known/openid-federation" class="wk-link">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
         .well-known/openid-federation
       </a>
     </div>
-    <span class="version-tag">inmor v__VERSION__</span>
+    <span class="version-tag">inmor v{{ version }}</span>
   </div>
   <div class="stats">
     <div class="stat">
-      <span class="stat-value">__DIRECT_SUB_COUNT__</span>
+      <span class="stat-value">{{ direct_sub_count }}</span>
       <span class="stat-label">Direct Subordinates</span>
     </div>
   </div>
 </header>
 
-__AUTHORITY_HINTS__
+{% if authority_hints | length > 0 %}
+<section class="section">
+  <h2>Authority Hints</h2>
+  <ul class="hint-list">
+    {% for hint in authority_hints %}
+    <li><a href="{{ hint }}/.well-known/openid-federation">{{ hint }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 
-__TRUST_MARKS__
+{% if trust_marks | length > 0 %}
+<section class="section">
+  <h2>Trust Marks</h2>
+  <ul class="tm-list">
+    {% for tm in trust_marks %}
+    <li class="tm-item">{{ tm.0 }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 
+{% if endpoints | length > 0 %}
 <details class="section ep-details">
   <summary><h2>Federation Endpoints</h2></summary>
   <table class="ep-table">
-    __ENDPOINT_ROWS__
+    {% for ep in endpoints %}
+    <tr><td class="ep-label">{{ ep.0 }}</td><td><a href="{{ ep.1 }}" class="ep-url">{{ ep.1 }}</a></td></tr>
+    {% endfor %}
   </table>
 </details>
+{% endif %}
 
-__DIRECT_SUBS__
+{% if direct_subordinates | length > 0 %}
+<section class="section">
+  <h2>Direct Subordinates</h2>
+  <div class="entity-group">
+    <div class="group-header">
+      <h3>Registered Entities</h3>
+      <span class="group-count">{{ direct_sub_count }}</span>
+    </div>
+    {% for eid in direct_subordinates %}
+      {{ macros::subordinate_card(eid=eid) }}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <section class="section">
   <h2 class="section-title-lg">Federation Details</h2>
   <div class="collection-stats">
     <div class="stat">
-      <span class="stat-value">__TOTAL_DISCOVERED__</span>
+      <span class="stat-value">{{ total_discovered }}</span>
       <span class="stat-label">Entities Discovered</span>
     </div>
     <div class="stat">
-      <span class="stat-value">__OP_COUNT__</span>
+      <span class="stat-value">{{ op_count }}</span>
       <span class="stat-label">Providers</span>
     </div>
     <div class="stat">
-      <span class="stat-value">__RP_COUNT__</span>
+      <span class="stat-value">{{ rp_count }}</span>
       <span class="stat-label">Relying Parties</span>
     </div>
   </div>
   <h2>Federation Entities</h2>
-  <p style="font-size:12px;color:var(--c-text-tertiary);margin-bottom:20px;">__LAST_UPDATED__</p>
+  {% if last_updated_ts %}
+  <p style="font-size:12px;color:var(--c-text-tertiary);margin-bottom:20px;">Last walk: <time>{{ last_updated_ts }}</time></p>
+  {% else %}
+  <p style="font-size:12px;color:var(--c-text-tertiary);margin-bottom:20px;">Collection not yet populated</p>
+  {% endif %}
 
   <div class="entity-group">
     <div class="group-header">
       <h3>Intermediate Authorities</h3>
-      <span class="group-count">__IA_COUNT__</span>
+      <span class="group-count">{{ ia_count }}</span>
     </div>
-    __INTERMEDIATES__
+    {% if intermediates | length > 0 %}
+      {% for e in intermediates %}{{ macros::entity_card(e=e) }}{% endfor %}
+    {% else %}
+      <p class="empty-state">No intermediate authorities discovered.</p>
+    {% endif %}
   </div>
 
   <div class="entity-group">
     <div class="group-header">
       <h3>OpenID Providers</h3>
-      <span class="group-count">__OP_COUNT__</span>
+      <span class="group-count">{{ op_count }}</span>
     </div>
-    __PROVIDERS__
+    {% if providers | length > 0 %}
+      {% for e in providers %}{{ macros::entity_card(e=e) }}{% endfor %}
+    {% else %}
+      <p class="empty-state">No OpenID Providers discovered.</p>
+    {% endif %}
   </div>
 
   <div class="entity-group">
     <div class="group-header">
       <h3>Relying Parties</h3>
-      <span class="group-count">__RP_COUNT__</span>
+      <span class="group-count">{{ rp_count }}</span>
     </div>
-    __RP__
+    {% if relying_parties | length > 0 %}
+      {% for e in relying_parties %}{{ macros::entity_card(e=e) }}{% endfor %}
+    {% else %}
+      <p class="empty-state">No Relying Parties discovered.</p>
+    {% endif %}
   </div>
 </section>
 
 <footer>
   <div class="footer-inner">
-    <span>OpenID Federation Trust Anchor &middot; inmor v__VERSION__</span>
+    <span>OpenID Federation Trust Anchor &middot; inmor v{{ version }}</span>
     <a href="https://github.com/SUNET/inmor">github.com/SUNET/inmor</a>
   </div>
 </footer>
@@ -593,7 +560,6 @@ __DIRECT_SUBS__
 </div>
 
 <script>
-// Convert Unix timestamps to local time
 document.querySelectorAll('time').forEach(el => {
   const ts = parseInt(el.textContent, 10);
   if (!isNaN(ts) && ts > 0) {
