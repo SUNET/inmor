@@ -489,8 +489,63 @@ Policy Operators
 When an entity's metadata violates the policy, registration fails with
 a 400 error.
 
+Renewing Subordinates
+---------------------
+
+Renewing a subordinate re-fetches and re-verifies its entity configuration,
+regenerates the signed subordinate statement with a fresh expiry, and updates
+both the database and Redis.
+
+Renew a Single Subordinate (API)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: bash
+
+   curl -X POST http://localhost:8000/api/v1/subordinates/1/renew
+
+The endpoint:
+
+1. Re-fetches the entity's ``/.well-known/openid-federation`` JWT
+2. Verifies the signature using the stored JWKS
+3. Checks that the TA domain is still in ``authority_hints``
+4. Validates metadata policy merge and application
+5. Regenerates the signed subordinate statement
+6. Updates the database and Redis
+
+**Response (200 OK):** The updated subordinate object.
+
+**Error responses:**
+
+* ``400``: Entity configuration fetch failed, authority_hints mismatch, or policy violation
+* ``404``: Subordinate not found
+
+Renew All Active Subordinates (Management Command)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``renew_subordinates`` management command renews all active subordinates
+in a single run. Each subordinate is processed independently — a failure on
+one does not stop the others.
+
+.. code-block:: bash
+
+   docker compose exec admin python manage.py renew_subordinates
+
+**Output:**
+
+.. code-block:: text
+
+   Renewing https://example-rp.com ... OK
+   Renewing https://example-op.com ... OK
+   Renewing https://inactive-entity.com ... FAILED (fetch: connection refused)
+
+   Done: 2/3 renewed, 1 failed.
+
+For production, schedule this command to run periodically. See
+:ref:`renew-subordinates` in the deployment guide for cron and systemd timer
+examples.
+
 Auto-Renewal
-------------
+^^^^^^^^^^^^
 
 Enable auto-renewal to keep subordinate statements fresh:
 

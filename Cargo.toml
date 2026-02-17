@@ -33,3 +33,4 @@ ureq = { version = "*", features = ["json", "native-tls"], default-features = fa
 sha2 = "0.10.9"
 rustls = "0.23"
 rustls-pemfile = "2.2"
+tera = "1"

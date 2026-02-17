@@ -906,6 +906,49 @@ def test_unauthenticated_subordinates_create(db):
     assert response.status_code == 401
 
 
+# ============================================================================
+# Management Command Tests
+# ============================================================================
+
+
+@pytest.mark.django_db
+def test_renew_subordinates_command(auth_client: Client, loadredis, clean_subordinate):
+    """Test the renew_subordinates management command renews all active subordinates."""
+    from django.core.management import call_command
+
+    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
+        metadata = json.load(fobj)
+    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
+        keys = json.load(fobj)
+
+    # Create a subordinate
+    data = {
+        "entityid": "https://fakerp0.labb.sunet.se",
+        "metadata": metadata,
+        "jwks": keys,
+        "forced_metadata": {},
+    }
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(data),
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    original = response.json()
+
+    from entities.models import Subordinate
+
+    original_statement = Subordinate.objects.get(id=original["id"]).statement
+
+    # Run the management command
+    call_command("renew_subordinates")
+
+    # Verify subordinate was renewed (statement should be different)
+    sub = Subordinate.objects.get(id=original["id"])
+    assert sub.active is True
+    assert sub.statement != original_statement
+
+
 def test_unauthenticated_server_entity(db):
     """Verify unauthenticated requests to server entity are rejected."""
     client = Client()

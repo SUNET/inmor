@@ -1,0 +1,39 @@
+{% macro entity_card(e) %}
+<div class="entity-card">
+  <div class="entity-icon">
+    {% if e.logo_uri %}
+    <img src="{{ e.logo_uri }}" alt="" class="entity-logo" />
+    {% else %}
+    <span class="entity-initial">{{ e.initial }}</span>
+    {% endif %}
+  </div>
+  <div class="entity-info">
+    <div class="entity-name">{% if e.display_name %}{{ e.display_name }}{% else %}{{ e.entity_id }}{% endif %}</div>
+    <div class="entity-url-row">
+      <span class="entity-id">{{ e.entity_id }}</span>
+      <a href="{{ e.entity_id }}/.well-known/openid-federation" class="wk-pill" title="Entity Configuration">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        .well-known/openid-federation
+      </a>
+    </div>
+    <div class="entity-types">
+      {% for b in e.type_badges %}<span class="badge {{ b.class }}">{{ b.short }}</span> {% endfor %}
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro subordinate_card(eid) %}
+<div class="entity-card">
+  <div class="entity-icon"><span class="entity-initial">{{ eid | split(pat="//") | last | truncate(length=1, end="") | upper }}</span></div>
+  <div class="entity-info">
+    <div class="entity-url-row">
+      <span class="entity-id">{{ eid }}</span>
+      <a href="{{ eid }}/.well-known/openid-federation" class="wk-pill" title="Entity Configuration">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        .well-known/openid-federation
+      </a>
+    </div>
+  </div>
+</div>
+{% endmacro %}

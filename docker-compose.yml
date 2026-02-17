@@ -13,6 +13,7 @@ services:
       retries: 5
       start_period: 10s
     volumes:
+      - ./target/debug/inmor:/app/inmor
       - ./taconfig.toml:/app/taconfig.toml
       - ./private.json:/app/private.json
       - ./publickeys:/app/publickeys
