@@ -7,8 +7,8 @@ services:
     networks:
       - inmor-net
     healthcheck:
-      test: ['CMD', 'true']
-      interval: 1s
+      test: ['CMD', 'curl', '--insecure', '--fail', '--silent', 'https://localhost:8080/health']
+      interval: 5s
       timeout: 5s
       retries: 5
       start_period: 10s

@@ -503,10 +503,55 @@ Health Checks
 
 All services have health checks configured:
 
-* **ta**: Basic connectivity check
+* **ta**: ``GET /health`` — verifies Redis connectivity, returns ``{"status": "ok"}`` (200) or ``{"status": "error", "detail": "redis unavailable"}`` (503)
 * **admin**: Django application health
 * **db**: PostgreSQL ready check (``pg_isready``)
 * **redis**: Redis ping
+
+The TA ``/health`` endpoint is used as the Docker healthcheck::
+
+   healthcheck:
+     test: ['CMD', 'curl', '--insecure', '--fail', '--silent', 'https://localhost:8080/health']
+     interval: 5s
+     timeout: 5s
+     retries: 5
+     start_period: 10s
+
+For detailed operational status (subordinate counts, trust mark types, collection stats),
+use the ``/status`` endpoint::
+
+   curl https://your-ta-domain/status
+
+Example response:
+
+.. code-block:: json
+
+   {
+     "entity_id": "https://federation.example.com",
+     "version": "0.3.0",
+     "status": "ok",
+     "keys": {
+       "public_keys": 3,
+       "historical_keys_available": true
+     },
+     "subordinates": {
+       "direct": 4
+     },
+     "trust_marks": {
+       "types": [
+         "https://example.com/trustmark/member",
+         "https://example.com/trustmark/certified"
+       ],
+       "total_issued": 89
+     },
+     "collection": {
+       "total_entities": 523,
+       "openid_providers": 150,
+       "openid_relying_parties": 300,
+       "intermediates": 10,
+       "last_updated": 1708420000
+     }
+   }
 
 Monitor health status::
 

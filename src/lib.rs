@@ -1394,6 +1394,110 @@ pub async fn add_subordinate(entity_id: &str) -> Result<String> {
     Ok("all good".to_string())
 }
 
+/// Lightweight liveness check endpoint.
+/// Returns 200 with `{"status": "ok"}` if Redis is reachable,
+/// or 503 with `{"status": "error", "detail": "redis unavailable"}` if not.
+#[get("/health")]
+pub async fn health(redis: web::Data<redis::Client>) -> HttpResponse {
+    let conn_result = redis.get_connection_manager().await;
+    match conn_result {
+        Ok(mut conn) => {
+            let ping: Result<String, _> = redis::cmd("PING").query_async(&mut conn).await;
+            match ping {
+                Ok(_) => HttpResponse::Ok().json(json!({"status": "ok"})),
+                Err(_) => HttpResponse::ServiceUnavailable()
+                    .json(json!({"status": "error", "detail": "redis unavailable"})),
+            }
+        }
+        Err(_) => HttpResponse::ServiceUnavailable()
+            .json(json!({"status": "error", "detail": "redis unavailable"})),
+    }
+}
+
+/// Detailed operational status endpoint.
+/// Returns counts of keys, subordinates, trust marks, and collection data.
+#[get("/status")]
+pub async fn server_status(
+    redis: web::Data<redis::Client>,
+    state: web::Data<AppState>,
+) -> actix_web::Result<HttpResponse> {
+    let mut conn = redis
+        .get_connection_manager()
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
+    // Pipeline Redis queries for efficiency (single round-trip)
+    let mut pipe = redis::pipe();
+    pipe.cmd("EXISTS")
+        .arg("inmor:historical_keys")
+        .cmd("HLEN")
+        .arg("inmor:subordinates:jwt")
+        .cmd("SCARD")
+        .arg("inmor:tm:alltime")
+        .cmd("HLEN")
+        .arg("inmor:collection:entities")
+        .cmd("SCARD")
+        .arg("inmor:collection:by_type:openid_provider")
+        .cmd("SCARD")
+        .arg("inmor:collection:by_type:openid_relying_party")
+        .cmd("SCARD")
+        .arg("inmor:collection:by_type:federation_entity")
+        .cmd("GET")
+        .arg("inmor:collection:last_updated")
+        .cmd("KEYS")
+        .arg("inmor:tmtype:*");
+
+    let results: (
+        bool,        // historical_keys exists
+        u64,         // subordinate count
+        u64,         // total trust marks
+        u64,         // collection entities
+        u64,         // OPs
+        u64,         // RPs
+        u64,         // intermediates
+        Option<u64>, // last_updated
+        Vec<String>, // trust mark type keys
+    ) = pipe
+        .query_async(&mut conn)
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
+    // Extract trust mark type URLs from Redis key names
+    let trust_mark_types: Vec<String> = results
+        .8
+        .iter()
+        .filter_map(|key| key.strip_prefix("inmor:tmtype:").map(String::from))
+        .collect();
+
+    let public_key_count = PUBLIC_KEYS.len();
+
+    let response = json!({
+        "entity_id": state.entity_id,
+        "version": env!("CARGO_PKG_VERSION"),
+        "status": "ok",
+        "keys": {
+            "public_keys": public_key_count,
+            "historical_keys_available": results.0,
+        },
+        "subordinates": {
+            "direct": results.1,
+        },
+        "trust_marks": {
+            "types": trust_mark_types,
+            "total_issued": results.2,
+        },
+        "collection": {
+            "total_entities": results.3,
+            "openid_providers": results.4,
+            "openid_relying_parties": results.5,
+            "intermediates": results.6,
+            "last_updated": results.7,
+        },
+    });
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
 pub fn error_response_404(edetails: &str, message: &str) -> actix_web::Result<HttpResponse> {
     Ok(HttpResponse::NotFound()
         .content_type("application/json")

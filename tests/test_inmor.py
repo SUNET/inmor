@@ -522,3 +522,56 @@ def test_historical_keys_revoked_field(loaddata: Redis, start_server: int, http_
             assert revoked.get("reason") in ["unspecified", "compromised", "superseded"], (
                 f"revoked reason should be one of: unspecified, compromised, superseded"
             )
+
+
+def test_health_endpoint(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /health endpoint returns ok when Redis is reachable"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/health"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("status") == "ok"
+
+
+def test_status_endpoint(loaddata: Redis, start_server: int, http_client: Client):
+    "Tests /status endpoint returns detailed operational status"
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/status"
+    resp = http_client.get(url)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Verify top-level fields
+    assert data.get("entity_id") == f"https://localhost:{port}"
+    assert data.get("version") is not None
+    assert data.get("status") == "ok"
+
+    # Verify keys section
+    keys = data.get("keys")
+    assert keys is not None, "keys section missing"
+    assert isinstance(keys.get("public_keys"), int)
+    assert keys["public_keys"] > 0
+    assert isinstance(keys.get("historical_keys_available"), bool)
+
+    # Verify subordinates section
+    subordinates = data.get("subordinates")
+    assert subordinates is not None, "subordinates section missing"
+    assert isinstance(subordinates.get("direct"), int)
+    assert subordinates["direct"] == 3  # test data has 3 subordinates
+
+    # Verify trust_marks section
+    trust_marks = data.get("trust_marks")
+    assert trust_marks is not None, "trust_marks section missing"
+    assert isinstance(trust_marks.get("types"), list)
+    assert isinstance(trust_marks.get("total_issued"), int)
+
+    # Verify collection section
+    collection = data.get("collection")
+    assert collection is not None, "collection section missing"
+    assert isinstance(collection.get("total_entities"), int)
+    assert isinstance(collection.get("openid_providers"), int)
+    assert isinstance(collection.get("openid_relying_parties"), int)
+    assert isinstance(collection.get("intermediates"), int)
