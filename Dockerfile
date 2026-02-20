@@ -21,7 +21,7 @@ EOT
 
 RUN <<EOT
 apt-get clean
-apt update && apt install xmlsec1 redis ca-certificates -y
+apt update && apt install xmlsec1 redis ca-certificates curl -y
 apt dist-upgrade -y
 
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

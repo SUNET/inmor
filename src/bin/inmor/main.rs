@@ -385,6 +385,8 @@ async fn main() -> io::Result<()> {
             .service(trust_mark_list)
             .service(trust_mark_status)
             .service(federation_historical_keys)
+            .service(health)
+            .service(server_status)
             .wrap(middleware::NormalizePath::trim())
             .wrap(middleware::Logger::default())
     })
