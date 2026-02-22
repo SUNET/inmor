@@ -58,8 +58,20 @@ lazy_static! {
         keys
     };
     static ref PRIVATE_KEY: Vec<u8> = std::fs::read("./private.json").unwrap();
+    /// Shared HTTP client for all outbound federation requests.
+    /// Configured with timeouts and connection limits.
+    static ref HTTP_CLIENT: reqwest::Client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(10)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .expect("Failed to build HTTP client");
 }
 pub const WELL_KNOWN: &str = ".well-known/openid-federation";
+
+/// Maximum response body size for outbound federation requests (2 MB).
+const MAX_RESPONSE_BYTES: usize = 2_097_152;
 
 /// When true, allows HTTP scheme and private/loopback IPs in outbound federation requests.
 /// Only enable for development. Set from `allow_http` in `taconfig.toml`.
@@ -1464,10 +1476,34 @@ async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> 
     Ok(())
 }
 
-/// To do a GET query
+/// To do a GET query. Uses the shared HTTP client with timeouts and connection limits.
+/// Enforces a maximum response body size of `MAX_RESPONSE_BYTES`.
 pub async fn get_query(url: &str) -> Result<String> {
     validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
-    Ok(reqwest::get(url).await?.text().await?)
+    let response = HTTP_CLIENT.get(url).send().await?;
+    // Early reject if Content-Length header exceeds limit
+    if let Some(len) = response.content_length()
+        && len > MAX_RESPONSE_BYTES as u64
+    {
+        bail!(
+            "Response too large ({} bytes) from '{}', max {} bytes",
+            len,
+            url,
+            MAX_RESPONSE_BYTES
+        );
+    }
+    // Read body and check actual size (header may be missing or wrong)
+    let bytes = response.bytes().await?;
+    if bytes.len() > MAX_RESPONSE_BYTES {
+        bail!(
+            "Response too large ({} bytes) from '{}', max {} bytes",
+            bytes.len(),
+            url,
+            MAX_RESPONSE_BYTES
+        );
+    }
+    String::from_utf8(bytes.to_vec())
+        .map_err(|e| anyhow!("Response from '{}' is not valid UTF-8: {}", url, e))
 }
 
 /// FIXME: as an example.
@@ -1867,5 +1903,11 @@ mod ssrf_tests {
         let result = validate_federation_url("not-a-url", false).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid URL"));
+    }
+
+    #[test]
+    fn test_http_client_is_configured() {
+        // Verify the shared client was built successfully (lazy_static panics on failure)
+        let _ = &*HTTP_CLIENT;
     }
 }

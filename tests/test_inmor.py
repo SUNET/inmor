@@ -597,3 +597,23 @@ def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_cli
         },
     )
     assert resp.status_code == 400
+
+
+def test_resolve_timeout_on_unreachable(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    """C2: Server does not hang indefinitely on unreachable entities."""
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/resolve"
+    # TEST-NET-2 (198.51.100.0/24) is reserved and won't respond.
+    # The server's 10s request timeout should kick in instead of hanging.
+    resp = http_client.get(
+        url,
+        params={
+            "sub": "https://198.51.100.1",
+            "trust_anchor": f"https://localhost:{port}",
+        },
+        timeout=30,
+    )
+    assert resp.status_code == 400
