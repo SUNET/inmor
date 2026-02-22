@@ -1578,8 +1578,8 @@ pub async fn server_status(
         .arg("inmor:collection:by_type:federation_entity")
         .cmd("GET")
         .arg("inmor:collection:last_updated")
-        .cmd("KEYS")
-        .arg("inmor:tmtype:*");
+        .cmd("SMEMBERS")
+        .arg("inmor:tmtypes");
 
     let results: (
         bool,        // historical_keys exists
@@ -1596,12 +1596,8 @@ pub async fn server_status(
         .await
         .map_err(error::ErrorInternalServerError)?;
 
-    // Extract trust mark type URLs from Redis key names
-    let trust_mark_types: Vec<String> = results
-        .8
-        .iter()
-        .filter_map(|key| key.strip_prefix("inmor:tmtype:").map(String::from))
-        .collect();
+    // Trust mark type URLs from the inmor:tmtypes index set
+    let trust_mark_types: Vec<String> = results.8;
 
     let public_key_count = PUBLIC_KEYS.len();
 

@@ -357,6 +357,16 @@ async fn collection_tree_walking(
     }
 }
 
+/// Returns the list of known collection Redis keys for a given prefix.
+/// This avoids using the KEYS command which blocks the Redis event loop.
+fn known_collection_keys(prefix: &str) -> Vec<String> {
+    let mut keys = vec![format!("{prefix}:entities"), format!("{prefix}:all_sorted")];
+    for etype in KNOWN_ENTITY_TYPES {
+        keys.push(format!("{prefix}:by_type:{etype}"));
+    }
+    keys
+}
+
 /// Runs a full collection walk starting from the given trust anchor.
 ///
 /// Writes to staging Redis keys during the walk, then atomically swaps
@@ -368,18 +378,12 @@ pub async fn run_collection_walk(
     info!("Starting collection walk from {trust_anchor}");
 
     // Clean any leftover staging data
-    debug!("Cleaning leftover staging keys");
-    let staging_keys: Vec<String> = redis::cmd("KEYS")
-        .arg(format!("{STAGING_PREFIX}:*"))
-        .query_async(conn)
-        .await
-        .unwrap_or_default();
-    if !staging_keys.is_empty() {
-        debug!("Deleting {} leftover staging key(s)", staging_keys.len());
-        let _: Result<(), _> = redis::cmd("DEL").arg(&staging_keys).query_async(conn).await;
-    } else {
-        debug!("No leftover staging keys found");
-    }
+    let staging_keys = known_collection_keys(STAGING_PREFIX);
+    debug!(
+        "Cleaning {} possible leftover staging key(s)",
+        staging_keys.len()
+    );
+    let _: Result<(), _> = redis::cmd("DEL").arg(&staging_keys).query_async(conn).await;
 
     // Walk the tree
     debug!("Beginning recursive tree walk from {trust_anchor}");
@@ -394,28 +398,13 @@ pub async fn run_collection_walk(
     let mut pipe = redis::pipe();
 
     // Delete old live collection keys
-    let live_keys: Vec<String> = redis::cmd("KEYS")
-        .arg("inmor:collection:*")
-        .query_async(conn)
-        .await
-        .unwrap_or_default();
-    // Filter out staging keys from the delete list
-    let live_keys: Vec<&String> = live_keys
-        .iter()
-        .filter(|k| !k.starts_with(STAGING_PREFIX))
-        .collect();
-    if !live_keys.is_empty() {
-        debug!("Deleting {} old live key(s)", live_keys.len());
-        pipe.cmd("DEL").arg(live_keys).ignore();
-    }
+    let mut live_keys = known_collection_keys("inmor:collection");
+    live_keys.push("inmor:collection:last_updated".to_string());
+    debug!("Deleting {} old live key(s)", live_keys.len());
+    pipe.cmd("DEL").arg(&live_keys).ignore();
 
     // Rename staging keys to live
-    let staging_keys: Vec<String> = redis::cmd("KEYS")
-        .arg(format!("{STAGING_PREFIX}:*"))
-        .query_async(conn)
-        .await
-        .unwrap_or_default();
-
+    let staging_keys = known_collection_keys(STAGING_PREFIX);
     debug!("Renaming {} staging key(s) to live", staging_keys.len());
     for staging_key in &staging_keys {
         let live_key = staging_key.replace("inmor:collection:staging:", "inmor:collection:");
