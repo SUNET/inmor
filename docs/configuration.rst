@@ -41,6 +41,9 @@ The Trust Anchor reads its configuration from ``taconfig.toml``.
    * - ``tls_key``
      - No
      - Path to TLS private key file. Not required if running behind a reverse proxy.
+   * - ``allow_http``
+     - No
+     - Allow HTTP scheme and private/loopback IPs in outbound federation requests. **Development only.** Defaults to ``false``. When disabled (production), all outbound requests enforce HTTPS and reject targets that resolve to private IP ranges (SSRF protection).
 
 Admin Portal Configuration (settings.py)
 -----------------------------------------
@@ -427,3 +430,6 @@ Production taconfig.toml
    # TLS handled by reverse proxy, omit these
    # tls_cert = "cert.pem"
    # tls_key = "key.pem"
+
+   # NEVER set allow_http in production — it disables SSRF protection
+   # allow_http = false

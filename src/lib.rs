@@ -9,6 +9,8 @@ use redis::Client;
 use reqwest::blocking;
 use sha2::{Digest, Sha256};
 use std::fmt::{Display, format};
+use std::net::IpAddr;
+use std::sync::atomic::AtomicBool;
 
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer, Responder, error, get, middleware, post, web,
@@ -58,6 +60,10 @@ lazy_static! {
     static ref PRIVATE_KEY: Vec<u8> = std::fs::read("./private.json").unwrap();
 }
 pub const WELL_KNOWN: &str = ".well-known/openid-federation";
+
+/// When true, allows HTTP scheme and private/loopback IPs in outbound federation requests.
+/// Only enable for development. Set from `allow_http` in `taconfig.toml`.
+pub static ALLOW_HTTP: AtomicBool = AtomicBool::new(false);
 
 // This struct represents state
 pub struct AppState {
@@ -241,6 +247,8 @@ pub struct ServerConfiguration {
     pub redis_uri: String,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
+    /// Allow HTTP scheme and private IPs in outbound federation requests (development only).
+    pub allow_http: Option<bool>,
 }
 
 impl ServerConfiguration {
@@ -249,12 +257,14 @@ impl ServerConfiguration {
         redis_uri: String,
         tls_cert: Option<String>,
         tls_key: Option<String>,
+        allow_http: Option<bool>,
     ) -> ServerConfiguration {
         ServerConfiguration {
             domain: URL(domain),
             redis_uri,
             tls_cert,
             tls_key,
+            allow_http,
         }
     }
 
@@ -270,7 +280,10 @@ impl ServerConfiguration {
         let redis = env::var("TA_REDIS").unwrap_or("redis://redis:6379".to_string());
         let tls_cert = env::var("TA_TLS_CERT").ok();
         let tls_key = env::var("TA_TLS_KEY").ok();
-        ServerConfiguration::new(domain, redis, tls_cert, tls_key)
+        let allow_http = env::var("TA_ALLOW_HTTP")
+            .ok()
+            .map(|v| v == "true" || v == "1");
+        ServerConfiguration::new(domain, redis, tls_cert, tls_key, allow_http)
     }
 }
 
@@ -1379,8 +1392,81 @@ pub async fn get_entity_configruation_as_jwt(entity_id: &str) -> Result<String> 
     return get_query(&url).await;
 }
 
+/// Returns true if the IP address is in a private, loopback, or link-local range.
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()       // 127.0.0.0/8
+            || v4.is_private()     // 10/8, 172.16/12, 192.168/16
+            || v4.is_link_local()  // 169.254/16
+            || v4.is_unspecified() // 0.0.0.0
+            || v4.is_broadcast() // 255.255.255.255
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()       // ::1
+            || v6.is_unspecified() // ::
+            // unique local (fc00::/7) and link-local (fe80::/10)
+            || (v6.segments()[0] & 0xfe00) == 0xfc00
+            || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Validates a URL for federation use: HTTPS scheme, no private IPs.
+/// When `allow_http` is true (development mode), all checks are relaxed.
+async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> {
+    let parsed =
+        url::Url::parse(url_str).map_err(|e| anyhow!("Invalid URL '{}': {}", url_str, e))?;
+
+    // 1. Scheme check
+    match parsed.scheme() {
+        "https" => {}
+        "http" if allow_http => {}
+        scheme => bail!(
+            "Blocked scheme '{}' in URL '{}' — only HTTPS allowed",
+            scheme,
+            url_str
+        ),
+    }
+
+    // In development mode, skip DNS/IP validation
+    if allow_http {
+        return Ok(());
+    }
+
+    // 2. Must have a host
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("URL '{}' has no host", url_str))?;
+
+    // 3. Resolve DNS and check all IPs
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addr = format!("{}:{}", host, port);
+    let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&addr)
+        .await
+        .map_err(|e| anyhow!("DNS resolution failed for '{}': {}", host, e))?
+        .collect();
+
+    if resolved.is_empty() {
+        bail!("DNS resolution returned no addresses for '{}'", host);
+    }
+
+    for sock_addr in &resolved {
+        if is_private_ip(&sock_addr.ip()) {
+            bail!(
+                "Blocked request to private/internal IP {} (resolved from '{}')",
+                sock_addr.ip(),
+                host
+            );
+        }
+    }
+
+    Ok(())
+}
+
 /// To do a GET query
 pub async fn get_query(url: &str) -> Result<String> {
+    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
     Ok(reqwest::get(url).await?.text().await?)
 }
 
@@ -1682,5 +1768,104 @@ mod tests {
         let mut algs_vec: Vec<_> = algorithms.iter().collect();
         algs_vec.sort();
         println!("✓ All expected algorithms present: {:?}", algs_vec);
+    }
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::*;
+
+    #[test]
+    fn test_is_private_ip_v4() {
+        // Loopback
+        assert!(is_private_ip(&"127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"127.255.255.255".parse().unwrap()));
+        // Private ranges
+        assert!(is_private_ip(&"10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"172.16.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"192.168.1.1".parse().unwrap()));
+        // Link-local
+        assert!(is_private_ip(&"169.254.1.1".parse().unwrap()));
+        // Unspecified
+        assert!(is_private_ip(&"0.0.0.0".parse().unwrap()));
+        // Broadcast
+        assert!(is_private_ip(&"255.255.255.255".parse().unwrap()));
+        // Public IPs should pass
+        assert!(!is_private_ip(&"8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip(&"1.1.1.1".parse().unwrap()));
+        assert!(!is_private_ip(&"93.184.216.34".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_v6() {
+        // Loopback
+        assert!(is_private_ip(&"::1".parse().unwrap()));
+        // Unspecified
+        assert!(is_private_ip(&"::".parse().unwrap()));
+        // Unique local (fc00::/7)
+        assert!(is_private_ip(&"fc00::1".parse().unwrap()));
+        assert!(is_private_ip(&"fd00::1".parse().unwrap()));
+        // Link-local (fe80::/10)
+        assert!(is_private_ip(&"fe80::1".parse().unwrap()));
+        // Public IPv6
+        assert!(!is_private_ip(&"2001:db8::1".parse().unwrap()));
+        assert!(!is_private_ip(&"2607:f8b0:4004:800::200e".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_http() {
+        let result = validate_federation_url("http://example.com/foo", false).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("only HTTPS allowed")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_allows_http_when_configured() {
+        // With allow_http=true, HTTP scheme should not be rejected
+        let result = validate_federation_url("http://example.com/foo", true).await;
+        // Should succeed (allow_http skips all checks after scheme)
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_non_http_schemes() {
+        let result = validate_federation_url("ftp://example.com/foo", false).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("only HTTPS allowed")
+        );
+
+        let result = validate_federation_url("file:///etc/passwd", false).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_private_ips() {
+        // localhost resolves to 127.0.0.1
+        let result = validate_federation_url("https://127.0.0.1/foo", false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("private/internal"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_allows_private_ips_in_dev_mode() {
+        // With allow_http=true (dev mode), private IPs should be allowed
+        let result = validate_federation_url("https://127.0.0.1/foo", true).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_invalid_url() {
+        let result = validate_federation_url("not-a-url", false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
 }

@@ -348,6 +348,11 @@ async fn main() -> io::Result<()> {
         )
     });
 
+    inmor::ALLOW_HTTP.store(
+        server_config.allow_http.unwrap_or(false),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
     // Now the normal web app flow
     //
     //
