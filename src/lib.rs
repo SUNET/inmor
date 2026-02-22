@@ -738,12 +738,23 @@ pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
     Ok((payload, header))
 }
 
+/// Maximum recursion depth for trust chain resolution.
+/// Practical federations rarely exceed 3-4 levels.
+const MAX_RESOLVE_DEPTH: u8 = 10;
+
 pub async fn resolve_entity_to_trustanchor(
     sub: &str,
     trust_anchors: Vec<&str>,
     start: bool,
     visited: &mut HashSet<String>,
+    depth: u8,
 ) -> Result<Vec<VerifiedJWT>> {
+    if depth > MAX_RESOLVE_DEPTH {
+        bail!(
+            "Trust chain resolution exceeded maximum depth of {}",
+            MAX_RESOLVE_DEPTH
+        );
+    }
     eprintln!("\nReceived {sub} with trust anchors {trust_anchors:?}");
 
     let empty_authority: Vec<String> = Vec::new();
@@ -896,6 +907,7 @@ pub async fn resolve_entity_to_trustanchor(
                 trust_anchors.clone(),
                 false,
                 visited,
+                depth + 1,
             ))
             .await?;
             if r_result.is_empty() {
@@ -966,7 +978,7 @@ pub async fn resolve_entity(
     let tas: Vec<&str> = trust_anchors.iter().map(|s| s as &str).collect();
     let mut visisted: HashSet<String> = HashSet::new();
     // Now loop over the trust_anchors
-    let result = match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted).await {
+    let result = match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted, 0).await {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Error resolving entity {} to trust anchors: {}", sub, e);

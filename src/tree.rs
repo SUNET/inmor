@@ -152,13 +152,24 @@ fn detect_entity_types(metadata: &serde_json::Map<String, Value>) -> Vec<String>
     types
 }
 
+/// Maximum recursion depth for collection tree walking.
+const MAX_COLLECTION_DEPTH: u8 = 20;
+
 /// Walks a single entity: fetches config, classifies, stores collection data,
 /// then recurses into subordinates if the entity is a TA/IA.
 async fn collection_tree_walking(
     entity_id: &str,
     conn: &mut redis::aio::ConnectionManager,
     visited: &mut HashSet<String>,
+    depth: u8,
 ) {
+    if depth > MAX_COLLECTION_DEPTH {
+        error!(
+            "Collection tree walking exceeded maximum depth of {} at {entity_id}",
+            MAX_COLLECTION_DEPTH
+        );
+        return;
+    }
     if visited.contains(entity_id) {
         debug!("Already visited {entity_id}, skipping");
         return;
@@ -331,7 +342,8 @@ async fn collection_tree_walking(
                                 continue;
                             }
                             info!("Found subordinate: {sub_str}");
-                            Box::pin(collection_tree_walking(sub_str, conn, visited)).await;
+                            Box::pin(collection_tree_walking(sub_str, conn, visited, depth + 1))
+                                .await;
                         }
                     }
                 }
@@ -372,7 +384,7 @@ pub async fn run_collection_walk(
     // Walk the tree
     debug!("Beginning recursive tree walk from {trust_anchor}");
     let mut visited = HashSet::new();
-    collection_tree_walking(trust_anchor, conn, &mut visited).await;
+    collection_tree_walking(trust_anchor, conn, &mut visited, 0).await;
 
     let entity_count = visited.len();
     info!("Walk complete: {entity_count} entities discovered");
