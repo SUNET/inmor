@@ -203,3 +203,123 @@ class TestAPIKeyAuthentication:
         """Test that session authentication still works."""
         response = auth_client.get("/api/v1/trustmarktypes")
         assert response.status_code == 200
+
+
+class TestAPIKeyManagementCommand:
+    """Tests for the apikey management command."""
+
+    @pytest.mark.django_db
+    def test_apikey_create(self, user):
+        """Test creating an API key via management command."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command(
+            "apikey", "create", "--username", "testuser", "--key-name", "test key", stdout=out
+        )
+        plaintext = out.getvalue().strip()
+
+        assert len(plaintext) > 20
+        key = APIKey.objects.get(name="test key", user=user)
+        assert key.is_active is True
+        assert plaintext.startswith(key.prefix)
+
+    @pytest.mark.django_db
+    def test_apikey_create_user_not_found(self, db):
+        """Test creating an API key for a non-existent user."""
+        from io import StringIO
+
+        from django.core.management import call_command, CommandError
+
+        with pytest.raises(CommandError, match="does not exist"):
+            call_command("apikey", "create", "--username", "nobody", stdout=StringIO())
+
+    @pytest.mark.django_db
+    def test_apikey_list(self, user):
+        """Test listing API keys for a user."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        APIKey.create_key(name="key-one", user=user)
+        APIKey.create_key(name="key-two", user=user)
+
+        out = StringIO()
+        call_command("apikey", "list", "--username", "testuser", stdout=out)
+        output = out.getvalue()
+
+        assert "key-one" in output
+        assert "key-two" in output
+
+    @pytest.mark.django_db
+    def test_apikey_list_all(self, user):
+        """Test listing all API keys across users."""
+        from io import StringIO
+
+        from django.contrib.auth.models import User
+        from django.core.management import call_command
+
+        user2 = User.objects.create_user(username="otheruser", password="pass123")
+        APIKey.create_key(name="key-for-test", user=user)
+        APIKey.create_key(name="key-for-other", user=user2)
+
+        out = StringIO()
+        call_command("apikey", "list", "--all", stdout=out)
+        output = out.getvalue()
+
+        assert "key-for-test" in output
+        assert "key-for-other" in output
+        assert "testuser" in output
+        assert "otheruser" in output
+
+    @pytest.mark.django_db
+    def test_apikey_list_empty(self, user):
+        """Test listing keys when user has none."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("apikey", "list", "--username", "testuser", stdout=out)
+        output = out.getvalue()
+
+        assert "No API keys found" in output
+
+    @pytest.mark.django_db
+    def test_apikey_revoke(self, user):
+        """Test revoking an API key by name."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        APIKey.create_key(name="revoke-me", user=user)
+
+        out = StringIO()
+        call_command(
+            "apikey", "revoke", "--username", "testuser", "--key-name", "revoke-me", stdout=out
+        )
+        output = out.getvalue()
+
+        assert "Revoked 1 key(s)" in output
+        key = APIKey.objects.get(name="revoke-me", user=user)
+        assert key.is_active is False
+
+    @pytest.mark.django_db
+    def test_apikey_revoke_not_found(self, user):
+        """Test revoking a non-existent key."""
+        from io import StringIO
+
+        from django.core.management import call_command, CommandError
+
+        with pytest.raises(CommandError, match="No active API key"):
+            call_command(
+                "apikey",
+                "revoke",
+                "--username",
+                "testuser",
+                "--key-name",
+                "nope",
+                stdout=StringIO(),
+            )
