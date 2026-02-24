@@ -5,6 +5,40 @@ Inmor's Admin portal provides custom Django management commands for operational
 tasks. These commands are run via ``python manage.py <command>`` (or
 ``docker compose exec admin python manage.py <command>`` in a Docker deployment).
 
+createsuperuser
+---------------
+
+Create an admin superuser account. This is a built-in Django command. A
+superuser has full access to the Admin portal and API.
+
+::
+
+   python manage.py createsuperuser --username admin --email admin@example.com
+
+You will be prompted to enter and confirm a password. To skip the interactive
+prompt (useful in scripts and CI)::
+
+   DJANGO_SUPERUSER_PASSWORD=your-password \
+     python manage.py createsuperuser --username admin --email admin@example.com --noinput
+
+In a Docker deployment::
+
+   docker compose exec admin python manage.py createsuperuser --username admin --email admin@example.com
+
+changepassword
+--------------
+
+Change the password of an existing user. This is a built-in Django command.
+
+::
+
+   python manage.py changepassword admin
+
+You will be prompted to enter and confirm the new password. In a Docker
+deployment::
+
+   docker compose exec admin python manage.py changepassword admin
+
 apikey
 ------
 
