@@ -20,14 +20,6 @@
   --c-text-tertiary: #8b91a0;
   --c-accent: #1a56db;
   --c-accent-soft: #eef2ff;
-  --c-op: #0e7c3a;
-  --c-op-bg: #ecfdf3;
-  --c-rp: #9333ea;
-  --c-rp-bg: #faf5ff;
-  --c-fe: #0369a1;
-  --c-fe-bg: #f0f9ff;
-  --c-other: #64748b;
-  --c-other-bg: #f8fafc;
   --radius: 8px;
   --radius-lg: 12px;
   --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -133,224 +125,7 @@ header {
   letter-spacing: -0.01em;
 }
 
-.section-title-lg {
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin-bottom: 20px;
-}
-
-.ep-details summary {
-  cursor: pointer;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ep-details summary::-webkit-details-marker { display: none; }
-
-.ep-details summary::before {
-  content: '';
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  background: var(--c-surface);
-  border: 1px solid var(--c-border);
-  border-radius: 4px;
-  flex-shrink: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6572' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: center;
-  transition: transform 0.15s;
-}
-
-.ep-details[open] summary::before { transform: rotate(90deg); }
-.ep-details summary h2 { margin-bottom: 0; }
-.ep-details .ep-table { margin-top: 16px; }
-
-.ep-table { width: 100%; border-collapse: collapse; }
-.ep-table tr { border-bottom: 1px solid var(--c-border-light); }
-.ep-table tr:last-child { border-bottom: none; }
-.ep-table td { padding: 8px 0; vertical-align: top; }
-
-.ep-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--c-text-secondary);
-  width: 140px;
-  padding-right: 16px;
-}
-
-.ep-url {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--c-accent);
-  text-decoration: none;
-  word-break: break-all;
-}
-
-.ep-url:hover { text-decoration: underline; }
-
-.entity-group { margin-bottom: 32px; }
-.entity-group:last-child { margin-bottom: 0; }
-
-.group-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.group-header h3 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--c-text);
-}
-
-.group-count {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--c-text-tertiary);
-  background: var(--c-surface);
-  padding: 1px 8px;
-  border-radius: 10px;
-}
-
-.entity-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius);
-  margin-bottom: 6px;
-  background: var(--c-bg);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.entity-card:hover {
-  border-color: #cbd0d8;
-  box-shadow: var(--shadow-sm);
-}
-
-.entity-icon {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.entity-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  object-fit: contain;
-  background: var(--c-surface);
-}
-
-.entity-initial {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  background: var(--c-surface);
-  border: 1px solid var(--c-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--c-text-secondary);
-}
-
-.entity-info { min-width: 0; flex: 1; }
-
-.entity-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--c-text);
-  margin-bottom: 1px;
-}
-
-.entity-url-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 2px;
-}
-
-.entity-id {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--c-accent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wk-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--c-accent);
-  background: var(--c-accent-soft);
-  padding: 2px 10px;
-  border-radius: 20px;
-  text-decoration: none;
-  white-space: nowrap;
-  border: 1px solid transparent;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.wk-pill:hover {
-  background: #dce5ff;
-  border-color: var(--c-accent);
-}
-
-.wk-pill svg { width: 12px; height: 12px; flex-shrink: 0; }
-
-.entity-types {
-  margin-top: 6px;
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 7px;
-  border-radius: 4px;
-  letter-spacing: 0.02em;
-}
-
-.badge-op { background: var(--c-op-bg); color: var(--c-op); }
-.badge-rp { background: var(--c-rp-bg); color: var(--c-rp); }
-.badge-fe { background: var(--c-fe-bg); color: var(--c-fe); }
-.badge-other { background: var(--c-other-bg); color: var(--c-other); }
-
-.collection-stats {
-  display: flex;
-  gap: 32px;
-  padding-bottom: 20px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--c-border-light);
-}
-
-.empty-state {
-  font-size: 13px;
-  color: var(--c-text-tertiary);
-  font-style: italic;
-  padding: 8px 0;
-}
-
-.hint-list, .tm-list { list-style: none; }
+.hint-list { list-style: none; }
 .hint-list li { padding: 6px 0; border-bottom: 1px solid var(--c-border-light); }
 .hint-list li:last-child { border-bottom: none; }
 
@@ -362,35 +137,6 @@ header {
 }
 
 .hint-list a:hover { text-decoration: underline; }
-
-.tm-item {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--c-text-secondary);
-  padding: 6px 0;
-  border-bottom: 1px solid var(--c-border-light);
-  word-break: break-all;
-}
-
-.tm-item:last-child { border-bottom: none; }
-
-footer {
-  padding: 24px 0 40px;
-  border-top: 1px solid var(--c-border);
-  margin-top: 8px;
-}
-
-.footer-inner {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.footer-inner span { font-size: 12px; color: var(--c-text-tertiary); }
-.footer-inner a { font-size: 12px; color: var(--c-text-tertiary); text-decoration: none; }
-.footer-inner a:hover { color: var(--c-accent); }
 
 .wk-link {
   display: inline-flex;
@@ -410,12 +156,28 @@ footer {
 .wk-link:hover { background: #dce5ff; }
 .wk-link svg { width: 14px; height: 14px; }
 
+footer {
+  padding: 24px 0 40px;
+  border-top: 1px solid var(--c-border);
+  margin-top: 8px;
+}
+
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.footer-inner span { font-size: 12px; color: var(--c-text-tertiary); }
+.footer-inner a { font-size: 12px; color: var(--c-text-tertiary); text-decoration: none; }
+.footer-inner a:hover { color: var(--c-accent); }
+
 @media (max-width: 600px) {
   header { padding: 24px 0 20px; }
   .header-top { flex-direction: column; }
   .stats { gap: 20px; flex-wrap: wrap; }
-  .ep-label { width: 100px; }
-  .entity-card { padding: 10px 12px; }
 }
 </style>
 </head>
@@ -439,6 +201,10 @@ footer {
       <span class="stat-value">{{ direct_sub_count }}</span>
       <span class="stat-label">Direct Subordinates</span>
     </div>
+    <div class="stat">
+      <span class="stat-value">{{ public_key_count }}</span>
+      <span class="stat-label">Public Keys</span>
+    </div>
   </div>
 </header>
 
@@ -453,6 +219,7 @@ footer {
 </section>
 {% endif %}
 
+{# Trust marks — commented out for now
 {% if trust_marks | length > 0 %}
 <section class="section">
   <h2>Trust Marks</h2>
@@ -463,7 +230,9 @@ footer {
   </ul>
 </section>
 {% endif %}
+#}
 
+{# Federation endpoints — commented out for now
 {% if endpoints | length > 0 %}
 <details class="section ep-details">
   <summary><h2>Federation Endpoints</h2></summary>
@@ -474,7 +243,9 @@ footer {
   </table>
 </details>
 {% endif %}
+#}
 
+{# Direct subordinates list — commented out for now
 {% if direct_subordinates | length > 0 %}
 <section class="section">
   <h2>Direct Subordinates</h2>
@@ -489,7 +260,9 @@ footer {
   </div>
 </section>
 {% endif %}
+#}
 
+{# Federation details / collection — commented out for now
 <section class="section">
   <h2 class="section-title-lg">Federation Details</h2>
   <div class="collection-stats">
@@ -549,6 +322,7 @@ footer {
     {% endif %}
   </div>
 </section>
+#}
 
 <footer>
   <div class="footer-inner">
@@ -558,15 +332,5 @@ footer {
 </footer>
 
 </div>
-
-<script>
-document.querySelectorAll('time').forEach(el => {
-  const ts = parseInt(el.textContent, 10);
-  if (!isNaN(ts) && ts > 0) {
-    const d = new Date(ts * 1000);
-    el.textContent = d.toLocaleString();
-  }
-});
-</script>
 </body>
 </html>

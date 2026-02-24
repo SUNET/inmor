@@ -1,15 +1,32 @@
-use actix_web::{App, HttpResponse, HttpServer, Responder, error, get, middleware, web};
+#![allow(unused)]
+
+use actix_web::{
+    App, HttpRequest, HttpResponse, HttpServer, Responder, error, get, middleware, web,
+};
 use lazy_static::lazy_static;
+use redis::Client;
+use redis::Commands;
+use serde::Deserialize;
+use serde::Serialize;
+use std::fmt::format;
 use std::fs;
+use std::ops::Deref;
 use std::sync::Mutex;
 use std::{env, io};
 
 use clap::Parser;
 use inmor::*;
+use josekit::{
+    JoseError,
+    jwk::{Jwk, JwkSet},
+    jws::{JwsHeader, RS256},
+    jwt::{self, JwtPayload},
+};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
 
 lazy_static! {
     static ref TERA: tera::Tera = {
@@ -37,9 +54,7 @@ async fn index(
 
     // Decode entity config for display
     let mut ta_name = String::new();
-    let mut endpoints: Vec<(String, String)> = Vec::new();
     let mut authority_hints: Vec<String> = Vec::new();
-    let mut ta_trust_marks: Vec<(String, String)> = Vec::new(); // (type, id)
 
     if let Some(ref jwt_str) = entity_jwt
         && let Ok((payload, _)) = get_unverified_payload_header(jwt_str)
@@ -49,26 +64,9 @@ async fn index(
             && let Some(fed) = metadata
                 .get("federation_entity")
                 .and_then(|v| v.as_object())
+            && let Some(name) = fed.get("organization_name").and_then(|v| v.as_str())
         {
-            if let Some(name) = fed.get("organization_name").and_then(|v| v.as_str()) {
-                ta_name = name.to_string();
-            }
-            // Collect endpoints
-            let endpoint_names = [
-                ("federation_fetch_endpoint", "Fetch"),
-                ("federation_list_endpoint", "List"),
-                ("federation_resolve_endpoint", "Resolve"),
-                ("federation_collection_endpoint", "Collection"),
-                ("federation_trust_mark_endpoint", "Trust Mark"),
-                ("federation_trust_mark_list_endpoint", "Trust Mark List"),
-                ("federation_trust_mark_status_endpoint", "Trust Mark Status"),
-                ("federation_historical_keys_endpoint", "Historical Keys"),
-            ];
-            for (key, label) in endpoint_names {
-                if let Some(url) = fed.get(key).and_then(|v| v.as_str()) {
-                    endpoints.push((label.to_string(), url.to_string()));
-                }
-            }
+            ta_name = name.to_string();
         }
         // Extract authority_hints
         if let Some(hints) = payload.claim("authority_hints").and_then(|v| v.as_array()) {
@@ -78,106 +76,22 @@ async fn index(
                 }
             }
         }
-        // Extract trust_marks
-        if let Some(tms) = payload.claim("trust_marks").and_then(|v| v.as_array()) {
-            for tm in tms {
-                if let Some(obj) = tm.as_object() {
-                    let tm_id = obj.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                    let tm_type = obj
-                        .get("trust_mark_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(tm_id);
-                    ta_trust_marks.push((tm_type.to_string(), tm_id.to_string()));
-                }
-            }
-        }
     }
 
-    // Fetch collection entities
-    let collection_entities: Vec<(String, String)> =
-        redis::Cmd::hgetall("inmor:collection:entities")
-            .query_async::<Vec<(String, String)>>(&mut conn)
-            .await
-            .unwrap_or_default();
-
-    let last_updated: Option<u64> = redis::Cmd::get("inmor:collection:last_updated")
+    // Fetch direct subordinate count
+    let direct_sub_count: usize = redis::Cmd::hlen("inmor:subordinates:jwt")
         .query_async(&mut conn)
         .await
-        .ok();
+        .unwrap_or(0);
 
-    // Parse collection entries
-    struct CollectionEntry {
-        entity_id: String,
-        entity_types: Vec<String>,
-        display_name: Option<String>,
-        logo_uri: Option<String>,
-    }
-
-    let mut entries: Vec<CollectionEntry> = Vec::new();
-    for (_eid, json_str) in &collection_entities {
-        if let Ok(resp) = serde_json::from_str::<EntityCollectionResponse>(json_str) {
-            let mut display_name = None;
-            let mut logo_uri = None;
-            if let Some(ref ui) = resp.ui_infos {
-                // Try federation_entity first, then any type
-                for key in &[
-                    "federation_entity",
-                    "openid_provider",
-                    "openid_relying_party",
-                ] {
-                    if let Some(info) = ui.get(*key) {
-                        if display_name.is_none()
-                            && let Some(ref dn) = info.display_name
-                            && !dn.is_empty()
-                        {
-                            display_name = Some(dn.clone());
-                        }
-                        if logo_uri.is_none()
-                            && let Some(ref lu) = info.logo_uri
-                            && !lu.is_empty()
-                        {
-                            logo_uri = Some(lu.clone());
-                        }
-                    }
-                }
-            }
-            entries.push(CollectionEntry {
-                entity_id: resp.entity_id,
-                entity_types: resp.entity_types,
-                display_name,
-                logo_uri,
-            });
-        }
-    }
-    entries.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
-
-    // Separate into categories
-    let intermediates: Vec<&CollectionEntry> = entries
-        .iter()
-        .filter(|e| {
-            e.entity_types.contains(&"federation_entity".to_string())
-                && !e
-                    .entity_types
-                    .iter()
-                    .any(|t| t == "openid_provider" || t == "openid_relying_party")
-        })
-        .filter(|e| e.entity_id != app_state.entity_id)
-        .collect();
-    let providers: Vec<&CollectionEntry> = entries
-        .iter()
-        .filter(|e| e.entity_types.contains(&"openid_provider".to_string()))
-        .collect();
-    let relying_parties: Vec<&CollectionEntry> = entries
-        .iter()
-        .filter(|e| e.entity_types.contains(&"openid_relying_party".to_string()))
-        .collect();
-
-    // Fetch direct subordinate entity IDs
-    let direct_sub_ids: Vec<String> = redis::Cmd::hkeys("inmor:subordinates:jwt")
-        .query_async(&mut conn)
-        .await
-        .unwrap_or_default();
-    let direct_sub_count = direct_sub_ids.len();
+    // Count public keys from the keyset
+    let public_key_count = app_state
+        .public_keyset
+        .as_ref()
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
 
     // Build Tera context
     let entity_id = &app_state.entity_id;
@@ -189,74 +103,13 @@ async fn index(
         ta_name.clone()
     };
 
-    // Sort direct subordinates
-    let mut sorted_sub_ids = direct_sub_ids.clone();
-    sorted_sub_ids.sort();
-
-    // Build serializable entity data for template
-    let to_entry = |e: &&CollectionEntry| -> serde_json::Value {
-        let initial = e
-            .entity_id
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .chars()
-            .next()
-            .unwrap_or('?')
-            .to_uppercase()
-            .to_string();
-        let type_badges: Vec<serde_json::Value> = e
-            .entity_types
-            .iter()
-            .map(|t| {
-                let (class, short) = match t.as_str() {
-                    "openid_provider" => ("badge-op", "OP"),
-                    "openid_relying_party" => ("badge-rp", "RP"),
-                    "federation_entity" => ("badge-fe", "FE"),
-                    "oauth_authorization_server" => ("badge-other", "AS"),
-                    "oauth_client" => ("badge-other", "OC"),
-                    "oauth_resource" => ("badge-other", "OR"),
-                    other => ("badge-other", other),
-                };
-                json!({"class": class, "short": short})
-            })
-            .collect();
-        json!({
-            "entity_id": e.entity_id,
-            "display_name": e.display_name.as_deref().unwrap_or(""),
-            "logo_uri": e.logo_uri,
-            "initial": initial,
-            "type_badges": type_badges,
-        })
-    };
-
-    let last_updated_ts = last_updated.filter(|&ts| ts > 0);
-
     let mut ctx = tera::Context::new();
     ctx.insert("display_title", &display_title);
     ctx.insert("entity_id", entity_id);
     ctx.insert("version", version);
     ctx.insert("direct_sub_count", &direct_sub_count);
-    ctx.insert("direct_subordinates", &sorted_sub_ids);
-    ctx.insert("total_discovered", &entries.len());
-    ctx.insert("op_count", &providers.len());
-    ctx.insert("rp_count", &relying_parties.len());
-    ctx.insert("ia_count", &intermediates.len());
-    ctx.insert("endpoints", &endpoints);
     ctx.insert("authority_hints", &authority_hints);
-    ctx.insert("trust_marks", &ta_trust_marks);
-    ctx.insert(
-        "intermediates",
-        &intermediates.iter().map(to_entry).collect::<Vec<_>>(),
-    );
-    ctx.insert(
-        "providers",
-        &providers.iter().map(to_entry).collect::<Vec<_>>(),
-    );
-    ctx.insert(
-        "relying_parties",
-        &relying_parties.iter().map(to_entry).collect::<Vec<_>>(),
-    );
-    ctx.insert("last_updated_ts", &last_updated_ts);
+    ctx.insert("public_key_count", &public_key_count);
 
     let html = TERA
         .render("index.html", &ctx)
@@ -312,11 +165,6 @@ async fn main() -> io::Result<()> {
         )
     });
 
-    inmor::ALLOW_HTTP.store(
-        server_config.allow_http.unwrap_or(false),
-        std::sync::atomic::Ordering::Relaxed,
-    );
-
     // Now the normal web app flow
     //
     //
@@ -324,7 +172,7 @@ async fn main() -> io::Result<()> {
     let redis =
         redis::Client::open(server_config.redis_uri.as_str()).expect("Failed to connect to Redis");
 
-    let federation = Federation {
+    let mut federation = Federation {
         entities: Mutex::new(HashMap::new()),
     };
 
