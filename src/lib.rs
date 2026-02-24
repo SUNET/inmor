@@ -1629,19 +1629,17 @@ pub async fn server_status(
 }
 
 pub fn error_response_404(edetails: &str, message: &str) -> actix_web::Result<HttpResponse> {
-    Ok(HttpResponse::NotFound()
-        .content_type("application/json")
-        .body(format!(
-            "{{\"error\":\"{edetails}\",\"error_description\": \"{message}\"}}"
-        )))
+    Ok(HttpResponse::NotFound().json(json!({
+        "error": edetails,
+        "error_description": message
+    })))
 }
 
 pub fn error_response_400(edetails: &str, message: &str) -> actix_web::Result<HttpResponse> {
-    Ok(HttpResponse::BadRequest()
-        .content_type("application/json")
-        .body(format!(
-            "{{\"error\":\"{edetails}\",\"error_description\": \"{message}\"}}"
-        )))
+    Ok(HttpResponse::BadRequest().json(json!({
+        "error": edetails,
+        "error_description": message
+    })))
 }
 
 #[cfg(test)]
