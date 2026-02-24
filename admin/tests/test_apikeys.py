@@ -91,14 +91,17 @@ class TestAPIKeyModel:
             user=user,
         )
 
-        authenticated_user = APIKey.authenticate(plaintext)
+        result = APIKey.authenticate(plaintext)
+        assert result is not None
+        authenticated_user, returned_key = result
         assert authenticated_user == user
+        assert returned_key.pk == api_key.pk
 
     @pytest.mark.django_db
     def test_authenticate_invalid_key(self, user):
         """Test authentication with an invalid API key."""
-        authenticated_user = APIKey.authenticate("invalid_key_123")
-        assert authenticated_user is None
+        result = APIKey.authenticate("invalid_key_123")
+        assert result is None
 
     @pytest.mark.django_db
     def test_authenticate_expired_key(self, user):
@@ -110,8 +113,8 @@ class TestAPIKeyModel:
             expires_at=expires,
         )
 
-        authenticated_user = APIKey.authenticate(plaintext)
-        assert authenticated_user is None
+        result = APIKey.authenticate(plaintext)
+        assert result is None
 
     @pytest.mark.django_db
     def test_authenticate_deactivated_key(self, user):
@@ -123,8 +126,8 @@ class TestAPIKeyModel:
         api_key.is_active = False
         api_key.save()
 
-        authenticated_user = APIKey.authenticate(plaintext)
-        assert authenticated_user is None
+        result = APIKey.authenticate(plaintext)
+        assert result is None
 
     @pytest.mark.django_db
     def test_last_used_updated(self, user):
@@ -139,6 +142,30 @@ class TestAPIKeyModel:
 
         api_key.refresh_from_db()
         assert api_key.last_used_at is not None
+
+    @pytest.mark.django_db
+    def test_tenant_default(self, user):
+        """Test that tenant defaults to 'default'."""
+        api_key, _ = APIKey.create_key(name="Default Tenant Key", user=user)
+        assert api_key.tenant == "default"
+
+    @pytest.mark.django_db
+    def test_tenant_custom(self, user):
+        """Test creating a key with a custom tenant."""
+        api_key, _ = APIKey.create_key(name="Custom Tenant Key", user=user, tenant="acme-corp")
+        assert api_key.tenant == "acme-corp"
+
+    @pytest.mark.django_db
+    def test_authenticate_returns_tenant(self, user):
+        """Test that authenticate returns the key with correct tenant."""
+        api_key, plaintext = APIKey.create_key(
+            name="Tenant Auth Key", user=user, tenant="my-tenant"
+        )
+
+        result = APIKey.authenticate(plaintext)
+        assert result is not None
+        _, returned_key = result
+        assert returned_key.tenant == "my-tenant"
 
 
 class TestAPIKeyAuthentication:
@@ -224,7 +251,33 @@ class TestAPIKeyManagementCommand:
         assert len(plaintext) > 20
         key = APIKey.objects.get(name="test key", user=user)
         assert key.is_active is True
+        assert key.tenant == "default"
         assert plaintext.startswith(key.prefix)
+
+    @pytest.mark.django_db
+    def test_apikey_create_with_tenant(self, user):
+        """Test creating an API key with --tenant via management command."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command(
+            "apikey",
+            "create",
+            "--username",
+            "testuser",
+            "--key-name",
+            "tenant key",
+            "--tenant",
+            "acme-corp",
+            stdout=out,
+        )
+        plaintext = out.getvalue().strip()
+
+        assert len(plaintext) > 20
+        key = APIKey.objects.get(name="tenant key", user=user)
+        assert key.tenant == "acme-corp"
 
     @pytest.mark.django_db
     def test_apikey_create_user_not_found(self, db):
@@ -252,6 +305,8 @@ class TestAPIKeyManagementCommand:
 
         assert "key-one" in output
         assert "key-two" in output
+        assert "Tenant" in output  # Header includes tenant column
+        assert "default" in output  # Default tenant value shown
 
     @pytest.mark.django_db
     def test_apikey_list_all(self, user):

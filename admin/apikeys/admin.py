@@ -14,13 +14,14 @@ class APIKeyAdmin(admin.ModelAdmin):
         "name",
         "prefix_display",
         "user",
+        "tenant",
         "is_active",
         "is_valid_display",
         "created_at",
         "expires_at",
         "last_used_at",
     ]
-    list_filter = ["is_active", "created_at", "expires_at"]
+    list_filter = ["is_active", "tenant", "created_at", "expires_at"]
     search_fields = ["name", "prefix", "user__username"]
     readonly_fields = ["prefix", "key_hash", "created_at", "last_used_at"]
     ordering = ["-created_at"]
@@ -29,7 +30,7 @@ class APIKeyAdmin(admin.ModelAdmin):
         (
             None,
             {
-                "fields": ["name", "user", "is_active"],
+                "fields": ["name", "user", "tenant", "is_active"],
             },
         ),
         (

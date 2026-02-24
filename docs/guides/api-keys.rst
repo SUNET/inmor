@@ -38,9 +38,11 @@ Creating a Key
 .. code-block:: bash
 
    python manage.py apikey create --username admin --key-name "CI deploy"
+   python manage.py apikey create --username admin --key-name "CI deploy" --tenant acme-corp
 
 The plaintext key is printed to stdout so it can be captured by scripts.
 The ``--key-name`` flag is optional and defaults to ``auto-generated``.
+The ``--tenant`` flag assigns the key to a tenant (defaults to ``default``).
 
 .. warning::
 
@@ -62,8 +64,8 @@ List keys across all users:
 
    python manage.py apikey list --all
 
-Output includes the key name, prefix, active status, creation date, expiry,
-and last-used timestamp. The ``--all`` flag adds a user column.
+Output includes the key name, prefix, tenant, active status, creation date,
+expiry, and last-used timestamp. The ``--all`` flag adds a user column.
 
 Revoking a Key
 ^^^^^^^^^^^^^^

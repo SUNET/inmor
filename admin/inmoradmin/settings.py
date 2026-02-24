@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "trustmarks.apps.TrustmarksConfig",
     "entities.apps.EntitiesConfig",
     "apikeys.apps.ApikeysConfig",
+    "auditlog.apps.AuditlogConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
