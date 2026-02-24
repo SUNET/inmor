@@ -26,8 +26,57 @@ Each API key is:
 * Optionally time-limited with an expiry date
 * Revocable at any time
 
-Creating an API Key
--------------------
+Command-Line Management
+-----------------------
+
+The ``apikey`` management command lets you create, list, and revoke API keys
+from the command line.
+
+Creating a Key
+^^^^^^^^^^^^^^
+
+.. code-block:: bash
+
+   python manage.py apikey create --username admin --key-name "CI deploy"
+
+The plaintext key is printed to stdout so it can be captured by scripts.
+The ``--key-name`` flag is optional and defaults to ``auto-generated``.
+
+.. warning::
+
+   The plaintext API key is displayed **only once** at creation. If you
+   lose it, you must create a new key.
+
+Listing Keys
+^^^^^^^^^^^^
+
+List keys for a specific user:
+
+.. code-block:: bash
+
+   python manage.py apikey list --username admin
+
+List keys across all users:
+
+.. code-block:: bash
+
+   python manage.py apikey list --all
+
+Output includes the key name, prefix, active status, creation date, expiry,
+and last-used timestamp. The ``--all`` flag adds a user column.
+
+Revoking a Key
+^^^^^^^^^^^^^^
+
+.. code-block:: bash
+
+   python manage.py apikey revoke --username admin --key-name "CI deploy"
+
+This deactivates all active keys matching the given name for that user.
+Revoked keys cannot be reactivated — create a new key instead.
+
+Creating a Key via Admin UI
+---------------------------
 
 Only Django superusers can create API keys through the admin interface.
 
@@ -42,11 +91,6 @@ Only Django superusers can create API keys through the admin interface.
 
 5. Click **Save**
 6. **Copy the displayed key immediately** -- it will not be shown again
-
-.. warning::
-
-   The plaintext API key is displayed **only once** after creation. If you
-   lose it, you must create a new key.
 
 Using an API Key
 ----------------
@@ -89,8 +133,8 @@ Examples
         -H "X-API-Key: YOUR_KEY_HERE" \
         https://your-server/api/v1/server/entity
 
-Managing API Keys
------------------
+Managing Keys via Admin UI
+--------------------------
 
 Viewing Keys
 ^^^^^^^^^^^^
@@ -115,8 +159,6 @@ To revoke multiple keys at once:
 1. Select the keys using the checkboxes
 2. Choose **Revoke selected API keys** from the action dropdown
 3. Click **Go**
-
-Revoked keys cannot be reactivated -- create a new key instead.
 
 Security Best Practices
 -----------------------
