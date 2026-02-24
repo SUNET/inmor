@@ -4,8 +4,7 @@
 //! subordinate entities and storing their collection data in Redis.
 
 use anyhow::Result;
-use log::{debug, error, info, warn};
-use redis::AsyncCommands;
+use log::{debug, error, info};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};

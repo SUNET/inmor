@@ -1,32 +1,15 @@
-#![allow(unused)]
-
-use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer, Responder, error, get, middleware, web,
-};
+use actix_web::{App, HttpResponse, HttpServer, Responder, error, get, middleware, web};
 use lazy_static::lazy_static;
-use redis::Client;
-use redis::Commands;
-use serde::Deserialize;
-use serde::Serialize;
-use std::fmt::format;
 use std::fs;
-use std::ops::Deref;
 use std::sync::Mutex;
 use std::{env, io};
 
 use clap::Parser;
 use inmor::*;
-use josekit::{
-    JoseError,
-    jwk::{Jwk, JwkSet},
-    jws::{JwsHeader, RS256},
-    jwt::{self, JwtPayload},
-};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
-use serde_json::{Map, Value, json};
+use serde_json::json;
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
 
 lazy_static! {
     static ref TERA: tera::Tera = {
@@ -34,25 +17,6 @@ lazy_static! {
         tera.autoescape_on(vec![".html"]);
         tera
     };
-}
-
-async fn get_from_cache(redis: web::Data<redis::Client>) -> actix_web::Result<impl Responder> {
-    let mut conn = redis
-        .get_connection_manager()
-        .await
-        .map_err(error::ErrorInternalServerError)?;
-
-    let res = redis::Cmd::get("name")
-        .query_async::<String>(&mut conn)
-        .await
-        .map_err(error::ErrorInternalServerError)?;
-
-    Ok(HttpResponse::Ok().body(res))
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct MyParams {
-    name: String,
 }
 
 #[get("/")]
@@ -360,7 +324,7 @@ async fn main() -> io::Result<()> {
     let redis =
         redis::Client::open(server_config.redis_uri.as_str()).expect("Failed to connect to Redis");
 
-    let mut federation = Federation {
+    let federation = Federation {
         entities: Mutex::new(HashMap::new()),
     };
 

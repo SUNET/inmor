@@ -1,37 +1,25 @@
-#![allow(unused)]
 pub mod tree;
 use anyhow::{Result, anyhow, bail};
 
 use lazy_static::lazy_static;
-use log::{debug, info};
-use redis::AsyncCommands;
-use redis::Client;
-use reqwest::blocking;
+use log::debug;
 use sha2::{Digest, Sha256};
-use std::fmt::{Display, format};
+use std::fmt::Display;
 use std::net::IpAddr;
 use std::sync::atomic::AtomicBool;
 
-use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer, Responder, error, get, middleware, post, web,
-};
+use actix_web::{HttpRequest, HttpResponse, Responder, error, get, post, web};
 use actix_web_lab::extract::Query;
-
-use actix_web::http::uri::Parts;
 use base64::Engine;
 use josekit::{
     JoseError,
     jwk::{Jwk, JwkSet},
-    jws::alg::rsassa::RsassaJwsAlgorithm,
-    jws::{
-        ES256, ES384, ES512, EdDSA, JwsAlgorithm, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256,
-    },
+    jws::{ES256, ES384, ES512, EdDSA, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256},
     jwt::{self, JwtPayload, JwtPayloadValidator},
-    util,
 };
 use oidfed_metadata_policy::*;
+use serde::Deserialize;
 use serde::Serialize;
-use serde::{Deserialize, de::Error};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
@@ -732,7 +720,7 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
 /// This function will self veify the JWT and returns
 /// the payload and header after verification.
 pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
-    let (payload, header) = get_unverified_payload_header(data)?;
+    let (payload, _header) = get_unverified_payload_header(data)?;
     let jwks = get_jwks_from_payload(&payload)?;
     let (payload, header) = verify_jwt_with_jwks(data, Some(jwks))?;
     Ok((payload, header))
@@ -776,7 +764,7 @@ pub async fn resolve_entity_to_trustanchor(
     // Add it already visited
     visited.insert(sub.to_string());
 
-    let (opayload, oheader) = self_verify_jwt(&original_ec)?;
+    let (opayload, _oheader) = self_verify_jwt(&original_ec)?;
 
     if start {
         let vjwt = VerifiedJWT::new(original_ec, &opayload, false, false);
@@ -950,7 +938,7 @@ fn create_resolve_response_jwt(
     payload.set_expires_at(&min_exp);
 
     if let Some(metadata_val) = metadata {
-        payload.set_claim("metadata", Some(json!(metadata_val)));
+        let _ = payload.set_claim("metadata", Some(json!(metadata_val)));
     }
     let trust_chain: Vec<String> = result.iter().map(|x| x.jwt.clone()).collect();
     let _ = payload.set_claim("trust_chain", Some(json!(trust_chain)));
@@ -966,7 +954,7 @@ fn create_resolve_response_jwt(
 #[get("/resolve")]
 pub async fn resolve_entity(
     info: Query<ResolveParams>,
-    redis: web::Data<redis::Client>,
+    _redis: web::Data<redis::Client>,
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let mut found_ta = false;
@@ -1009,15 +997,13 @@ pub async fn resolve_entity(
         println!("\n{:?}\n", res.payload);
         mpolicy = match mpolicy {
             // This is when we have some policy the higher subordinate statement
-            Some(mut val) => {
+            Some(val) => {
                 // But we should only apply claim from subordinate statements
                 if res.substatement {
                     let new_policy = res.payload.claim("metadata_policy");
                     match new_policy {
                         Some(p) => {
                             let temp_val = json!(val);
-                            // Uncomment these to learn about metadata policy merging
-                            //println!("\n Calling with {:?}\n\n{:?}\n\n\n", &temp_val, p);
                             let merged = merge_policies(&temp_val, p);
                             match merged {
                                 Ok(policy) => Some(policy),
@@ -1034,7 +1020,7 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
-                    let Some(mut metadata) = res.payload.claim("metadata").cloned() else {
+                    let Some(metadata) = res.payload.claim("metadata").cloned() else {
                         return error_response_400(
                             "invalid_trust_chain",
                             "missing metadata in entity statement",
@@ -1046,7 +1032,7 @@ pub async fn resolve_entity(
                     );
                     let mut forced_metadata: Option<&Value> = None;
                     // Let us see if we have any subordinate statement's metadata to apply first
-                    if (i > 0) {
+                    if i > 0 {
                         let last_sub_statement = reversed[i - 1];
                         forced_metadata = last_sub_statement.payload.claim("metadata");
                     }
@@ -1170,16 +1156,6 @@ fn filter_metadata_by_entity_types(
     Some(filtered)
 }
 
-/// Internal function to apply forced metadata from subordinate statement on top of
-/// the metadata of the final entity statement.
-fn merge_objects(v1: &mut Value, v2: &Value) {
-    if let (Some(obj1), Some(obj2)) = (v1.as_object_mut(), v2.as_object()) {
-        for (key, value) in obj2 {
-            obj1.insert(key.clone(), value.clone());
-        }
-    }
-}
-
 /// To create the signed JWT for trust mark status response
 /// Per spec Section 8.4.2, the response includes `trust_mark` (the full JWT) and `status`.
 fn create_trustmark_status_response_jwt(
@@ -1251,11 +1227,10 @@ pub async fn trust_mark_status(
             (JwtPayload::new(), JwsHeader::new())
         }
     };
-    let mut status = "";
-    if invalid {
-        status = "invalid";
+    let status = if invalid {
+        "invalid"
     } else if expired {
-        status = "expired";
+        "expired"
     } else {
         let v = json!("");
         let hkey = "inmor:tm:".to_string() + payload.subject().unwrap_or("");
@@ -1272,11 +1247,11 @@ pub async fn trust_mark_status(
             .map_err(error::ErrorInternalServerError)?;
 
         if mark != "revoked" {
-            status = "active";
+            "active"
         } else {
-            status = "revoked";
+            "revoked"
         }
-    }
+    };
 
     let resp = match create_trustmark_status_response_jwt(&state, &trust_mark, status) {
         Ok(r) => r,
@@ -1322,7 +1297,7 @@ pub async fn federation_historical_keys(
 pub async fn trust_mark_list(
     info: Query<TrustMarkListParams>,
     redis: web::Data<redis::Client>,
-    state: web::Data<AppState>,
+    _state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkListParams {
         trust_mark_type,
@@ -1370,7 +1345,7 @@ pub async fn trust_mark_list(
 pub async fn trust_mark_query(
     info: Query<TrustMarkParams>,
     redis: web::Data<redis::Client>,
-    state: web::Data<AppState>,
+    _state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkParams {
         trust_mark_type,
@@ -1524,7 +1499,7 @@ pub async fn get_query(url: &str) -> Result<String> {
 pub async fn add_subordinate(entity_id: &str) -> Result<String> {
     let data = get_entity_configruation_as_jwt(entity_id).await?;
 
-    self_verify_jwt(&data);
+    let _ = self_verify_jwt(&data);
     Ok("all good".to_string())
 }
 
@@ -1645,7 +1620,6 @@ pub fn error_response_400(edetails: &str, message: &str) -> actix_web::Result<Ht
 #[cfg(test)]
 mod tests {
     use super::*;
-    use josekit::jwt;
     use std::time::SystemTime;
 
     #[test]
