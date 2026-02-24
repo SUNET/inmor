@@ -138,6 +138,11 @@ Update ``taconfig.toml`` for production::
    # tls_cert = "cert.pem"
    # tls_key = "key.pem"
 
+   # SSRF protection: do NOT set allow_http in production.
+   # When omitted (or false), all outbound federation requests enforce HTTPS
+   # and reject targets that resolve to private/loopback IP ranges.
+   # allow_http = false
+
 4. Deploy with production compose
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

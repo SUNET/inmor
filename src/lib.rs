@@ -1,35 +1,25 @@
-#![allow(unused)]
 pub mod tree;
 use anyhow::{Result, anyhow, bail};
 
 use lazy_static::lazy_static;
-use log::{debug, info};
-use redis::AsyncCommands;
-use redis::Client;
-use reqwest::blocking;
+use log::debug;
 use sha2::{Digest, Sha256};
-use std::fmt::{Display, format};
+use std::fmt::Display;
+use std::net::IpAddr;
+use std::sync::atomic::AtomicBool;
 
-use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer, Responder, error, get, middleware, post, web,
-};
+use actix_web::{HttpRequest, HttpResponse, Responder, error, get, post, web};
 use actix_web_lab::extract::Query;
-
-use actix_web::http::uri::Parts;
 use base64::Engine;
 use josekit::{
     JoseError,
     jwk::{Jwk, JwkSet},
-    jws::alg::rsassa::RsassaJwsAlgorithm,
-    jws::{
-        ES256, ES384, ES512, EdDSA, JwsAlgorithm, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256,
-    },
+    jws::{ES256, ES384, ES512, EdDSA, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256},
     jwt::{self, JwtPayload, JwtPayloadValidator},
-    util,
 };
 use oidfed_metadata_policy::*;
+use serde::Deserialize;
 use serde::Serialize;
-use serde::{Deserialize, de::Error};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
@@ -56,8 +46,24 @@ lazy_static! {
         keys
     };
     static ref PRIVATE_KEY: Vec<u8> = std::fs::read("./private.json").unwrap();
+    /// Shared HTTP client for all outbound federation requests.
+    /// Configured with timeouts and connection limits.
+    static ref HTTP_CLIENT: reqwest::Client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(10)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .expect("Failed to build HTTP client");
 }
 pub const WELL_KNOWN: &str = ".well-known/openid-federation";
+
+/// Maximum response body size for outbound federation requests (2 MB).
+const MAX_RESPONSE_BYTES: usize = 2_097_152;
+
+/// When true, allows HTTP scheme and private/loopback IPs in outbound federation requests.
+/// Only enable for development. Set from `allow_http` in `taconfig.toml`.
+pub static ALLOW_HTTP: AtomicBool = AtomicBool::new(false);
 
 // This struct represents state
 pub struct AppState {
@@ -241,6 +247,8 @@ pub struct ServerConfiguration {
     pub redis_uri: String,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
+    /// Allow HTTP scheme and private IPs in outbound federation requests (development only).
+    pub allow_http: Option<bool>,
 }
 
 impl ServerConfiguration {
@@ -249,12 +257,14 @@ impl ServerConfiguration {
         redis_uri: String,
         tls_cert: Option<String>,
         tls_key: Option<String>,
+        allow_http: Option<bool>,
     ) -> ServerConfiguration {
         ServerConfiguration {
             domain: URL(domain),
             redis_uri,
             tls_cert,
             tls_key,
+            allow_http,
         }
     }
 
@@ -270,7 +280,10 @@ impl ServerConfiguration {
         let redis = env::var("TA_REDIS").unwrap_or("redis://redis:6379".to_string());
         let tls_cert = env::var("TA_TLS_CERT").ok();
         let tls_key = env::var("TA_TLS_KEY").ok();
-        ServerConfiguration::new(domain, redis, tls_cert, tls_key)
+        let allow_http = env::var("TA_ALLOW_HTTP")
+            .ok()
+            .map(|v| v == "true" || v == "1");
+        ServerConfiguration::new(domain, redis, tls_cert, tls_key, allow_http)
     }
 }
 
@@ -379,6 +392,8 @@ async fn get_collection_entities(
         // Get union of entity_ids across requested types
         let mut ids = HashSet::new();
         for etype in entity_types {
+            validate_entity_type(etype)
+                .map_err(|e| anyhow!("invalid entity_type '{}': {}", etype, e))?;
             let type_ids: Vec<String> =
                 redis::Cmd::smembers(format!("inmor:collection:by_type:{etype}"))
                     .query_async(conn)
@@ -488,6 +503,9 @@ async fn list_subordinates(
     }
     if let Some(trust_mark_type) = trust_mark_type {
         // Means filter based on trustmark type
+        if let Err(e) = validate_redis_key_input(&trust_mark_type) {
+            return error_response_400("invalid_request", &format!("invalid trust_mark_type: {e}"));
+        }
 
         let query = format!("inmor:tmtype:{trust_mark_type}");
         let valid_entities: HashSet<String> = redis::Cmd::smembers(query)
@@ -707,18 +725,29 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
 /// This function will self veify the JWT and returns
 /// the payload and header after verification.
 pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
-    let (payload, header) = get_unverified_payload_header(data)?;
+    let (payload, _header) = get_unverified_payload_header(data)?;
     let jwks = get_jwks_from_payload(&payload)?;
     let (payload, header) = verify_jwt_with_jwks(data, Some(jwks))?;
     Ok((payload, header))
 }
+
+/// Maximum recursion depth for trust chain resolution.
+/// Practical federations rarely exceed 3-4 levels.
+const MAX_RESOLVE_DEPTH: u8 = 10;
 
 pub async fn resolve_entity_to_trustanchor(
     sub: &str,
     trust_anchors: Vec<&str>,
     start: bool,
     visited: &mut HashSet<String>,
+    depth: u8,
 ) -> Result<Vec<VerifiedJWT>> {
+    if depth > MAX_RESOLVE_DEPTH {
+        bail!(
+            "Trust chain resolution exceeded maximum depth of {}",
+            MAX_RESOLVE_DEPTH
+        );
+    }
     eprintln!("\nReceived {sub} with trust anchors {trust_anchors:?}");
 
     let empty_authority: Vec<String> = Vec::new();
@@ -740,7 +769,7 @@ pub async fn resolve_entity_to_trustanchor(
     // Add it already visited
     visited.insert(sub.to_string());
 
-    let (opayload, oheader) = self_verify_jwt(&original_ec)?;
+    let (opayload, _oheader) = self_verify_jwt(&original_ec)?;
 
     if start {
         let vjwt = VerifiedJWT::new(original_ec, &opayload, false, false);
@@ -871,6 +900,7 @@ pub async fn resolve_entity_to_trustanchor(
                 trust_anchors.clone(),
                 false,
                 visited,
+                depth + 1,
             ))
             .await?;
             if r_result.is_empty() {
@@ -913,7 +943,7 @@ fn create_resolve_response_jwt(
     payload.set_expires_at(&min_exp);
 
     if let Some(metadata_val) = metadata {
-        payload.set_claim("metadata", Some(json!(metadata_val)));
+        let _ = payload.set_claim("metadata", Some(json!(metadata_val)));
     }
     let trust_chain: Vec<String> = result.iter().map(|x| x.jwt.clone()).collect();
     let _ = payload.set_claim("trust_chain", Some(json!(trust_chain)));
@@ -929,7 +959,7 @@ fn create_resolve_response_jwt(
 #[get("/resolve")]
 pub async fn resolve_entity(
     info: Query<ResolveParams>,
-    redis: web::Data<redis::Client>,
+    _redis: web::Data<redis::Client>,
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let mut found_ta = false;
@@ -941,7 +971,7 @@ pub async fn resolve_entity(
     let tas: Vec<&str> = trust_anchors.iter().map(|s| s as &str).collect();
     let mut visisted: HashSet<String> = HashSet::new();
     // Now loop over the trust_anchors
-    let result = match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted).await {
+    let result = match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted, 0).await {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Error resolving entity {} to trust anchors: {}", sub, e);
@@ -972,15 +1002,13 @@ pub async fn resolve_entity(
         println!("\n{:?}\n", res.payload);
         mpolicy = match mpolicy {
             // This is when we have some policy the higher subordinate statement
-            Some(mut val) => {
+            Some(val) => {
                 // But we should only apply claim from subordinate statements
                 if res.substatement {
                     let new_policy = res.payload.claim("metadata_policy");
                     match new_policy {
                         Some(p) => {
                             let temp_val = json!(val);
-                            // Uncomment these to learn about metadata policy merging
-                            //println!("\n Calling with {:?}\n\n{:?}\n\n\n", &temp_val, p);
                             let merged = merge_policies(&temp_val, p);
                             match merged {
                                 Ok(policy) => Some(policy),
@@ -997,7 +1025,7 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
-                    let Some(mut metadata) = res.payload.claim("metadata").cloned() else {
+                    let Some(metadata) = res.payload.claim("metadata").cloned() else {
                         return error_response_400(
                             "invalid_trust_chain",
                             "missing metadata in entity statement",
@@ -1009,7 +1037,7 @@ pub async fn resolve_entity(
                     );
                     let mut forced_metadata: Option<&Value> = None;
                     // Let us see if we have any subordinate statement's metadata to apply first
-                    if (i > 0) {
+                    if i > 0 {
                         let last_sub_statement = reversed[i - 1];
                         forced_metadata = last_sub_statement.payload.claim("metadata");
                     }
@@ -1133,16 +1161,6 @@ fn filter_metadata_by_entity_types(
     Some(filtered)
 }
 
-/// Internal function to apply forced metadata from subordinate statement on top of
-/// the metadata of the final entity statement.
-fn merge_objects(v1: &mut Value, v2: &Value) {
-    if let (Some(obj1), Some(obj2)) = (v1.as_object_mut(), v2.as_object()) {
-        for (key, value) in obj2 {
-            obj1.insert(key.clone(), value.clone());
-        }
-    }
-}
-
 /// To create the signed JWT for trust mark status response
 /// Per spec Section 8.4.2, the response includes `trust_mark` (the full JWT) and `status`.
 fn create_trustmark_status_response_jwt(
@@ -1214,14 +1232,13 @@ pub async fn trust_mark_status(
             (JwtPayload::new(), JwsHeader::new())
         }
     };
-    let mut status = "";
-    if invalid {
-        status = "invalid";
+    let status = if invalid {
+        "invalid"
     } else if expired {
-        status = "expired";
+        "expired"
     } else {
         let v = json!("");
-        let hkey = "inmor:tm:".to_string() + payload.subject().unwrap_or("");
+        let sub = payload.subject().unwrap_or("");
         let claims = payload.claims_set();
         let trustmarktype = claims
             .get("trust_mark_type")
@@ -1229,17 +1246,28 @@ pub async fn trust_mark_status(
             .as_str()
             .unwrap_or("");
 
+        if let Err(e) = validate_redis_key_input(sub) {
+            return error_response_400("invalid_request", &format!("invalid sub in JWT: {e}"));
+        }
+        if let Err(e) = validate_redis_key_input(trustmarktype) {
+            return error_response_400(
+                "invalid_request",
+                &format!("invalid trust_mark_type in JWT: {e}"),
+            );
+        }
+
+        let hkey = format!("inmor:tm:{sub}");
         let mark = redis::Cmd::hget(hkey, trustmarktype)
             .query_async::<String>(&mut conn)
             .await
             .map_err(error::ErrorInternalServerError)?;
 
         if mark != "revoked" {
-            status = "active";
+            "active"
         } else {
-            status = "revoked";
+            "revoked"
         }
-    }
+    };
 
     let resp = match create_trustmark_status_response_jwt(&state, &trust_mark, status) {
         Ok(r) => r,
@@ -1285,12 +1313,16 @@ pub async fn federation_historical_keys(
 pub async fn trust_mark_list(
     info: Query<TrustMarkListParams>,
     redis: web::Data<redis::Client>,
-    state: web::Data<AppState>,
+    _state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkListParams {
         trust_mark_type,
         sub,
     } = info.into_inner();
+
+    if let Err(e) = validate_redis_key_input(&trust_mark_type) {
+        return error_response_400("invalid_request", &format!("invalid trust_mark_type: {e}"));
+    }
 
     let mut conn = redis
         .get_connection_manager()
@@ -1333,12 +1365,19 @@ pub async fn trust_mark_list(
 pub async fn trust_mark_query(
     info: Query<TrustMarkParams>,
     redis: web::Data<redis::Client>,
-    state: web::Data<AppState>,
+    _state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let TrustMarkParams {
         trust_mark_type,
         sub,
     } = info.into_inner();
+
+    if let Err(e) = validate_redis_key_input(&sub) {
+        return error_response_400("invalid_request", &format!("invalid sub: {e}"));
+    }
+    if let Err(e) = validate_redis_key_input(&trust_mark_type) {
+        return error_response_400("invalid_request", &format!("invalid trust_mark_type: {e}"));
+    }
 
     let mut conn = redis
         .get_connection_manager()
@@ -1379,9 +1418,142 @@ pub async fn get_entity_configruation_as_jwt(entity_id: &str) -> Result<String> 
     return get_query(&url).await;
 }
 
-/// To do a GET query
+/// Returns true if the IP address is in a private, loopback, or link-local range.
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()       // 127.0.0.0/8
+            || v4.is_private()     // 10/8, 172.16/12, 192.168/16
+            || v4.is_link_local()  // 169.254/16
+            || v4.is_unspecified() // 0.0.0.0
+            || v4.is_broadcast() // 255.255.255.255
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()       // ::1
+            || v6.is_unspecified() // ::
+            // unique local (fc00::/7) and link-local (fe80::/10)
+            || (v6.segments()[0] & 0xfe00) == 0xfc00
+            || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Known OpenID Federation entity types accepted in query parameters.
+const KNOWN_ENTITY_TYPES: &[&str] = &[
+    "openid_provider",
+    "openid_relying_party",
+    "federation_entity",
+    "oauth_authorization_server",
+    "oauth_client",
+    "oauth_resource",
+];
+
+/// Validates that a user-supplied string is safe to use in a Redis key.
+/// Rejects control characters (including newlines and null bytes) and
+/// enforces a maximum length to prevent memory abuse.
+fn validate_redis_key_input(input: &str) -> Result<(), &'static str> {
+    const MAX_KEY_INPUT_LEN: usize = 2048;
+    if input.is_empty() {
+        return Err("empty value");
+    }
+    if input.len() > MAX_KEY_INPUT_LEN {
+        return Err("value too long");
+    }
+    if input.chars().any(|c| c.is_control()) {
+        return Err("value contains control characters");
+    }
+    Ok(())
+}
+
+/// Validates that a string is a known OpenID Federation entity type.
+fn validate_entity_type(etype: &str) -> Result<(), &'static str> {
+    if KNOWN_ENTITY_TYPES.contains(&etype) {
+        Ok(())
+    } else {
+        Err("unknown entity type")
+    }
+}
+
+/// Validates a URL for federation use: HTTPS scheme, no private IPs.
+/// When `allow_http` is true (development mode), all checks are relaxed.
+async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> {
+    let parsed =
+        url::Url::parse(url_str).map_err(|e| anyhow!("Invalid URL '{}': {}", url_str, e))?;
+
+    // 1. Scheme check
+    match parsed.scheme() {
+        "https" => {}
+        "http" if allow_http => {}
+        scheme => bail!(
+            "Blocked scheme '{}' in URL '{}' — only HTTPS allowed",
+            scheme,
+            url_str
+        ),
+    }
+
+    // In development mode, skip DNS/IP validation
+    if allow_http {
+        return Ok(());
+    }
+
+    // 2. Must have a host
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("URL '{}' has no host", url_str))?;
+
+    // 3. Resolve DNS and check all IPs
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addr = format!("{}:{}", host, port);
+    let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&addr)
+        .await
+        .map_err(|e| anyhow!("DNS resolution failed for '{}': {}", host, e))?
+        .collect();
+
+    if resolved.is_empty() {
+        bail!("DNS resolution returned no addresses for '{}'", host);
+    }
+
+    for sock_addr in &resolved {
+        if is_private_ip(&sock_addr.ip()) {
+            bail!(
+                "Blocked request to private/internal IP {} (resolved from '{}')",
+                sock_addr.ip(),
+                host
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// To do a GET query. Uses the shared HTTP client with timeouts and connection limits.
+/// Enforces a maximum response body size of `MAX_RESPONSE_BYTES`.
 pub async fn get_query(url: &str) -> Result<String> {
-    Ok(reqwest::get(url).await?.text().await?)
+    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
+    let response = HTTP_CLIENT.get(url).send().await?;
+    // Early reject if Content-Length header exceeds limit
+    if let Some(len) = response.content_length()
+        && len > MAX_RESPONSE_BYTES as u64
+    {
+        bail!(
+            "Response too large ({} bytes) from '{}', max {} bytes",
+            len,
+            url,
+            MAX_RESPONSE_BYTES
+        );
+    }
+    // Read body and check actual size (header may be missing or wrong)
+    let bytes = response.bytes().await?;
+    if bytes.len() > MAX_RESPONSE_BYTES {
+        bail!(
+            "Response too large ({} bytes) from '{}', max {} bytes",
+            bytes.len(),
+            url,
+            MAX_RESPONSE_BYTES
+        );
+    }
+    String::from_utf8(bytes.to_vec())
+        .map_err(|e| anyhow!("Response from '{}' is not valid UTF-8: {}", url, e))
 }
 
 /// FIXME: as an example.
@@ -1390,7 +1562,7 @@ pub async fn get_query(url: &str) -> Result<String> {
 pub async fn add_subordinate(entity_id: &str) -> Result<String> {
     let data = get_entity_configruation_as_jwt(entity_id).await?;
 
-    self_verify_jwt(&data);
+    let _ = self_verify_jwt(&data);
     Ok("all good".to_string())
 }
 
@@ -1444,8 +1616,8 @@ pub async fn server_status(
         .arg("inmor:collection:by_type:federation_entity")
         .cmd("GET")
         .arg("inmor:collection:last_updated")
-        .cmd("KEYS")
-        .arg("inmor:tmtype:*");
+        .cmd("SMEMBERS")
+        .arg("inmor:tmtypes");
 
     let results: (
         bool,        // historical_keys exists
@@ -1462,12 +1634,8 @@ pub async fn server_status(
         .await
         .map_err(error::ErrorInternalServerError)?;
 
-    // Extract trust mark type URLs from Redis key names
-    let trust_mark_types: Vec<String> = results
-        .8
-        .iter()
-        .filter_map(|key| key.strip_prefix("inmor:tmtype:").map(String::from))
-        .collect();
+    // Trust mark type URLs from the inmor:tmtypes index set
+    let trust_mark_types: Vec<String> = results.8;
 
     let public_key_count = PUBLIC_KEYS.len();
 
@@ -1499,25 +1667,22 @@ pub async fn server_status(
 }
 
 pub fn error_response_404(edetails: &str, message: &str) -> actix_web::Result<HttpResponse> {
-    Ok(HttpResponse::NotFound()
-        .content_type("application/json")
-        .body(format!(
-            "{{\"error\":\"{edetails}\",\"error_description\": \"{message}\"}}"
-        )))
+    Ok(HttpResponse::NotFound().json(json!({
+        "error": edetails,
+        "error_description": message
+    })))
 }
 
 pub fn error_response_400(edetails: &str, message: &str) -> actix_web::Result<HttpResponse> {
-    Ok(HttpResponse::BadRequest()
-        .content_type("application/json")
-        .body(format!(
-            "{{\"error\":\"{edetails}\",\"error_description\": \"{message}\"}}"
-        )))
+    Ok(HttpResponse::BadRequest().json(json!({
+        "error": edetails,
+        "error_description": message
+    })))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use josekit::jwt;
     use std::time::SystemTime;
 
     #[test]
@@ -1682,5 +1847,178 @@ mod tests {
         let mut algs_vec: Vec<_> = algorithms.iter().collect();
         algs_vec.sort();
         println!("✓ All expected algorithms present: {:?}", algs_vec);
+    }
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::*;
+
+    #[test]
+    fn test_is_private_ip_v4() {
+        // Loopback
+        assert!(is_private_ip(&"127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"127.255.255.255".parse().unwrap()));
+        // Private ranges
+        assert!(is_private_ip(&"10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"172.16.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"192.168.1.1".parse().unwrap()));
+        // Link-local
+        assert!(is_private_ip(&"169.254.1.1".parse().unwrap()));
+        // Unspecified
+        assert!(is_private_ip(&"0.0.0.0".parse().unwrap()));
+        // Broadcast
+        assert!(is_private_ip(&"255.255.255.255".parse().unwrap()));
+        // Public IPs should pass
+        assert!(!is_private_ip(&"8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip(&"1.1.1.1".parse().unwrap()));
+        assert!(!is_private_ip(&"93.184.216.34".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_is_private_ip_v6() {
+        // Loopback
+        assert!(is_private_ip(&"::1".parse().unwrap()));
+        // Unspecified
+        assert!(is_private_ip(&"::".parse().unwrap()));
+        // Unique local (fc00::/7)
+        assert!(is_private_ip(&"fc00::1".parse().unwrap()));
+        assert!(is_private_ip(&"fd00::1".parse().unwrap()));
+        // Link-local (fe80::/10)
+        assert!(is_private_ip(&"fe80::1".parse().unwrap()));
+        // Public IPv6
+        assert!(!is_private_ip(&"2001:db8::1".parse().unwrap()));
+        assert!(!is_private_ip(&"2607:f8b0:4004:800::200e".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_http() {
+        let result = validate_federation_url("http://example.com/foo", false).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("only HTTPS allowed")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_allows_http_when_configured() {
+        // With allow_http=true, HTTP scheme should not be rejected
+        let result = validate_federation_url("http://example.com/foo", true).await;
+        // Should succeed (allow_http skips all checks after scheme)
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_non_http_schemes() {
+        let result = validate_federation_url("ftp://example.com/foo", false).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("only HTTPS allowed")
+        );
+
+        let result = validate_federation_url("file:///etc/passwd", false).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_private_ips() {
+        // localhost resolves to 127.0.0.1
+        let result = validate_federation_url("https://127.0.0.1/foo", false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("private/internal"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_allows_private_ips_in_dev_mode() {
+        // With allow_http=true (dev mode), private IPs should be allowed
+        let result = validate_federation_url("https://127.0.0.1/foo", true).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_invalid_url() {
+        let result = validate_federation_url("not-a-url", false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
+    }
+
+    #[test]
+    fn test_http_client_is_configured() {
+        // Verify the shared client was built successfully (lazy_static panics on failure)
+        let _ = &*HTTP_CLIENT;
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_rejects_control_chars() {
+        assert_eq!(
+            validate_redis_key_input("hello\0world"),
+            Err("value contains control characters")
+        );
+        assert_eq!(
+            validate_redis_key_input("hello\nworld"),
+            Err("value contains control characters")
+        );
+        assert_eq!(
+            validate_redis_key_input("hello\rworld"),
+            Err("value contains control characters")
+        );
+        assert_eq!(
+            validate_redis_key_input("hello\tworld"),
+            Err("value contains control characters")
+        );
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_rejects_empty() {
+        assert_eq!(validate_redis_key_input(""), Err("empty value"));
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_rejects_too_long() {
+        let long = "a".repeat(2049);
+        assert_eq!(validate_redis_key_input(&long), Err("value too long"));
+        // Exactly 2048 should be fine
+        let exact = "a".repeat(2048);
+        assert!(validate_redis_key_input(&exact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_accepts_urls() {
+        assert!(validate_redis_key_input("https://example.com/trust_mark/foo").is_ok());
+        assert!(
+            validate_redis_key_input("https://ta.example.org/.well-known/openid-federation")
+                .is_ok()
+        );
+        assert!(validate_redis_key_input("https://entity.example.com:8443/path?q=1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_entity_type_accepts_known() {
+        for etype in KNOWN_ENTITY_TYPES {
+            assert!(
+                validate_entity_type(etype).is_ok(),
+                "should accept {}",
+                etype
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_entity_type_rejects_unknown() {
+        assert_eq!(
+            validate_entity_type("unknown_type"),
+            Err("unknown entity type")
+        );
+        assert_eq!(validate_entity_type(""), Err("unknown entity type"));
+        assert_eq!(
+            validate_entity_type("openid_provider; DROP TABLE keys"),
+            Err("unknown entity type")
+        );
     }
 }

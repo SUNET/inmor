@@ -36,6 +36,11 @@ async fn main() -> io::Result<()> {
         )
     });
 
+    inmor::ALLOW_HTTP.store(
+        server_config.allow_http.unwrap_or(false),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
     eprintln!("Connecting to Redis at {}", &server_config.redis_uri);
     let redis =
         redis::Client::open(server_config.redis_uri.as_str()).expect("Failed to connect to Redis");

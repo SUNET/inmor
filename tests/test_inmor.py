@@ -573,3 +573,47 @@ def test_status_endpoint(loaddata: Redis, start_server: int, http_client: Client
     assert isinstance(collection.get("openid_providers"), int)
     assert isinstance(collection.get("openid_relying_parties"), int)
     assert isinstance(collection.get("intermediates"), int)
+
+
+def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_client: Client):
+    """C1: SSRF protection blocks requests to private IPs when not in dev mode.
+
+    Note: The test server runs with allow_http=true so it allows private IPs.
+    This test verifies the resolve endpoint correctly returns 400 for an
+    unreachable private IP target (the request fails during fetch, not SSRF block,
+    because dev mode is enabled). To fully test SSRF blocking, see the Rust
+    unit tests in ssrf_tests module.
+    """
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/resolve"
+    # Try to resolve an entity at a private IP — should fail with 400
+    # because the entity configuration cannot be fetched
+    resp = http_client.get(
+        url,
+        params={
+            "sub": "https://192.168.1.1:9999",
+            "trust_anchor": f"https://localhost:{port}",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_resolve_timeout_on_unreachable(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    """C2: Server does not hang indefinitely on unreachable entities."""
+    _rdb = loaddata
+    port = start_server
+    url = f"https://localhost:{port}/resolve"
+    # TEST-NET-2 (198.51.100.0/24) is reserved and won't respond.
+    # The server's 10s request timeout should kick in instead of hanging.
+    resp = http_client.get(
+        url,
+        params={
+            "sub": "https://198.51.100.1",
+            "trust_anchor": f"https://localhost:{port}",
+        },
+        timeout=30,
+    )
+    assert resp.status_code == 400

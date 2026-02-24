@@ -53,6 +53,7 @@ def start_server(trdb):
             f.write('redis_uri = "redis://localhost:6088"\n')
             f.write('tls_cert = "dev/localhost+2.pem"\n')
             f.write('tls_key = "dev/localhost+2-key.pem"\n')
+            f.write("allow_http = true\n")
         # Now start a process
         inmor_proc = subprocess.Popen([inmor_path, "-p", str(port), "-c", tconfig])
         assert not inmor_proc.poll()

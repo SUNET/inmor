@@ -4,8 +4,7 @@
 //! subordinate entities and storing their collection data in Redis.
 
 use anyhow::Result;
-use log::{debug, error, info, warn};
-use redis::AsyncCommands;
+use log::{debug, error, info};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -152,13 +151,24 @@ fn detect_entity_types(metadata: &serde_json::Map<String, Value>) -> Vec<String>
     types
 }
 
+/// Maximum recursion depth for collection tree walking.
+const MAX_COLLECTION_DEPTH: u8 = 20;
+
 /// Walks a single entity: fetches config, classifies, stores collection data,
 /// then recurses into subordinates if the entity is a TA/IA.
 async fn collection_tree_walking(
     entity_id: &str,
     conn: &mut redis::aio::ConnectionManager,
     visited: &mut HashSet<String>,
+    depth: u8,
 ) {
+    if depth > MAX_COLLECTION_DEPTH {
+        error!(
+            "Collection tree walking exceeded maximum depth of {} at {entity_id}",
+            MAX_COLLECTION_DEPTH
+        );
+        return;
+    }
     if visited.contains(entity_id) {
         debug!("Already visited {entity_id}, skipping");
         return;
@@ -331,7 +341,8 @@ async fn collection_tree_walking(
                                 continue;
                             }
                             info!("Found subordinate: {sub_str}");
-                            Box::pin(collection_tree_walking(sub_str, conn, visited)).await;
+                            Box::pin(collection_tree_walking(sub_str, conn, visited, depth + 1))
+                                .await;
                         }
                     }
                 }
@@ -345,6 +356,16 @@ async fn collection_tree_walking(
     }
 }
 
+/// Returns the list of known collection Redis keys for a given prefix.
+/// This avoids using the KEYS command which blocks the Redis event loop.
+fn known_collection_keys(prefix: &str) -> Vec<String> {
+    let mut keys = vec![format!("{prefix}:entities"), format!("{prefix}:all_sorted")];
+    for etype in KNOWN_ENTITY_TYPES {
+        keys.push(format!("{prefix}:by_type:{etype}"));
+    }
+    keys
+}
+
 /// Runs a full collection walk starting from the given trust anchor.
 ///
 /// Writes to staging Redis keys during the walk, then atomically swaps
@@ -356,23 +377,17 @@ pub async fn run_collection_walk(
     info!("Starting collection walk from {trust_anchor}");
 
     // Clean any leftover staging data
-    debug!("Cleaning leftover staging keys");
-    let staging_keys: Vec<String> = redis::cmd("KEYS")
-        .arg(format!("{STAGING_PREFIX}:*"))
-        .query_async(conn)
-        .await
-        .unwrap_or_default();
-    if !staging_keys.is_empty() {
-        debug!("Deleting {} leftover staging key(s)", staging_keys.len());
-        let _: Result<(), _> = redis::cmd("DEL").arg(&staging_keys).query_async(conn).await;
-    } else {
-        debug!("No leftover staging keys found");
-    }
+    let staging_keys = known_collection_keys(STAGING_PREFIX);
+    debug!(
+        "Cleaning {} possible leftover staging key(s)",
+        staging_keys.len()
+    );
+    let _: Result<(), _> = redis::cmd("DEL").arg(&staging_keys).query_async(conn).await;
 
     // Walk the tree
     debug!("Beginning recursive tree walk from {trust_anchor}");
     let mut visited = HashSet::new();
-    collection_tree_walking(trust_anchor, conn, &mut visited).await;
+    collection_tree_walking(trust_anchor, conn, &mut visited, 0).await;
 
     let entity_count = visited.len();
     info!("Walk complete: {entity_count} entities discovered");
@@ -382,28 +397,13 @@ pub async fn run_collection_walk(
     let mut pipe = redis::pipe();
 
     // Delete old live collection keys
-    let live_keys: Vec<String> = redis::cmd("KEYS")
-        .arg("inmor:collection:*")
-        .query_async(conn)
-        .await
-        .unwrap_or_default();
-    // Filter out staging keys from the delete list
-    let live_keys: Vec<&String> = live_keys
-        .iter()
-        .filter(|k| !k.starts_with(STAGING_PREFIX))
-        .collect();
-    if !live_keys.is_empty() {
-        debug!("Deleting {} old live key(s)", live_keys.len());
-        pipe.cmd("DEL").arg(live_keys).ignore();
-    }
+    let mut live_keys = known_collection_keys("inmor:collection");
+    live_keys.push("inmor:collection:last_updated".to_string());
+    debug!("Deleting {} old live key(s)", live_keys.len());
+    pipe.cmd("DEL").arg(&live_keys).ignore();
 
     // Rename staging keys to live
-    let staging_keys: Vec<String> = redis::cmd("KEYS")
-        .arg(format!("{STAGING_PREFIX}:*"))
-        .query_async(conn)
-        .await
-        .unwrap_or_default();
-
+    let staging_keys = known_collection_keys(STAGING_PREFIX);
     debug!("Renaming {} staging key(s) to live", staging_keys.len());
     for staging_key in &staging_keys {
         let live_key = staging_key.replace("inmor:collection:staging:", "inmor:collection:");
