@@ -1,3 +1,6 @@
+# Dev compose command (resolves paths from repo root)
+dc := "docker compose -f dev/docker-compose.dev.yml --project-directory ."
+
 _default:
   @just --list --unsorted
 
@@ -71,28 +74,28 @@ build-rs:
   cargo build
 
 build:
-  docker compose build ta
-  docker compose build admin
-  docker compose build frontend
+  {{dc}} build ta
+  {{dc}} build admin
+  {{dc}} build frontend
 
 rebuild-ta:
   @cargo build
-  docker compose restart ta
+  {{dc}} restart ta
 
 up:
-  docker compose up -d
+  {{dc}} up -d
 
 down:
-  docker compose down
+  {{dc}} down
 
 t-admin *FLAGS:
-  docker compose exec admin pytest -vvv {{FLAGS}}
+  {{dc}} exec admin pytest -vvv {{FLAGS}}
 
 debug-ta:
-  docker compose run --rm ta /bin/bash
+  {{dc}} run --rm ta /bin/bash
 
 debug-admin:
-  docker compose run --rm admin /bin/bash
+  {{dc}} run --rm admin /bin/bash
 
 # To remove the files of the dev environment
 clean:
@@ -103,26 +106,25 @@ clean:
 recreate-fedora: down
   sudo rm -rf ./db ./redis
   mkdir db redis
-  sudo chcon -Rt container_file_t ./db ./redis ./localhost+2*.pem
+  sudo chcon -Rt container_file_t ./db ./redis ./dev/localhost+2*.pem
 
 
 # To recreate the db and redis data for tests
 recreate-data: recreate-fedora up
   echo "Sleeping for 5 seconds"
   sleep 5
-  docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=testpass admin python manage.py setup_admin --username admin --noinput --skip-checks
-  INMOR_API_KEY=$(docker compose exec -T admin python manage.py apikey create --username admin --skip-checks) python scripts/create_redis_db_data.py
+  {{dc}} exec -T -e DJANGO_SUPERUSER_PASSWORD=testpass admin python manage.py setup_admin --username admin --noinput --skip-checks
+  INMOR_API_KEY=$({{dc}} exec -T admin python manage.py apikey create --username admin --skip-checks) python scripts/create_redis_db_data.py
 
 # To regenerate the TA entity configuration
 regenerate-entity:
-  docker compose exec admin python manage.py regenerate_entity
+  {{dc}} exec admin python manage.py regenerate_entity
 
 # To run the collection walk inside the TA container
 collection TA="https://ta.tiime2026.aai.garr.it":
-  docker compose exec ta ./inmor-collection -c taconfig.toml {{TA}}
+  {{dc}} exec ta ./inmor-collection -c taconfig.toml {{TA}}
 
 # To dump the redis data locally
 dump-redis:
-  docker compose exec redis redis-cli save
+  {{dc}} exec redis redis-cli save
   docker cp inmor_redis_1:/data/dump.rdb .
-

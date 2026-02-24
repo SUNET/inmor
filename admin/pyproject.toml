@@ -43,6 +43,7 @@ dependencies = [
 	"whitenoise",
 	"qrcode",
 	"cryptography",
+	"granian",
 ]
 
 [project.urls]

@@ -13,7 +13,7 @@ dbpath = os.path.join(file_dir, "redisdata")
 inmor_path = os.path.join(os.path.dirname(file_dir), "target/debug/inmor")
 
 # mkcert CA root certificate for TLS verification
-MKCERT_CA = os.path.expanduser("./rootCA.pem")
+MKCERT_CA = os.path.expanduser("./dev/rootCA.pem")
 
 
 trdb = factories.redis_proc(port=6088, datadir=dbpath)
@@ -51,8 +51,8 @@ def start_server(trdb):
         with open(tconfig, "w") as f:
             f.write(f'domain = "https://localhost:{port}"\n')
             f.write('redis_uri = "redis://localhost:6088"\n')
-            f.write('tls_cert = "localhost+2.pem"\n')
-            f.write('tls_key = "localhost+2-key.pem"\n')
+            f.write('tls_cert = "dev/localhost+2.pem"\n')
+            f.write('tls_key = "dev/localhost+2-key.pem"\n')
         # Now start a process
         inmor_proc = subprocess.Popen([inmor_path, "-p", str(port), "-c", tconfig])
         assert not inmor_proc.poll()

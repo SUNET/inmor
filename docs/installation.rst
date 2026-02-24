@@ -62,6 +62,21 @@ The Trust Anchor is now running at ``http://localhost:8080`` and the Admin API a
    For production deployments, you should generate your own signing keys.
    See the `Key Generation`_ section below.
 
+Docker Compose Files
+--------------------
+
+The project has two Docker Compose configurations:
+
+* ``docker-compose.yml`` — **Production** configuration. Uses baked-in Docker image code,
+  release builds, granian, named volumes, and only exposes the TA port.
+* ``dev/docker-compose.dev.yml`` — **Development** configuration. Mounts source code for
+  live reloading, uses debug builds, exposes all ports, and uses trust auth for PostgreSQL.
+
+The ``just`` commands automatically use the development compose file. To use the
+production configuration directly::
+
+   docker compose up -d
+
 Key Generation
 --------------
 
@@ -104,8 +119,13 @@ After installation, your directory structure should look like::
    ├── private.json          # TA primary signing key
    ├── admin/
    │   └── private.json      # Admin signing key
+   ├── dev/                  # Development files
+   │   ├── docker-compose.dev.yml
+   │   ├── rootCA.pem        # Dev root CA certificate
+   │   ├── localhost+2.pem   # Dev TLS certificate
+   │   └── localhost+2-key.pem
    ├── taconfig.toml         # TA configuration
-   └── docker-compose.yml
+   └── docker-compose.yml    # Production compose
 
 Verifying Installation
 ----------------------
@@ -137,7 +157,7 @@ To stop all services::
 
 To stop and remove all data (including database)::
 
-   docker compose down -v
+   just down
    rm -rf db/ redis/
 
 Development Setup
@@ -162,26 +182,27 @@ For local development without Docker:
 
 3. Install the development root CA certificate to the system trust store.
 
-   The repository includes self-signed TLS certificates for development.
-   To allow your system to trust these certificates, install the root CA:
+   The repository includes self-signed TLS certificates for development
+   under the ``dev/`` directory. To allow your system to trust these
+   certificates, install the root CA:
 
    **Ubuntu/Debian**::
 
-      sudo cp rootCA.pem /usr/local/share/ca-certificates/rootCA.crt
+      sudo cp dev/rootCA.pem /usr/local/share/ca-certificates/rootCA.crt
       sudo update-ca-certificates
 
    **Fedora/RHEL/CentOS**::
 
-      sudo cp rootCA.pem /etc/pki/ca-trust/source/anchors/rootCA.pem
+      sudo cp dev/rootCA.pem /etc/pki/ca-trust/source/anchors/rootCA.pem
       sudo update-ca-trust
 
    **macOS**::
 
-      sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain rootCA.pem
+      sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain dev/rootCA.pem
 
    **Arch Linux**::
 
-      sudo cp rootCA.pem /etc/ca-certificates/trust-source/anchors/rootCA.crt
+      sudo cp dev/rootCA.pem /etc/ca-certificates/trust-source/anchors/rootCA.crt
       sudo trust extract-compat
 
 4. Set up Rust environment::
@@ -190,7 +211,11 @@ For local development without Docker:
 
 5. Start dependencies (Redis and PostgreSQL)::
 
-      docker compose up -d db redis
+      just up
+
+   Or start only db and redis with the dev compose file::
+
+      docker compose -f dev/docker-compose.dev.yml --project-directory . up -d db redis
 
 6. Run Django migrations::
 
@@ -204,6 +229,36 @@ For local development without Docker:
 8. Start the Trust Anchor::
 
       cargo run --release -- -c taconfig.toml
+
+Production Deployment
+---------------------
+
+For production deployments:
+
+1. Build or pull the Docker images::
+
+      docker compose build
+
+2. Configure ``localsettings.py`` with production Django settings
+   (``SECRET_KEY``, ``ALLOWED_HOSTS``, ``SECURE_SSL_REDIRECT``, etc.)
+   and place it in the repository root.
+
+3. Update TLS certificate paths in ``docker-compose.yml`` to point
+   to your production certificates.
+
+4. Set ``POSTGRES_PASSWORD`` in ``docker-compose.yml`` (or use environment
+   variables / Docker secrets).
+
+5. Generate an ``MFA_ENCRYPTION_KEY`` and set it in the admin service
+   environment.
+
+6. Start services::
+
+      docker compose up -d
+
+The admin service runs with granian in production (``PRODUCTION=true``).
+Place a reverse proxy (e.g., nginx) in front of the admin and frontend
+services.
 
 Troubleshooting
 ---------------
@@ -230,9 +285,9 @@ Ensure PostgreSQL is running and healthy::
 
 If the database is corrupted, remove and recreate::
 
-   docker compose down
+   just down
    rm -rf db/
-   docker compose up -d
+   just up
 
 Key file errors
 ^^^^^^^^^^^^^^^
@@ -255,7 +310,7 @@ making requests to the Trust Anchor, ensure the root CA is installed::
    ls /usr/local/share/ca-certificates/rootCA.crt
 
    # If missing, install it
-   sudo cp rootCA.pem /usr/local/share/ca-certificates/rootCA.crt
+   sudo cp dev/rootCA.pem /usr/local/share/ca-certificates/rootCA.crt
    sudo update-ca-certificates
 
 For other operating systems, see the root CA installation steps in the

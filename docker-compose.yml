@@ -1,8 +1,26 @@
+# Production Docker Compose configuration
+#
+# For development, use: dev/docker-compose.dev.yml
+#   just up   # Uses dev compose automatically
+#
+# This configuration:
+# - Uses baked-in Docker image code (no source mounts)
+# - Release-built Rust binary
+# - Granian WSGI server for Django
+# - Named volumes for persistent data
+# - Only TA port exposed (admin/db/redis internal only)
+# - TLS certificates mounted from host
+#
+# Before deploying, ensure:
+# - TLS certificates are in place (update paths below)
+# - localsettings.py is configured (Django SECRET_KEY, ALLOWED_HOSTS, etc.)
+# - Set MFA_ENCRYPTION_KEY for production
+# - Consider setting Django SECURE_SSL_REDIRECT, SESSION_COOKIE_SECURE,
+#   CSRF_COOKIE_SECURE in localsettings.py
 ---
 services:
   ta:
     restart: always
-    build: .
     image: docker.sunet.se/inmor:0.3.0
     networks:
       - inmor-net
@@ -13,22 +31,23 @@ services:
       retries: 5
       start_period: 10s
     volumes:
-      - ./target/debug/inmor:/app/inmor
-      - ./taconfig.toml:/app/taconfig.toml
-      - ./private.json:/app/private.json
-      - ./publickeys:/app/publickeys
-      - ./historical_keys:/app/historical_keys
-      - ./templates:/app/templates
-      - ./localhost+2.pem:/app/localhost+2.pem
-      - ./localhost+2-key.pem:/app/localhost+2-key.pem
+      - ./taconfig.toml:/app/taconfig.toml:ro
+      - ./private.json:/app/private.json:ro
+      - ./publickeys:/app/publickeys:ro
+      - ./historical_keys:/app/historical_keys:ro
+      - ./templates:/app/templates:ro
+      # TLS certificates — update paths for your deployment
+      - /etc/ssl/certs/inmor.pem:/app/tls.pem:ro
+      - /etc/ssl/private/inmor-key.pem:/app/tls-key.pem:ro
     depends_on:
       redis:
         condition: service_healthy
     command: ./inmor -c taconfig.toml
     environment:
-      - 'RUST_LOG=debug' # If you want see debug logs (too many)
+      - 'RUST_LOG=info'
     ports:
       - "8080:8080"
+
   db:
     restart: always
     image: postgres:14-alpine
@@ -42,11 +61,16 @@ services:
       retries: 5
       start_period: 80s
     volumes:
-      - ./db:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - postgres_data:/var/lib/postgresql/data
+    # No port exposed — only accessible within the container network
     environment:
-      - 'POSTGRES_HOST_AUTH_METHOD=trust'
+      # Option 1: Trust auth (simple, no password)
+      # - 'POSTGRES_HOST_AUTH_METHOD=trust'
+      # Option 2: Password auth (recommended for production)
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=changeme
+      - POSTGRES_DB=postgres
+
   redis:
     restart: always
     image: redis:7-alpine
@@ -59,9 +83,10 @@ services:
       retries: 5
       start_period: 80s
     volumes:
-      - ./redis:/data
+      - redis_data:/data
+    # No port exposed — only accessible within the container network
+
   admin:
-    build: ./admin/
     image: docker.sunet.se/inmor-admin:0.3.0
     networks:
       - inmor-net
@@ -75,38 +100,34 @@ services:
     command: /app/docker-entrypoint.sh
     environment:
       - INSIDE_CONTAINER=true
-      # MFA encryption key for TOTP secrets - generate a new key for production with:
+      - PRODUCTION=true
+      # MFA encryption key for TOTP secrets — generate with:
       # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       # - MFA_ENCRYPTION_KEY=your-production-key-here
     volumes:
-      - ./private.json:/app/private.json
-      - ./admin/inmoradmin:/app/inmoradmin
-      - ./admin/apikeys:/app/apikeys
-      - ./admin/entities:/app/entities
-      - ./admin/trustmarks:/app/trustmarks
-      - ./admin/templates:/app/templates
-      - ./admin/common:/app/common
-      - ./admin/tests:/app/tests
-      - ./publickeys:/app/publickeys
-      - ./historical_keys:/app/historical_keys
-    # - ./localsettings.py:/app/inmoradmin/localsettings.py  # For production you want to override the settings
-    ports:
-      - "8000:8000"
-  frontend:
-    build:
-      context: ./admin/frontend/
-      target: production
-      args:
-        # Empty string means use same origin (nginx proxies API requests)
-        VITE_API_URL: ""
-    image: docker.sunet.se/inmor-frontend:0.3.0
-    networks:
-      - inmor-net
-    depends_on:
-      - admin
-    ports:
-      - "127.0.0.1:5173:80"
+      - ./private.json:/app/private.json:ro
+      - ./publickeys:/app/publickeys:ro
+      - ./historical_keys:/app/historical_keys:ro
+      - ./localsettings.py:/app/inmoradmin/localsettings.py:ro
+    # No port exposed — fronted by a reverse proxy in production
+
+  # Frontend: In production, typically served by a reverse proxy (nginx)
+  # that also proxies API requests to the admin service.
+  # Uncomment and configure if needed:
+  #
+  # frontend:
+  #   image: docker.sunet.se/inmor-frontend:0.3.0
+  #   networks:
+  #     - inmor-net
+  #   depends_on:
+  #     - admin
+  #   ports:
+  #     - "127.0.0.1:5173:80"
+
 networks:
   inmor-net:
     driver: bridge
 
+volumes:
+  postgres_data:
+  redis_data:
