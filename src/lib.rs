@@ -392,6 +392,8 @@ async fn get_collection_entities(
         // Get union of entity_ids across requested types
         let mut ids = HashSet::new();
         for etype in entity_types {
+            validate_entity_type(etype)
+                .map_err(|e| anyhow!("invalid entity_type '{}': {}", etype, e))?;
             let type_ids: Vec<String> =
                 redis::Cmd::smembers(format!("inmor:collection:by_type:{etype}"))
                     .query_async(conn)
@@ -501,6 +503,9 @@ async fn list_subordinates(
     }
     if let Some(trust_mark_type) = trust_mark_type {
         // Means filter based on trustmark type
+        if let Err(e) = validate_redis_key_input(&trust_mark_type) {
+            return error_response_400("invalid_request", &format!("invalid trust_mark_type: {e}"));
+        }
 
         let query = format!("inmor:tmtype:{trust_mark_type}");
         let valid_entities: HashSet<String> = redis::Cmd::smembers(query)
@@ -1233,7 +1238,7 @@ pub async fn trust_mark_status(
         "expired"
     } else {
         let v = json!("");
-        let hkey = "inmor:tm:".to_string() + payload.subject().unwrap_or("");
+        let sub = payload.subject().unwrap_or("");
         let claims = payload.claims_set();
         let trustmarktype = claims
             .get("trust_mark_type")
@@ -1241,6 +1246,17 @@ pub async fn trust_mark_status(
             .as_str()
             .unwrap_or("");
 
+        if let Err(e) = validate_redis_key_input(sub) {
+            return error_response_400("invalid_request", &format!("invalid sub in JWT: {e}"));
+        }
+        if let Err(e) = validate_redis_key_input(trustmarktype) {
+            return error_response_400(
+                "invalid_request",
+                &format!("invalid trust_mark_type in JWT: {e}"),
+            );
+        }
+
+        let hkey = format!("inmor:tm:{sub}");
         let mark = redis::Cmd::hget(hkey, trustmarktype)
             .query_async::<String>(&mut conn)
             .await
@@ -1304,6 +1320,10 @@ pub async fn trust_mark_list(
         sub,
     } = info.into_inner();
 
+    if let Err(e) = validate_redis_key_input(&trust_mark_type) {
+        return error_response_400("invalid_request", &format!("invalid trust_mark_type: {e}"));
+    }
+
     let mut conn = redis
         .get_connection_manager()
         .await
@@ -1351,6 +1371,13 @@ pub async fn trust_mark_query(
         trust_mark_type,
         sub,
     } = info.into_inner();
+
+    if let Err(e) = validate_redis_key_input(&sub) {
+        return error_response_400("invalid_request", &format!("invalid sub: {e}"));
+    }
+    if let Err(e) = validate_redis_key_input(&trust_mark_type) {
+        return error_response_400("invalid_request", &format!("invalid trust_mark_type: {e}"));
+    }
 
     let mut conn = redis
         .get_connection_manager()
@@ -1408,6 +1435,42 @@ fn is_private_ip(ip: &IpAddr) -> bool {
             || (v6.segments()[0] & 0xfe00) == 0xfc00
             || (v6.segments()[0] & 0xffc0) == 0xfe80
         }
+    }
+}
+
+/// Known OpenID Federation entity types accepted in query parameters.
+const KNOWN_ENTITY_TYPES: &[&str] = &[
+    "openid_provider",
+    "openid_relying_party",
+    "federation_entity",
+    "oauth_authorization_server",
+    "oauth_client",
+    "oauth_resource",
+];
+
+/// Validates that a user-supplied string is safe to use in a Redis key.
+/// Rejects control characters (including newlines and null bytes) and
+/// enforces a maximum length to prevent memory abuse.
+fn validate_redis_key_input(input: &str) -> Result<(), &'static str> {
+    const MAX_KEY_INPUT_LEN: usize = 2048;
+    if input.is_empty() {
+        return Err("empty value");
+    }
+    if input.len() > MAX_KEY_INPUT_LEN {
+        return Err("value too long");
+    }
+    if input.chars().any(|c| c.is_control()) {
+        return Err("value contains control characters");
+    }
+    Ok(())
+}
+
+/// Validates that a string is a known OpenID Federation entity type.
+fn validate_entity_type(etype: &str) -> Result<(), &'static str> {
+    if KNOWN_ENTITY_TYPES.contains(&etype) {
+        Ok(())
+    } else {
+        Err("unknown entity type")
     }
 }
 
@@ -1889,5 +1952,73 @@ mod ssrf_tests {
     fn test_http_client_is_configured() {
         // Verify the shared client was built successfully (lazy_static panics on failure)
         let _ = &*HTTP_CLIENT;
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_rejects_control_chars() {
+        assert_eq!(
+            validate_redis_key_input("hello\0world"),
+            Err("value contains control characters")
+        );
+        assert_eq!(
+            validate_redis_key_input("hello\nworld"),
+            Err("value contains control characters")
+        );
+        assert_eq!(
+            validate_redis_key_input("hello\rworld"),
+            Err("value contains control characters")
+        );
+        assert_eq!(
+            validate_redis_key_input("hello\tworld"),
+            Err("value contains control characters")
+        );
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_rejects_empty() {
+        assert_eq!(validate_redis_key_input(""), Err("empty value"));
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_rejects_too_long() {
+        let long = "a".repeat(2049);
+        assert_eq!(validate_redis_key_input(&long), Err("value too long"));
+        // Exactly 2048 should be fine
+        let exact = "a".repeat(2048);
+        assert!(validate_redis_key_input(&exact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_redis_key_input_accepts_urls() {
+        assert!(validate_redis_key_input("https://example.com/trust_mark/foo").is_ok());
+        assert!(
+            validate_redis_key_input("https://ta.example.org/.well-known/openid-federation")
+                .is_ok()
+        );
+        assert!(validate_redis_key_input("https://entity.example.com:8443/path?q=1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_entity_type_accepts_known() {
+        for etype in KNOWN_ENTITY_TYPES {
+            assert!(
+                validate_entity_type(etype).is_ok(),
+                "should accept {}",
+                etype
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_entity_type_rejects_unknown() {
+        assert_eq!(
+            validate_entity_type("unknown_type"),
+            Err("unknown entity type")
+        );
+        assert_eq!(validate_entity_type(""), Err("unknown entity type"));
+        assert_eq!(
+            validate_entity_type("openid_provider; DROP TABLE keys"),
+            Err("unknown entity type")
+        );
     }
 }
