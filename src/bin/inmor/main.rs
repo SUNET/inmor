@@ -165,6 +165,12 @@ async fn main() -> io::Result<()> {
         )
     });
 
+    // Set global allow_http flag from config
+    ALLOW_HTTP.store(
+        server_config.allow_http.unwrap_or(false),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
     // Now the normal web app flow
     //
     //
