@@ -27,6 +27,9 @@ from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
 
+from auditlog.diff import model_to_dict
+from auditlog.helpers import log_create, log_update
+
 from .auth import auth_router, combined_auth
 
 api = NinjaAPI(
@@ -247,6 +250,7 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
             active=data.active,
         )
         if created:
+            log_create(request, "TrustMarkType", tmt)
             return 201, tmt
         else:
             return 403, tmt
@@ -308,6 +312,7 @@ def update_trust_mark_type(request: HttpRequest, tmtid: int, data: TrustMarkType
     try:
         updated = False
         tmt = TrustMarkType.objects.get(id=tmtid)
+        before = model_to_dict(tmt)
         if data.active is not None:
             tmt.active = data.active
             updated = True
@@ -323,6 +328,7 @@ def update_trust_mark_type(request: HttpRequest, tmtid: int, data: TrustMarkType
         # Now save if only updated
         if updated:
             tmt.save()
+            log_update(request, "TrustMarkType", tmt, snapshot_before=before)
         return tmt
     except TrustMarkType.DoesNotExist:
         return 404, {"message": "TrustMarkType could not be found.", "id": tmtid}
@@ -399,6 +405,7 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
             expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
             tm.expire_at = expiry
             tm.save()
+            log_create(request, "TrustMark", tm)
             return 201, tm
     except Exception as e:
         print(e)
@@ -438,6 +445,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
     """Renews a TrustMark"""
     try:
         tm = TrustMark.objects.get(id=tmid)
+        before = model_to_dict(tm)
         con: Redis = get_redis_connection("default")
         mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con)
         # Adds the newly created JWT in the response
@@ -445,6 +453,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
         expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
         tm.expire_at = expiry
         tm.save()
+        log_update(request, "TrustMark", tm, snapshot_before=before, is_renew=True)
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}
@@ -463,6 +472,7 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
     should_mark_redis_revoked = False
     try:
         tm = TrustMark.objects.get(id=tmid)
+        before = model_to_dict(tm)
         if data.autorenew is not None:
             tm.autorenew = data.autorenew
         if data.active is not None:
@@ -483,6 +493,7 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
         if should_mark_redis_revoked:
             _ = con.hset(f"inmor:tm:{tm.domain}", tm.tmt.tmtype, "revoked")
             _ = con.srem(f"inmor:tmtype:{tm.tmt.tmtype}", tm.domain)
+        log_update(request, "TrustMark", tm, snapshot_before=before)
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}
@@ -586,6 +597,7 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     update_redis_with_subordinate(
         data.entityid, entity_jwt_str, official_metadata, signed_statement, con
     )
+    log_create(request, "Subordinate", sub_statement, event_type="registration")
     return 201, sub_statement
 
 
@@ -625,6 +637,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
 
     try:
         sub = Subordinate.objects.get(id=subid)
+        before = model_to_dict(sub)
     except Subordinate.DoesNotExist:
         return 404, {"message": "Subordinate could not be found.", "id": subid}
     except Exception as e:
@@ -711,6 +724,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     update_redis_with_subordinate(
         sub.entityid, entity_jwt_str, official_metadata, signed_statement, con
     )
+    log_update(request, "Subordinate", sub, snapshot_before=before)
     return 200, sub
 
 
@@ -921,6 +935,78 @@ def create_historical_keys(request: HttpRequest):
     _ = con.set("inmor:historical_keys", token)
 
     return 201, {"message": f"Historical keys JWT created with {len(keys)} keys"}
+
+
+# Audit log API
+
+
+class AuditLogEntryOutSchema(Schema):
+    id: int
+    timestamp: datetime
+    user_id: int | None
+    username: str | None = None
+    auth_method: str
+    tenant: str
+    ip_address: str | None
+    action: str
+    resource_type: str
+    resource_id: int | None
+    resource_repr: str
+    endpoint: str
+    http_method: str
+    diff: dict[str, Any] | None
+    response_code: int
+    success: bool
+    event_type: str | None
+
+    @staticmethod
+    def resolve_username(obj):
+        return obj.user.username if obj.user else None
+
+
+@router.get(
+    "/auditlog",
+    response=list[AuditLogEntryOutSchema],
+    tags=["AuditLog"],
+)
+@paginate(LimitOffsetPagination)
+def list_audit_log(
+    request: HttpRequest,
+    resource_type: str | None = None,
+    action: str | None = None,
+    event_type: str | None = None,
+):
+    """List audit log entries with optional filters."""
+    from auditlog.models import AuditLogEntry
+
+    qs = AuditLogEntry.objects.select_related("user").all()
+    if resource_type:
+        qs = qs.filter(resource_type=resource_type)
+    if action:
+        qs = qs.filter(action=action)
+    if event_type:
+        qs = qs.filter(event_type=event_type)
+    return qs
+
+
+@router.get(
+    "/auditlog/{int:entry_id}",
+    response={200: AuditLogEntryOutSchema, 404: Message},
+    tags=["AuditLog"],
+)
+def get_audit_log_entry(request: HttpRequest, entry_id: int):
+    """Get a single audit log entry with full snapshots."""
+    from auditlog.models import AuditLogEntry
+
+    try:
+        return AuditLogEntry.objects.select_related("user").get(id=entry_id)
+    except AuditLogEntry.DoesNotExist:
+        return 404, {"message": "Audit log entry not found.", "id": entry_id}
+
+
+class AuditLogDetailOutSchema(AuditLogEntryOutSchema):
+    snapshot_before: dict[str, Any] | None
+    snapshot_after: dict[str, Any] | None
 
 
 # Add routers to API
