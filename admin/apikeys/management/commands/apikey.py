@@ -31,6 +31,12 @@ class Command(BaseCommand):
             default="auto-generated",
             help="Descriptive name for the API key",
         )
+        create_parser.add_argument(
+            "--tenant",
+            type=str,
+            default="default",
+            help="Tenant this API key belongs to (default: 'default')",
+        )
 
         # list
         list_parser = subparsers.add_parser("list", help="List API keys")
@@ -62,13 +68,14 @@ class Command(BaseCommand):
         User = get_user_model()
         username = options["username"]
         key_name = options["key_name"]
+        tenant = options["tenant"]
 
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             raise CommandError(f"User '{username}' does not exist")
 
-        _, plaintext_key = APIKey.create_key(name=key_name, user=user)
+        _, plaintext_key = APIKey.create_key(name=key_name, user=user, tenant=tenant)
 
         # Print only the key so it can be captured by scripts
         self.stdout.write(plaintext_key)
@@ -94,16 +101,16 @@ class Command(BaseCommand):
         # Header
         if show_all:
             self.stdout.write(
-                f"{'Name':<25} {'Prefix':<10} {'User':<15} {'Active':<8} "
+                f"{'Name':<25} {'Prefix':<10} {'User':<15} {'Tenant':<15} {'Active':<8} "
+                f"{'Created':<20} {'Expires':<20} {'Last Used':<20}"
+            )
+            self.stdout.write("-" * 133)
+        else:
+            self.stdout.write(
+                f"{'Name':<25} {'Prefix':<10} {'Tenant':<15} {'Active':<8} "
                 f"{'Created':<20} {'Expires':<20} {'Last Used':<20}"
             )
             self.stdout.write("-" * 118)
-        else:
-            self.stdout.write(
-                f"{'Name':<25} {'Prefix':<10} {'Active':<8} "
-                f"{'Created':<20} {'Expires':<20} {'Last Used':<20}"
-            )
-            self.stdout.write("-" * 103)
 
         for key in keys:
             created = key.created_at.strftime("%Y-%m-%d %H:%M") if key.created_at else "-"
@@ -114,11 +121,11 @@ class Command(BaseCommand):
             if show_all:
                 self.stdout.write(
                     f"{key.name:<25} {key.prefix:<10} {key.user.username:<15} "
-                    f"{active:<8} {created:<20} {expires:<20} {last_used:<20}"
+                    f"{key.tenant:<15} {active:<8} {created:<20} {expires:<20} {last_used:<20}"
                 )
             else:
                 self.stdout.write(
-                    f"{key.name:<25} {key.prefix:<10} {active:<8} "
+                    f"{key.name:<25} {key.prefix:<10} {key.tenant:<15} {active:<8} "
                     f"{created:<20} {expires:<20} {last_used:<20}"
                 )
 

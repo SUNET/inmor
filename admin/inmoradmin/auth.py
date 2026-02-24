@@ -1,8 +1,13 @@
 """Authentication module for Inmor Admin API.
 
 Provides session-based and API key authentication for django-ninja API.
-Designed to be extensible for future SAML/OAuth providers.
+Designed to be extensible — new auth backends (e.g. JWT) can be added by
+subclassing ``AuthBackend`` and appending to ``CombinedAuthentication.backends``.
 """
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
@@ -13,6 +18,84 @@ from ninja import Router, Schema
 from ninja.security.apikey import APIKeyBase
 
 
+# ---------------------------------------------------------------------------
+# Auth result and backend protocol
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AuthResult:
+    """Structured authentication result attached to ``request.auth_result``.
+
+    Carries metadata about *how* the request was authenticated so that
+    downstream code (audit logging, tenant-scoped queries) can use it
+    without re-inspecting headers.
+    """
+
+    user: User
+    auth_method: str  # "session", "api_key", or future plugin names
+    api_key_name: str | None = None  # Name of the API key used (None for session)
+    tenant: str = "default"  # Tenant identifier
+
+
+class AuthBackend:
+    """Base class for authentication backends.
+
+    Subclass this and implement ``authenticate()`` to add a new auth method.
+    """
+
+    name: str = "base"
+
+    def authenticate(self, request: HttpRequest) -> AuthResult | None:
+        raise NotImplementedError
+
+
+class APIKeyAuthBackend(AuthBackend):
+    """Authenticate via the ``X-API-Key`` header."""
+
+    name = "api_key"
+
+    def authenticate(self, request: HttpRequest) -> AuthResult | None:
+        key = request.META.get("HTTP_X_API_KEY")
+        if not key:
+            return None
+
+        from apikeys.models import APIKey
+
+        result = APIKey.authenticate(key)
+        if result is None:
+            return None
+
+        user, api_key = result
+        return AuthResult(
+            user=user,
+            auth_method="api_key",
+            api_key_name=api_key.name,
+            tenant=api_key.tenant,
+        )
+
+
+class SessionAuthBackend(AuthBackend):
+    """Authenticate via the Django session cookie (with CSRF enforcement)."""
+
+    name = "session"
+
+    def authenticate(self, request: HttpRequest) -> AuthResult | None:
+        if not request.user.is_authenticated:
+            return None
+
+        _enforce_csrf(request)
+        return AuthResult(
+            user=request.user,
+            auth_method="session",
+        )
+
+
+# ---------------------------------------------------------------------------
+# CSRF helper
+# ---------------------------------------------------------------------------
+
+
 class _CSRFCheck(CsrfViewMiddleware):
     """CSRF check that doesn't reject — just records the result."""
 
@@ -20,49 +103,48 @@ class _CSRFCheck(CsrfViewMiddleware):
         return reason
 
 
-class CombinedAuthentication(APIKeyBase):
-    """Authenticates via API key (X-API-Key header) or Django session.
+def _enforce_csrf(request: HttpRequest):
+    """Enforce CSRF for session-based requests on unsafe methods."""
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        check = _CSRFCheck(lambda req: None)
+        # populates request.META["CSRF_COOKIE"] from the cookie
+        check.process_request(request)
+        reason = check.process_view(request, None, (), {})
+        if reason:
+            from ninja.errors import HttpError
 
-    API key is tried first and does not require CSRF.
-    Session auth falls back and enforces CSRF for unsafe methods (POST, PUT, DELETE, PATCH).
+            raise HttpError(403, f"CSRF check Failed: {reason}")
+
+
+# ---------------------------------------------------------------------------
+# Combined authenticator (used by django-ninja routers)
+# ---------------------------------------------------------------------------
+
+
+class CombinedAuthentication(APIKeyBase):
+    """Authenticates via a chain of pluggable backends.
+
+    Iterates ``backends`` in order; the first backend that returns an
+    ``AuthResult`` wins.  The result is stored on ``request.auth_result``
+    so downstream code can inspect auth metadata.
     """
 
-    # Disable Django Ninja's built-in CSRF enforcement so we can
-    # handle it ourselves: skip CSRF for API key, enforce for session.
     csrf = False
     openapi_type: str = "apiKey"
     param_name: str = "X-API-Key"
+
+    backends: list[AuthBackend] = [APIKeyAuthBackend(), SessionAuthBackend()]
 
     def _get_key(self, request: HttpRequest) -> str | None:
         return request.META.get("HTTP_X_API_KEY")
 
     def authenticate(self, request: HttpRequest, key: str | None = None):
-        # 1. Try API key authentication (no CSRF needed)
-        if key:
-            from apikeys.models import APIKey
-
-            user = APIKey.authenticate(key)
-            if user:
-                return user
-
-        # 2. Fall back to session authentication with CSRF enforcement
-        if request.user.is_authenticated:
-            self._enforce_csrf(request)
-            return request.user
-
+        for backend in self.backends:
+            result = backend.authenticate(request)
+            if result is not None:
+                request.auth_result = result  # type: ignore[attr-defined]
+                return result.user
         return None
-
-    def _enforce_csrf(self, request: HttpRequest):
-        """Enforce CSRF for session-based requests on unsafe methods."""
-        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-            check = _CSRFCheck(lambda req: None)
-            # populates request.META["CSRF_COOKIE"] from the cookie
-            check.process_request(request)
-            reason = check.process_view(request, None, (), {})
-            if reason:
-                from ninja.errors import HttpError
-
-                raise HttpError(403, f"CSRF check Failed: {reason}")
 
 
 # Single auth instance used by the protected router

@@ -222,9 +222,7 @@ def test_ta_list_subordinates_bytrustmark(loaddata: Redis, start_server: int, ht
     assert set(data) == subs
 
 
-def test_ta_fetch_missing_sub_returns_400(
-    loaddata: Redis, start_server: int, http_client: Client
-):
+def test_ta_fetch_missing_sub_returns_400(loaddata: Redis, start_server: int, http_client: Client):
     "Tests /fetch without sub parameter returns 400, not 500 (spec 8.9)"
     _rdb = loaddata
     port = start_server

@@ -69,6 +69,11 @@ class APIKey(models.Model):
         blank=True,
         help_text="When this API key was last used.",
     )
+    tenant = models.CharField(
+        max_length=255,
+        default="default",
+        help_text="Tenant this API key belongs to.",
+    )
 
     class Meta:
         verbose_name = "API Key"
@@ -93,13 +98,16 @@ class APIKey(models.Model):
         self.save(update_fields=["last_used_at"])
 
     @classmethod
-    def create_key(cls, name: str, user: User, expires_at=None) -> tuple["APIKey", str]:
+    def create_key(
+        cls, name: str, user: User, expires_at=None, tenant: str = "default"
+    ) -> tuple["APIKey", str]:
         """Create a new API key.
 
         Args:
             name: Descriptive name for the key
             user: User who owns the key
             expires_at: Optional expiration datetime
+            tenant: Tenant identifier (default: "default")
 
         Returns:
             tuple: (APIKey instance, plaintext key)
@@ -112,25 +120,26 @@ class APIKey(models.Model):
             key_hash=key_hash,
             user=user,
             expires_at=expires_at,
+            tenant=tenant,
         )
         return api_key, full_key
 
     @classmethod
-    def authenticate(cls, key: str) -> User | None:
+    def authenticate(cls, key: str) -> tuple[User, "APIKey"] | None:
         """Authenticate using an API key.
 
         Args:
             key: The plaintext API key
 
         Returns:
-            User if authentication succeeds, None otherwise
+            (User, APIKey) tuple if authentication succeeds, None otherwise
         """
         key_hash = hash_api_key(key)
         try:
             api_key = cls.objects.select_related("user").get(key_hash=key_hash)
             if api_key.is_valid:
                 api_key.update_last_used()
-                return api_key.user
+                return api_key.user, api_key
         except cls.DoesNotExist:
             pass
         return None
