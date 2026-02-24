@@ -16,5 +16,14 @@ python manage.py collectstatic --noinput
 python manage.py reload_issued_tms
 
 # Start server
-echo "Starting web server"
-python manage.py runserver 0.0.0.0:8000
+if [ "$PRODUCTION" = "true" ]; then
+    echo "Starting granian (production)"
+    granian --interface wsgi \
+        --host 0.0.0.0 \
+        --port 8000 \
+        --workers 3 \
+        inmoradmin.wsgi:application
+else
+    echo "Starting Django development server"
+    python manage.py runserver 0.0.0.0:8000
+fi

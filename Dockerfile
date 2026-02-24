@@ -7,7 +7,7 @@ RUN mkdir /app
 RUN --mount=type=bind,source=Cargo.toml,target=/app/Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=/app/Cargo.lock \
     --mount=type=bind,source=src,target=/app/src \
-    cd /app && cargo build
+    cd /app && cargo build --release
 
 
 
@@ -28,8 +28,8 @@ rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 EOT
 
 # Copy from the build container
-COPY --from=build --chown=app:app /app/target/debug/inmor /app/
-COPY --from=build --chown=app:app /app/target/debug/inmor-collection /app/
+COPY --from=build --chown=app:app /app/target/release/inmor /app/
+COPY --from=build --chown=app:app /app/target/release/inmor-collection /app/
 COPY --chown=app:app templates/ /app/templates/
 
 USER app

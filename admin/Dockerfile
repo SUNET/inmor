@@ -44,6 +44,9 @@ COPY ./inmoradmin /app/inmoradmin
 COPY ./entities /app/entities
 COPY ./common /app/common
 COPY ./trustmarks /app/trustmarks
+COPY ./apikeys /app/apikeys
+COPY ./auditlog /app/auditlog
+COPY ./templates /app/templates
 COPY ./docker-entrypoint.sh /app/
 COPY ./manage.py /app/
 
