@@ -58,7 +58,7 @@ def merge_our_policy_ontop_subpolicy(subpolicy: dict[Any, Any]) -> str | None:
 
 def apply_server_policy(metadata: str):
     "Verifies that we can apply our policy on the metadata."
-    m = apply_policy(json.dumps(settings.POLICY_DOCUMENT), metadata)
+    m = apply_policy(json.dumps(settings.POLICY_DOCUMENT.get("metadata_policy", {})), metadata)
     return m
 
 
