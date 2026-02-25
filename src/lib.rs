@@ -76,13 +76,13 @@ pub struct AppState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EntityDetails {
     pub entity_id: String,
-    pub entity_type: String,
+    pub entity_types: HashSet<String>,
     pub has_trustmark: bool,
     pub trustmarks: HashSet<String>,
 }
 
 impl EntityDetails {
-    pub fn new(entity_id: &str, entity_type: &str, trustmarks: Option<&Value>) -> Self {
+    pub fn new(entity_id: &str, entity_types: HashSet<String>, trustmarks: Option<&Value>) -> Self {
         let mut has_trustmark = false;
         let mut tms: HashSet<String> = HashSet::new();
 
@@ -109,7 +109,7 @@ impl EntityDetails {
         }
         EntityDetails {
             entity_id: entity_id.to_string(),
-            entity_type: entity_type.to_string(),
+            entity_types,
             has_trustmark,
             trustmarks: tms,
         }
@@ -467,33 +467,33 @@ async fn list_subordinates(
                 eprintln!("Metadata is not an object for entity: {}", key);
                 continue; // Skip if metadata is not an object
             };
-            if x.contains_key("openid_provider") {
-                // Means OP
-                let entity = EntityDetails::new(key, "openid_provider", trustmarks);
-                results.push(entity);
-            } else if x.contains_key("openid_relying_party") {
-                // Means RP
-                let entity = EntityDetails::new(key, "openid_relying_party", trustmarks);
-
-                results.push(entity);
-            } else {
-                // Means TA/IA
-                let entity = EntityDetails::new(key, "taia", trustmarks);
-                results.push(entity);
-            }
+            // Collect all entity type identifiers present in metadata
+            let entity_types: HashSet<String> = x.keys().cloned().collect();
+            let entity = EntityDetails::new(key, entity_types, trustmarks);
+            results.push(entity);
         }
     }
     // Now let us go through the list if we need to filter based on the query parameter.
     if let Some(etype) = entity_type {
-        // Means an entity_type was passed.
-        results.retain(|x| etype.contains(&x.entity_type));
+        // Means one or more entity_type params were passed.
+        // Keep entities that have at least one of the requested types.
+        results.retain(|x| x.entity_types.iter().any(|t| etype.contains(t)));
     }
 
     if let Some(inter) = intermediate {
-        // Means we should only provide any intermediate subordinate
-        results.retain(|x| match x.entity_type.as_str() {
-            "taia" => inter, // When we asked for intermediate
-            _ => !inter,     // When we want to the rest
+        // An intermediate is an entity with federation_entity metadata that also
+        // has a federation_list_endpoint (i.e., it has subordinates). For simplicity
+        // we filter on whether federation_entity is the *only* protocol type present
+        // (no openid_provider, openid_relying_party, etc.).
+        results.retain(|x| {
+            let is_intermediate = x.entity_types.contains("federation_entity")
+                && !x.entity_types.contains("openid_provider")
+                && !x.entity_types.contains("openid_relying_party");
+            if inter {
+                is_intermediate
+            } else {
+                !is_intermediate
+            }
         });
     }
 
