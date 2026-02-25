@@ -75,6 +75,7 @@ Documentation Contents
    guides/api-keys
    guides/trustmarks
    guides/subordinates
+   guides/management-commands
 
 Architecture Overview
 ---------------------

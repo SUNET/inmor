@@ -580,7 +580,12 @@ Updating Django Settings
 
 When running behind a reverse proxy, update ``localsettings.py``::
 
-   # Trust the X-Forwarded headers from proxy
+   # REQUIRED: Disable Django's HTTPS redirect — the proxy handles it.
+   # Without this, POST requests get 301-redirected and lose their body.
+   SECURE_SSL_REDIRECT = False
+
+   # REQUIRED: Trust the X-Forwarded-Proto header from the proxy so Django
+   # knows the original request was HTTPS (needed for CSRF, secure cookies).
    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
    USE_X_FORWARDED_HOST = True
 

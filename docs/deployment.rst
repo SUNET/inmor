@@ -111,6 +111,10 @@ Create ``localsettings.py`` for Django::
    TA_DOMAIN = 'https://federation.your-domain.example.com'
    TRUSTMARK_PROVIDER = 'https://federation.your-domain.example.com'
 
+   # Reverse proxy settings (REQUIRED — see section below)
+   SECURE_SSL_REDIRECT = False
+   SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
    # Trust marks issued to the TA itself
    TA_TRUSTMARKS = [
        {
@@ -149,6 +153,38 @@ Update ``taconfig.toml`` for production::
 ::
 
    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+Running Behind a Reverse Proxy
+------------------------------
+
+In production, a reverse proxy (nginx, Caddy, Apache) terminates TLS and
+forwards plain HTTP to the Django admin service. Without the correct Django
+settings, this causes **301 redirects on POST requests** — Django's
+``SecurityMiddleware`` sees an ``http://`` request and redirects to ``https://``,
+which drops the POST body.
+
+Two settings in ``localsettings.py`` are **required**::
+
+   # Do NOT let Django redirect to HTTPS — the reverse proxy handles that.
+   SECURE_SSL_REDIRECT = False
+
+   # Trust the X-Forwarded-Proto header set by the reverse proxy so Django
+   # knows the original request was HTTPS (needed for CSRF, secure cookies, etc.)
+   SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+The reverse proxy must set the ``X-Forwarded-Proto`` header. Example for nginx:
+
+.. code-block:: nginx
+
+   location / {
+       proxy_pass http://127.0.0.1:8000;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+
+See :doc:`reverse-proxy` for complete nginx, Apache, and Caddy configurations.
 
 Volume Mounts
 -------------
