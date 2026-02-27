@@ -1,6 +1,6 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { Plus, Pencil, Trash2 } from 'lucide-vue-next';
+import { Plus, Pencil, ShieldOff } from 'lucide-vue-next';
 import Heading from '../components/base/Heading.vue';
 import Button from '../components/base/Button.vue';
 import Badge from '../components/base/Badge.vue';
@@ -38,7 +38,7 @@ export default defineComponent({
         Toggle,
         Plus,
         Pencil,
-        Trash2,
+        ShieldOff,
     },
     data() {
         return {
@@ -225,8 +225,8 @@ export default defineComponent({
                         Edit
                     </Button>
                     <Button variant="ghost" size="sm" @click="openDeleteModal(row as TrustMarkType)">
-                        <Trash2 :size="16" />
-                        Delete
+                        <ShieldOff :size="16" />
+                        Deactivate
                     </Button>
                 </div>
             </template>
