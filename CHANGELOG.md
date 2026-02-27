@@ -1,3 +1,48 @@
+
+<a id='changelog-0.3.0'></a>
+# 0.3.0 — 2026-02-27
+
+## Added
+
+- POST /subordinates/fetch-config API endpoint to fetch and
+self-validate OpenID Federation entity configurations
+- Handle network errors gracefully (DNS failures, timeouts, 404s,
+    invalid JWTs) with user-friendly error messages
+
+- Frontend for the Admins
+- JSON editor for all JSON fields
+- API_KEYS for API access #122.
+- MFA support #123
+
+- Management commands for Trust Mark Types and Subordinates
+- Enforce `kid` header in Trust Anchor JWT verification #150
+- Migrate Subordinate metadata/jwks fields from CharField to JSONField #158
+
+- Refetch metadata button to the frontend #164
+
+- renewal API and frontend update #166
+
+- Adds /collection endpoint back #170
+
+- Management command for subordinate renewal #174
+
+- apikey management command #178
+- production docker compose #137
+- granian to run admin django application #61
+
+## Fixed
+
+- Explicitly reject `alg: none` in JWT verification #151
+- /trust_mark_list returns JSON error responses instead of plain text #148
+- /fetch returns 400 instead of 500 on invalid entity configuration #147
+- /list with trust_marked=false no longer incorrectly filters subordinates #146
+- Authenticated API calls pass credentials correctly #152
+- Minimal `exp` claim handling in trust mark JWTs #145
+
+- don't include null metadata in policy document
+
+- pass correct policy object to apply_policy and upgrade oidfpolicy to 0.2.0 #185
+- `/list` endpoint fix #187
 <a id='changelog-0.2.2'></a>
 # 0.2.2 — 2026-02-06
 
