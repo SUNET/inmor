@@ -30,18 +30,19 @@ This guide covers deploying Inmor using Docker Compose for production environmen
 Architecture
 ------------
 
-The Docker Compose setup includes four services:
+The Docker Compose setup includes 5 services:
 
 * **ta** - Trust Anchor (Rust) on port 8080
 * **admin** - Admin Portal (Django) on port 8000
 * **db** - PostgreSQL 14 database
 * **redis** - Redis 7 for caching and federation data
+* **frontend** - UI for admin work on port 5173
 
 .. code-block:: yaml
 
    services:
      ta:
-       image: docker.sunet.se/inmor:0.2.0
+       image: docker.sunet.se/inmor:0.3.0
        ports:
          - "8080:8080"
        depends_on:
@@ -49,7 +50,7 @@ The Docker Compose setup includes four services:
            condition: service_healthy
 
      admin:
-       image: docker.sunet.se/inmor-admin:0.2.0
+       image: docker.sunet.se/inmor-admin:0.3.0
        ports:
          - "8000:8000"
        depends_on:
@@ -68,11 +69,21 @@ The Docker Compose setup includes four services:
      redis:
        image: redis:7-alpine
 
+     frontend:
+       image: docker.sunet.se/inmor-frontend:0.3.0
+       depends_on:
+         - admin
+       ports:
+         - "127.0.0.1:5173:80"
+
 Production Deployment
 ---------------------
 
 For production, you typically deploy behind a reverse proxy (nginx, Apache, Traefik)
 that handles TLS termination. The internal services communicate over HTTP.
+
+In this example, the TA is running as https://realta.labb.sunet.se , we have separate subdomain
+for TA admin frontend and API service.
 
 1. Create production configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -85,12 +96,33 @@ Create a ``docker-compose.prod.yml`` override::
          - "127.0.0.1:8080:8080"  # Only bind to localhost
        environment:
          - RUST_LOG=info
+     healthcheck:
+       test: ['CMD', 'curl', '--fail', '--silent', 'http://localhost:8080/health']
+       interval: 5s
+       timeout: 5s
+       retries: 5
+       start_period: 10s
+     volumes:
+       - ./taconfig.toml:/app/taconfig.toml
+       - ./private.json:/app/private.json
+       - ./publickeys:/app/publickeys
+       - ./historical_keys:/app/historical_keys
+       - ./templates:/app/templates
 
      admin:
        ports:
          - "127.0.0.1:8000:8000"  # Only bind to localhost
+       command: /app/docker-entrypoint.sh
+       environment:
+         - INSIDE_CONTAINER=true
+         - CORS_ORIGINS=https://taui.labb.sunet.se,https://taapi.labb.sunet.se,http://localhost:5173
+         - CSRF_TRUSTED_ORIGINS=https://taui.labb.sunet.se,https://taapi.labb.sunet.se
+         - LOGIN_REDIRECT_URL=https://taui.labb.sunet.se/
        volumes:
          - ./localsettings.py:/app/inmoradmin/localsettings.py
+         - ./private.json:/app/private.json
+         - ./publickeys:/app/publickey
+         - ./historical_keys:/app/historical_keys
 
      db:
        ports: []  # Don't expose to host
@@ -104,11 +136,22 @@ Create ``localsettings.py`` for Django::
 
    # Production settings override
    DEBUG = False
-   ALLOWED_HOSTS = ['your-domain.example.com', 'admin.your-domain.example.com']
+   ALLOWED_HOSTS = ['your-domain.example.com', 'localhost', '127.0.0.1', 'admin', 'taapi.labb.sunet.se', 'taui.labb.sunet.se']
    SECRET_KEY = 'your-production-secret-key'
 
    # Use your production domain
-   TA_DOMAIN = 'https://federation.your-domain.example.com'
+   TA_DOMAIN = 'https://realta.labb.sunet.se'
+   # Add the required endpoints for TA
+   FEDERATION_ENTITY = {
+    "federation_fetch_endpoint": f"{TA_DOMAIN}/fetch",
+    "federation_list_endpoint": f"{TA_DOMAIN}/list",
+    "federation_resolve_endpoint": f"{TA_DOMAIN}/resolve",
+    "federation_trust_mark_status_endpoint": f"{TA_DOMAIN}/trust_mark_status",
+    "federation_trust_mark_list_endpoint": f"{TA_DOMAIN}/trust_mark_list",
+    "federation_trust_mark_endpoint": f"{TA_DOMAIN}/trust_mark",
+    "federation_historical_keys_endpoint": f"{TA_DOMAIN}/historical_keys",
+    "federation_collection_endpoint": f"{TA_DOMAIN}/collection",
+   }
    TRUSTMARK_PROVIDER = 'https://federation.your-domain.example.com'
 
    # Reverse proxy settings (REQUIRED — see section below)
