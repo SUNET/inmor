@@ -43,11 +43,15 @@ Quick Installation
 
       just build
 
-3. Start all services::
+3. Build binaries::
+
+      just build-rs
+
+4. Start all services::
 
       just up
 
-4. Initialize the Trust Anchor::
+5. Initialize the Trust Anchor::
 
       # Create the entity configuration
       curl -X POST http://localhost:8000/api/v1/server/entity
