@@ -31,6 +31,7 @@ The fastest way to get Inmor running is with Docker Compose::
 
    # Build and start all services
    just build
+   just build-rs
    just up
 
    # Initialize the Trust Anchor
