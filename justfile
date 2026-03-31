@@ -88,6 +88,9 @@ up:
 down:
   {{dc}} down
 
+logs:
+  {{dc}} logs -f 
+
 t-admin *FLAGS:
   {{dc}} exec admin pytest -vvv {{FLAGS}}
 
