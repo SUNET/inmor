@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    EntityCollectionResponse, UiInfo, get_entity_configruation_as_jwt, get_query, self_verify_jwt,
+    EntityCollectionResponse, UiInfo, get_entity_configruation_as_jwt,
+    get_jwks_from_payload_or_uri, get_query, get_unverified_payload_header, self_verify_jwt,
+    verify_jwt_with_jwks,
 };
 
 /// Prefix for staging keys used during tree walk.
@@ -51,9 +53,30 @@ async fn fetch_all_subordinate_statements(
 
         let (entity_payload, _) = match self_verify_jwt(&jwt_net) {
             Ok(data) => data,
-            Err(e) => {
-                error!("Failed to verify authority hint JWT for {ahint_str}: {e}");
-                continue;
+            Err(_) => {
+                // Self-verification failed — try fetching JWKS from jwks_uri
+                let (unverified_payload, _) = match get_unverified_payload_header(&jwt_net) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Failed to parse authority hint JWT for {ahint_str}: {e}");
+                        continue;
+                    }
+                };
+                match get_jwks_from_payload_or_uri(&unverified_payload, conn).await {
+                    Ok(keyset) => match verify_jwt_with_jwks(&jwt_net, Some(keyset)) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!(
+                                "Failed to verify authority hint JWT for {ahint_str} with fetched JWKS: {e}"
+                            );
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to get JWKS for authority hint {ahint_str}: {e}");
+                        continue;
+                    }
+                }
             }
         };
 
@@ -199,9 +222,34 @@ async fn collection_tree_walking(
             debug!("JWT verification successful for {entity_id}");
             data
         }
-        Err(e) => {
-            error!("Failed to verify entity configuration for {entity_id}: {e}");
-            return;
+        Err(_) => {
+            // Self-verification failed — try fetching JWKS from jwks_uri
+            debug!("Self-verification failed for {entity_id}, trying jwks_uri fallback");
+            let (unverified_payload, _) = match get_unverified_payload_header(&jwt_net) {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Failed to parse entity configuration JWT for {entity_id}: {e}");
+                    return;
+                }
+            };
+            match get_jwks_from_payload_or_uri(&unverified_payload, conn).await {
+                Ok(keyset) => match verify_jwt_with_jwks(&jwt_net, Some(keyset)) {
+                    Ok(data) => {
+                        debug!("JWT verification successful for {entity_id} via jwks_uri");
+                        data
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to verify entity configuration for {entity_id} with fetched JWKS: {e}"
+                        );
+                        return;
+                    }
+                },
+                Err(e) => {
+                    error!("Failed to get JWKS for entity {entity_id}: {e}");
+                    return;
+                }
+            }
         }
     };
 

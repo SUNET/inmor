@@ -599,9 +599,7 @@ def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_cli
     assert resp.status_code == 400
 
 
-def test_resolve_timeout_on_unreachable(
-    loaddata: Redis, start_server: int, http_client: Client
-):
+def test_resolve_timeout_on_unreachable(loaddata: Redis, start_server: int, http_client: Client):
     """C2: Server does not hang indefinitely on unreachable entities."""
     _rdb = loaddata
     port = start_server

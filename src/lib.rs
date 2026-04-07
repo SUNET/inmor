@@ -633,6 +633,83 @@ pub fn get_jwks_from_payload(payload: &JwtPayload) -> Result<JwkSet> {
     Ok(JwkSet::from_map(internal_map)?)
 }
 
+/// Fetch a JWKS from a remote `jwks_uri` endpoint.
+///
+/// Uses the shared HTTP client with the same URL validation and size limits
+/// as other federation requests.
+pub async fn fetch_jwks_from_uri(uri: &str) -> Result<JwkSet> {
+    let body = get_query(uri).await?;
+    parse_jwks_json(&body).map_err(|e| anyhow!("Failed to parse JWKS from {}: {}", uri, e))
+}
+
+/// Fetch a JWKS from a URI with Redis caching.
+///
+/// Checks Redis for a cached copy first. On cache miss, fetches from the URI,
+/// stores in Redis with a 1-hour TTL, and returns the key set.
+pub async fn get_jwks_from_uri_cached(
+    uri: &str,
+    conn: &mut redis::aio::ConnectionManager,
+) -> Result<JwkSet> {
+    let hash = Sha256::digest(uri);
+    let cache_key = format!("inmor:jwks_cache:{:x}", hash);
+
+    // Try cache first
+    let cached: Option<String> = redis::Cmd::get(&cache_key)
+        .query_async(conn)
+        .await
+        .unwrap_or(None);
+
+    if let Some(ref cached_json) = cached {
+        return parse_jwks_json(cached_json);
+    }
+
+    // Cache miss — fetch from URI
+    let body = get_query(uri).await?;
+    let keyset = parse_jwks_json(&body)?;
+
+    // Store raw JSON in Redis with 1-hour TTL
+    let _: Result<(), _> = redis::Cmd::set_ex(&cache_key, &body, 3600)
+        .query_async(conn)
+        .await;
+
+    Ok(keyset)
+}
+
+/// Parse a JWKS JSON string into a JwkSet.
+fn parse_jwks_json(json_str: &str) -> Result<JwkSet> {
+    let parsed: Value =
+        serde_json::from_str(json_str).map_err(|e| anyhow!("Invalid JWKS JSON: {}", e))?;
+    let keys = parsed
+        .get("keys")
+        .ok_or_else(|| anyhow!("No 'keys' field in JWKS"))?;
+    let mut internal_map: Map<String, Value> = Map::new();
+    internal_map.insert("keys".to_string(), keys.clone());
+    Ok(JwkSet::from_map(internal_map)?)
+}
+
+/// Try to get JWKS from the payload's `jwks` claim, falling back to `jwks_uri`.
+///
+/// Priority: inline `jwks` > `jwks_uri`
+pub async fn get_jwks_from_payload_or_uri(
+    payload: &JwtPayload,
+    conn: &mut redis::aio::ConnectionManager,
+) -> Result<JwkSet> {
+    // Try inline jwks first
+    if let Ok(keyset) = get_jwks_from_payload(payload) {
+        return Ok(keyset);
+    }
+
+    // Fall back to jwks_uri
+    if let Some(uri_value) = payload.claim("jwks_uri")
+        && let Some(uri) = uri_value.as_str()
+    {
+        eprintln!("No inline jwks, fetching from jwks_uri: {}", uri);
+        return get_jwks_from_uri_cached(uri, conn).await;
+    }
+
+    Err(anyhow!("No jwks or jwks_uri found in payload"))
+}
+
 /// Gets the payload and header without any cryptographic verification.
 #[allow(clippy::explicit_counter_loop)]
 pub fn get_unverified_payload_header(data: &str) -> Result<(JwtPayload, JwsHeader)> {
@@ -741,6 +818,7 @@ pub async fn resolve_entity_to_trustanchor(
     start: bool,
     visited: &mut HashSet<String>,
     depth: u8,
+    redis_conn: &mut redis::aio::ConnectionManager,
 ) -> Result<Vec<VerifiedJWT>> {
     if depth > MAX_RESOLVE_DEPTH {
         bail!(
@@ -860,8 +938,8 @@ pub async fn resolve_entity_to_trustanchor(
                 // result a half done list back.
             }
         };
-        // Get the authority's JWKS and then verify the subordinate statement against them.
-        let ah_jwks = match get_jwks_from_payload(&ah_payload) {
+        // Get the authority's JWKS (inline, or via jwks_uri fallback) and verify the subordinate statement.
+        let ah_jwks = match get_jwks_from_payload_or_uri(&ah_payload, redis_conn).await {
             Ok(result) => result,
             Err(e) => {
                 eprintln!(
@@ -901,6 +979,7 @@ pub async fn resolve_entity_to_trustanchor(
                 false,
                 visited,
                 depth + 1,
+                redis_conn,
             ))
             .await?;
             if r_result.is_empty() {
@@ -959,7 +1038,7 @@ fn create_resolve_response_jwt(
 #[get("/resolve")]
 pub async fn resolve_entity(
     info: Query<ResolveParams>,
-    _redis: web::Data<redis::Client>,
+    redis: web::Data<redis::Client>,
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
     let mut found_ta = false;
@@ -970,14 +1049,19 @@ pub async fn resolve_entity(
     } = info.into_inner();
     let tas: Vec<&str> = trust_anchors.iter().map(|s| s as &str).collect();
     let mut visisted: HashSet<String> = HashSet::new();
+    let mut conn = redis
+        .get_connection_manager()
+        .await
+        .map_err(error::ErrorInternalServerError)?;
     // Now loop over the trust_anchors
-    let result = match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted, 0).await {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Error resolving entity {} to trust anchors: {}", sub, e);
-            return error_response_400("invalid_trust_chain", "Failed to find trust chain");
-        }
-    };
+    let result =
+        match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted, 0, &mut conn).await {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("Error resolving entity {} to trust anchors: {}", sub, e);
+                return error_response_400("invalid_trust_chain", "Failed to find trust chain");
+            }
+        };
 
     // Verify that the result is not empty and we actually found a TA
     if result.is_empty() {
@@ -2020,5 +2104,49 @@ mod ssrf_tests {
             validate_entity_type("openid_provider; DROP TABLE keys"),
             Err("unknown entity type")
         );
+    }
+
+    #[test]
+    fn test_parse_jwks_json_valid() {
+        let json = r#"{"keys":[{"kty":"RSA","n":"test","e":"AQAB","kid":"k1"}]}"#;
+        let result = parse_jwks_json(json);
+        assert!(result.is_ok());
+        let keyset = result.unwrap();
+        assert!(!keyset.get("k1").is_empty());
+    }
+
+    #[test]
+    fn test_parse_jwks_json_no_keys_field() {
+        let json = r#"{"not_keys":[]}"#;
+        let result = parse_jwks_json(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No 'keys' field"));
+    }
+
+    #[test]
+    fn test_parse_jwks_json_invalid_json() {
+        let result = parse_jwks_json("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_jwks_from_payload_missing_jwks() {
+        let payload = JwtPayload::new();
+        let result = get_jwks_from_payload(&payload);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No jwks"));
+    }
+
+    #[test]
+    fn test_get_jwks_from_payload_with_jwks() {
+        let mut payload = JwtPayload::new();
+        payload
+            .set_claim(
+                "jwks",
+                Some(json!({"keys":[{"kty":"RSA","n":"test","e":"AQAB","kid":"k1"}]})),
+            )
+            .unwrap();
+        let result = get_jwks_from_payload(&payload);
+        assert!(result.is_ok());
     }
 }

@@ -85,11 +85,12 @@ rebuild-ta:
 up:
   {{dc}} up -d
 
+# To start only the db container, useful for running the collection walk locally
+up-db:
+  {{dc}} up -d db
+
 down:
   {{dc}} down
-
-logs:
-  {{dc}} logs -f 
 
 t-admin *FLAGS:
   {{dc}} exec admin pytest -vvv {{FLAGS}}
