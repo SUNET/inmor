@@ -140,7 +140,9 @@ During registration, the API performs these validations:
 1. **Fetch Entity Configuration**: Downloads and parses the entity's
    ``/.well-known/openid-federation`` JWT
 
-2. **Verify Signature**: Validates the JWT signature using the provided JWKS
+2. **Verify Signature**: Validates the JWT signature using the provided JWKS.
+   If the entity's configuration uses ``jwks_uri`` instead of inline
+   ``jwks``, the keys are fetched from the URI automatically
 
 3. **Check Authority Hints**: Confirms your TA domain is in the entity's
    ``authority_hints`` list
@@ -388,6 +390,12 @@ The ``/resolve`` endpoint builds complete trust chains:
 * Final resolved metadata (after policy application)
 * Complete trust chain (array of JWTs)
 
+The resolve endpoint supports entities that publish ``jwks_uri`` instead of
+inline ``jwks`` in their entity configurations. When an authority in the
+chain lacks inline keys, the resolver fetches them from the ``jwks_uri``
+automatically. Fetched JWKS responses are cached in Redis for 1 hour to
+avoid repeated network round-trips during chain resolution.
+
 Entity Types
 ------------
 
@@ -592,8 +600,14 @@ Complete workflow for onboarding a new subordinate:
         -H "Content-Type: application/json" \
         -d '{"url": "https://new-entity.example.com"}'
 
-   This returns the entity's ``metadata``, ``jwks``, ``authority_hints``,
-   and ``trust_marks`` after signature validation.
+   This returns the entity's ``metadata``, ``jwks``, ``jwks_uri``,
+   ``authority_hints``, and ``trust_marks`` after signature validation.
+
+   If the entity publishes a ``jwks_uri`` instead of inline ``jwks``, the
+   endpoint automatically fetches the keys from the URI and returns them
+   as inline ``jwks`` in the response. This means the registration step
+   always receives populated keys regardless of how the entity publishes
+   them.
 
 4. **Registration**
 
