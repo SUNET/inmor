@@ -19,6 +19,7 @@ from entities.lib import (
     create_server_statement,
     create_subordinate_statement,
     fetch_entity_configuration,
+    fetch_jwks_from_uri,
     fetch_payload,
     merge_our_policy_ontop_subpolicy,
     update_redis_with_subordinate,
@@ -825,7 +826,12 @@ class FetchConfigOutSchema(Schema):
     metadata: Annotated[
         dict[str, Any], Field(description="Entity metadata from the configuration.")
     ]
-    jwks: Annotated[dict[str, Any], Field(description="JWKS from the entity configuration.")]
+    jwks: Annotated[
+        dict[str, Any] | None, Field(description="JWKS from the entity configuration.")
+    ] = None
+    jwks_uri: Annotated[
+        str | None, Field(description="JWKS URI if entity uses remote keys instead of inline.")
+    ] = None
     authority_hints: Annotated[
         list[str] | None, Field(description="Authority hints from the configuration.")
     ] = None
@@ -848,9 +854,18 @@ def fetch_entity_config(request: HttpRequest, data: FetchConfigSchema):
     """
     try:
         payload, _jwt_str = fetch_payload(data.url)
+        jwks = payload.get("jwks")
+        # If no inline jwks, resolve from jwks_uri so the frontend always gets keys
+        if jwks is None and payload.get("jwks_uri"):
+            try:
+                resolved = fetch_jwks_from_uri(payload["jwks_uri"])
+                jwks = resolved.export(private_keys=False, as_dict=True)
+            except Exception:
+                pass  # Return None; frontend will show empty keys
         return 200, {
             "metadata": payload.get("metadata", {}),
-            "jwks": payload.get("jwks", {}),
+            "jwks": jwks,
+            "jwks_uri": payload.get("jwks_uri"),
             "authority_hints": payload.get("authority_hints"),
             "trust_marks": payload.get("trust_marks"),
         }

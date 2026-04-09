@@ -954,3 +954,93 @@ def test_unauthenticated_server_entity(db):
     client = Client()
     response = client.post("/api/v1/server/entity")
     assert response.status_code == 401
+
+
+def test_self_validate_with_inline_jwks():
+    """self_validate works with inline JWKS (standard path)."""
+    from jwcrypto.jwk import JWK, JWKSet
+    from jwcrypto.jwt import JWT
+
+    key = JWK.generate(kty="EC", crv="P-256", kid="test-key-1")
+    keyset = JWKSet()
+    keyset.add(key)
+
+    claims = {
+        "iss": "https://example.com",
+        "sub": "https://example.com",
+        "jwks": keyset.export(private_keys=False, as_dict=True),
+    }
+
+    token = JWT(
+        header={"alg": "ES256", "kid": "test-key-1"},
+        claims=json.dumps(claims),
+    )
+    token.make_signed_token(key)
+    serialized = token.serialize()
+
+    parsed = jwt.JWT.from_jose_token(serialized)
+    payload = self_validate(parsed)
+    assert payload["iss"] == "https://example.com"
+    assert payload["sub"] == "https://example.com"
+    assert "jwks" in payload
+
+
+def test_self_validate_no_jwks_or_uri():
+    """self_validate raises when no jwks, jwks_uri, or signed_jwks_uri."""
+    from jwcrypto.jwk import JWK
+    from jwcrypto.jwt import JWT
+
+    key = JWK.generate(kty="EC", crv="P-256", kid="test-key-2")
+    claims = {
+        "iss": "https://example.com",
+        "sub": "https://example.com",
+        # No jwks, no jwks_uri
+    }
+
+    token = JWT(
+        header={"alg": "ES256", "kid": "test-key-2"},
+        claims=json.dumps(claims),
+    )
+    token.make_signed_token(key)
+    serialized = token.serialize()
+
+    parsed = jwt.JWT.from_jose_token(serialized)
+    with pytest.raises(Exception, match="No jwks or jwks_uri"):
+        self_validate(parsed)
+
+
+def test_self_validate_with_jwks_uri(monkeypatch):
+    """self_validate falls back to jwks_uri when inline jwks is missing."""
+    from jwcrypto.jwk import JWK, JWKSet
+    from jwcrypto.jwt import JWT
+
+    key = JWK.generate(kty="EC", crv="P-256", kid="test-key-3")
+    keyset = JWKSet()
+    keyset.add(key)
+
+    jwks_url = "https://example.com/.well-known/jwks.json"
+
+    # Mock fetch_jwks_from_uri to return our keyset
+    monkeypatch.setattr(
+        "entities.lib.fetch_jwks_from_uri",
+        lambda uri: keyset,
+    )
+
+    claims = {
+        "iss": "https://example.com",
+        "sub": "https://example.com",
+        "jwks_uri": jwks_url,
+        # No inline jwks
+    }
+
+    token = JWT(
+        header={"alg": "ES256", "kid": "test-key-3"},
+        claims=json.dumps(claims),
+    )
+    token.make_signed_token(key)
+    serialized = token.serialize()
+
+    parsed = jwt.JWT.from_jose_token(serialized)
+    payload = self_validate(parsed)
+    assert payload["iss"] == "https://example.com"
+    assert payload["jwks_uri"] == jwks_url

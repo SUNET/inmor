@@ -786,6 +786,11 @@ Fetches and self-validates an entity's OpenID Federation configuration from
 their ``/.well-known/openid-federation`` endpoint. Use this before adding a
 subordinate to inspect their metadata and keys.
 
+If the entity publishes a ``jwks_uri`` instead of inline ``jwks``, the
+endpoint automatically fetches the keys from the URI and returns them as
+inline ``jwks`` in the response. This ensures the response always contains
+populated keys regardless of how the entity publishes them.
+
 **Request Body:**
 
 .. code-block:: json
@@ -822,6 +827,7 @@ subordinate to inspect their metadata and keys.
      "jwks": {
        "keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]
      },
+     "jwks_uri": null,
      "authority_hints": ["https://federation.example.com"],
      "trust_marks": [
        {
@@ -830,6 +836,10 @@ subordinate to inspect their metadata and keys.
        }
      ]
    }
+
+The ``jwks_uri`` field is included in the response when the entity's
+configuration contains one. Even when ``jwks_uri`` is present, the ``jwks``
+field will be populated with the resolved keys.
 
 **Response (400 Bad Request):** Connection errors, invalid URL, signature
 validation failure, or no OpenID Federation configuration found.

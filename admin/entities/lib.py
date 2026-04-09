@@ -185,17 +185,34 @@ def update_redis_with_subordinate(
     _ = r.lpush("inmor:newsubordinate", entity_id)
 
 
+def fetch_jwks_from_uri(uri: str) -> JWKSet:
+    """Fetch a JWKS from a remote jwks_uri endpoint."""
+    resp = httpx.get(uri, timeout=10)
+    resp.raise_for_status()
+    return JWKSet.from_json(resp.text)
+
+
 def self_validate(token: jwt.JWT) -> dict[str, Any]:
-    """Self validates a JWT with JWKS from it."""
+    """Self validates a JWT with JWKS from it.
+
+    Tries inline jwks first, falls back to jwks_uri if available.
+    """
     try:
         payload = json.loads(token.token.objects.get("payload").decode("utf-8"))
-        # First get the jwks for self-verification
-        jwks_set = JWKSet()
-        keys = payload.get("jwks").get("keys")
-        for key in keys:
-            k = JWK(**key)
-            jwks_set.add(k)
-        token.validate(jwks_set)
+        jwks_data = payload.get("jwks")
+        if jwks_data is not None:
+            # Inline JWKS — standard path
+            jwks_set = JWKSet()
+            for key in jwks_data.get("keys", []):
+                jwks_set.add(JWK(**key))
+            token.validate(jwks_set)
+        elif payload.get("jwks_uri"):
+            # Fallback: fetch keys from jwks_uri
+            logger.info("No inline jwks, fetching from jwks_uri: %s", payload["jwks_uri"])
+            jwks_set = fetch_jwks_from_uri(payload["jwks_uri"])
+            token.validate(jwks_set)
+        else:
+            raise ValueError("No jwks or jwks_uri found in payload")
         return payload
     except Exception as e:
         raise Exception(str(e))
