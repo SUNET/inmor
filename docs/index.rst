@@ -74,6 +74,7 @@ Documentation Contents
    guides/admin-ui
    guides/mfa
    guides/api-keys
+   guides/auth-plugins
    guides/trustmarks
    guides/subordinates
    guides/management-commands
