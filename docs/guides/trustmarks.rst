@@ -341,6 +341,78 @@ Configure these in ``localsettings.py``:
 
 These trust marks appear in the TA's entity configuration (``/.well-known/openid-federation``).
 
+Trusted Trust Mark Issuers (Federation Recognition)
+---------------------------------------------------
+
+OpenID Federation §3.1.2 defines the ``trust_mark_issuers`` claim on a Trust
+Anchor's entity configuration. It tells the federation which combinations of
+trust mark type and issuer are recognised. Inmor publishes this claim on
+``/.well-known/openid-federation`` and uses it during ``/resolve`` (§8.3) to
+decide which trust marks may be included in the resolve response.
+
+The recognised list is built from two sources:
+
+1. **External issuers** — configured via ``TA_TRUSTED_TRUSTMARK_ISSUERS`` in
+   ``localsettings.py`` (a Python ``dict[str, list[str]]`` mapping trust mark
+   type URL to a list of allowed issuer entity IDs). This is the authoritative
+   source for issuers other than this TA itself.
+2. **Self-issuance** — for every active ``TrustMarkType`` row in the admin
+   database, this TA's own entity ID
+   (``settings.TRUSTMARK_PROVIDER`` — the ``iss`` of every trust mark issued
+   by this admin) is appended automatically. Operators do not need to restate
+   this in ``localsettings.py``.
+
+.. code-block:: python
+
+   # localsettings.py — only external issuers go here
+   TA_TRUSTED_TRUSTMARK_ISSUERS = {
+       "https://refeds.org/trustmarks/sirtfi": ["https://swamid.se"],
+       "https://openid.net/certification/op": [],   # any issuer (per §3.1.2)
+   }
+
+After changing this setting (or after adding/removing ``TrustMarkType`` rows),
+run the management command to refresh the published entity configuration:
+
+.. code-block:: bash
+
+   docker compose exec admin python manage.py regenerate_entity
+
+Per spec §3.1.2, an empty list for a given type means "anyone may issue trust
+marks with that identifier"; signature, expiry, and (for external issuers)
+revocation status are still verified.
+
+How ``/resolve`` Uses the List
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For every trust mark on a resolved subject, the Rust TA:
+
+1. Skips the mark if its ``trust_mark_type`` is not a key in
+   ``trust_mark_issuers``.
+2. Skips the mark if its ``iss`` is not in the allowed list for that type
+   (empty list bypasses this check).
+3. **For TA-issued marks** (``iss`` equals this TA): verifies the signature
+   against this TA's public keyset and checks Redis for a revocation entry.
+4. **For external-issued marks**: fetches the issuer's entity configuration,
+   discovers the issuer's
+   ``federation_trust_mark_status_endpoint`` from its ``federation_entity``
+   metadata, ``POST``\ s the trust mark to that endpoint, and verifies the
+   response JWT signature against the issuer's JWKS. The mark is included
+   only if the response's ``status`` claim is ``"active"``.
+
+The behaviour is **fail-closed**: any error (network failure, missing status
+endpoint, signature failure, non-active status, malformed JWT) causes that
+single trust mark to be omitted from the resolve response. The rest of the
+resolve still succeeds. Skipped marks are logged at WARN.
+
+If an external issuer does **not** advertise
+``federation_trust_mark_status_endpoint``, marks issued by it are omitted from
+the resolve response (and logged at WARN, like every other skipped mark).
+Issuers that want their marks honoured by Inmor MUST publish a status endpoint
+(per spec §8.4.1).
+
+The resolve response's ``exp`` claim is the minimum of every trust chain
+``exp`` and every included trust mark's ``exp`` (per spec §8.3.2).
+
 Best Practices
 --------------
 

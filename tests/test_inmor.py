@@ -1,12 +1,201 @@
+import base64
 import hashlib
 import json
 import os
+import time
 
 from httpx import Client
-from jwcrypto import jwt
+from jwcrypto import jwk, jwt
 from redis.client import Redis
 
 file_dir = os.path.dirname(os.path.abspath(__file__))
+
+
+# Helpers for the trust-mark-in-resolve tests below.
+#
+# Each test starts from the same loaded Redis dump and may need to rewrite the
+# TA's `trust_mark_issuers` claim. The TA's entity configuration JWT lives at
+# Redis key `inmor:entity_id` and is served verbatim via
+# /.well-known/openid-federation. Because `resolve_entity_to_trustanchor`
+# self-verifies the TA's entity configuration during chain validation, we
+# must re-sign the JWT after editing the payload — see `_repatch_ta_ec()`.
+# The TA's resolve trust-mark gate intentionally trusts Redis (uses
+# `get_unverified_payload_header`) so the re-signed JWT just needs to be
+# decodable; the signature is checked by chain validation which uses the
+# inline `jwks` claim.
+
+_TM_TYPE = "https://sunet.se/does_not_exist_trustmark"
+_TA_ENTITY_ID = "https://localhost:8080"
+_PRIVATE_KEY_PATH = os.path.join(os.path.dirname(file_dir), "private.json")
+
+
+def _b64url_decode(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def _decode_jwt_payload(jwt_str: str) -> dict:
+    return json.loads(_b64url_decode(jwt_str.split(".")[1]).decode())
+
+
+def _decode_jwt_header(jwt_str: str) -> dict:
+    return json.loads(_b64url_decode(jwt_str.split(".")[0]).decode())
+
+
+def _ta_signing_key() -> jwk.JWK:
+    with open(_PRIVATE_KEY_PATH) as f:
+        key_dict = json.load(f)
+    return jwk.JWK(**key_dict)
+
+
+def _resign_payload(payload: dict, original_header: dict) -> str:
+    """Sign `payload` with the TA's signing key, preserving the original `typ`.
+
+    The `kid` is taken from the signing key (or its thumbprint if the key has
+    none); we don't carry over `original_header["kid"]` because the signature
+    has to validate against whatever key we're actually signing with.
+    """
+    key = _ta_signing_key()
+    header = {
+        "alg": "RS256",
+        "kid": key.thumbprint() if key.kid is None else key.kid,
+        "typ": original_header.get("typ", "entity-statement+jwt"),
+    }
+    token = jwt.JWT(header=header, claims=payload)
+    token.make_signed_token(key)
+    return token.serialize()
+
+
+def _repatch_ta_ec(rdb: Redis, **payload_changes):
+    """Mutate the TA's entity-config payload and re-sign so chain verification
+    still succeeds.
+
+    Pass `trust_mark_issuers=None` to drop the claim.
+    """
+    raw = rdb.get("inmor:entity_id")
+    jwt_str = raw.decode() if isinstance(raw, bytes) else raw
+    payload = _decode_jwt_payload(jwt_str)
+    header = _decode_jwt_header(jwt_str)
+    for k, v in payload_changes.items():
+        if v is None:
+            payload.pop(k, None)
+        else:
+            payload[k] = v
+    rdb.set("inmor:entity_id", _resign_payload(payload, header))
+
+
+def _set_trust_mark_issuers(rdb: Redis, mapping):
+    """Replace `trust_mark_issuers` in the TA's entity configuration. Pass
+    `None` to drop the claim entirely."""
+    _repatch_ta_ec(rdb, trust_mark_issuers=mapping)
+
+
+def _accept_trust_mark(rdb: Redis, sub: str, trust_mark_obj: dict) -> None:
+    """Make a trust mark eligible for the TA-issued verification path."""
+    jwt_str = trust_mark_obj["trust_mark"]
+    h = hashlib.sha256(jwt_str.encode()).hexdigest()
+    rdb.sadd("inmor:tm:alltime", h)
+    rdb.hset(
+        f"inmor:tm:{sub}",
+        trust_mark_obj["trust_mark_type"],
+        jwt_str,
+    )
+
+
+def _resolve_payload(http_client: Client, port: int, sub: str) -> dict:
+    url = (
+        f"https://localhost:{port}/resolve"
+        f"?sub={sub}&trust_anchor={_TA_ENTITY_ID}"
+    )
+    resp = http_client.get(url)
+    assert resp.status_code == 200, resp.text
+    return _decode_jwt_payload(resp.text)
+
+
+def _sign_with_ta(payload: dict, typ: str) -> str:
+    key = _ta_signing_key()
+    header = {"alg": "RS256", "kid": key.kid, "typ": typ}
+    token = jwt.JWT(header=header, claims=payload)
+    token.make_signed_token(key)
+    return token.serialize()
+
+
+def _build_subject(
+    rdb: Redis,
+    fake_subject,
+    trust_marks: list[dict] | None,
+) -> str:
+    """Spin up a fake subject EC reachable by the TA, register a subordinate
+    statement for it in Redis, and return the subject's entity_id.
+
+    The subject signs its EC with a fresh ephemeral RSA key; the TA verifies
+    the subordinate statement using the inline `jwks` claim (which carries
+    that key). Trust marks (if any) are signed by the TA and embedded in the
+    subject's EC.
+    """
+    subject_id = fake_subject.entity_id
+    subject_key = jwk.JWK.generate(kty="RSA", size=2048, alg="RS256", use="sig")
+    subject_key.kid = subject_key.thumbprint()
+    subject_jwks = {"keys": [json.loads(subject_key.export(private_key=False))]}
+    now = int(time.time())
+    exp = now + 3600
+
+    subject_ec_payload: dict = {
+        "iss": subject_id,
+        "sub": subject_id,
+        "iat": now,
+        "exp": exp,
+        "authority_hints": [_TA_ENTITY_ID],
+        "jwks": subject_jwks,
+        "metadata": {
+            "federation_entity": {"organization_name": "Fake Test Subject"},
+        },
+    }
+    if trust_marks is not None:
+        subject_ec_payload["trust_marks"] = trust_marks
+
+    subject_header = {"alg": "RS256", "kid": subject_key.kid, "typ": "entity-statement+jwt"}
+    subject_ec_token = jwt.JWT(header=subject_header, claims=subject_ec_payload)
+    subject_ec_token.make_signed_token(subject_key)
+    fake_subject.set_entity_configuration(subject_ec_token.serialize())
+
+    # Register a subordinate statement for this subject in the TA. The TA's
+    # /fetch endpoint reads it via `HGET inmor:subordinates {subject_id}` (see
+    # `fetch_subordinates` in src/lib.rs). The statement asserts the subject's
+    # keyset and is signed by the TA.
+    sub_statement = _sign_with_ta(
+        {
+            "iss": _TA_ENTITY_ID,
+            "sub": subject_id,
+            "iat": now,
+            "exp": exp,
+            "jwks": subject_jwks,
+        },
+        "entity-statement+jwt",
+    )
+    # The /fetch endpoint reads `inmor:subordinates` (the signed sub statement);
+    # `inmor:subordinates:jwt` is a separate hash used by /list (subject's own EC).
+    rdb.hset("inmor:subordinates", subject_id, sub_statement)
+
+    return subject_id
+
+
+def _build_trust_mark(
+    sub: str,
+    trust_mark_type: str = _TM_TYPE,
+    issuer: str = _TA_ENTITY_ID,
+    exp_offset: int = 3600,
+) -> dict:
+    """Sign a trust mark with the TA's key. Returns the {trust_mark, trust_mark_type} object."""
+    now = int(time.time())
+    payload = {
+        "iss": issuer,
+        "sub": sub,
+        "iat": now,
+        "exp": now + exp_offset,
+        "trust_mark_type": trust_mark_type,
+    }
+    jwt_str = _sign_with_ta(payload, "trust-mark+jwt")
+    return {"trust_mark": jwt_str, "trust_mark_type": trust_mark_type}
 
 
 def test_server(loaddata: Redis, start_server: int, http_client: Client):
@@ -615,3 +804,261 @@ def test_resolve_timeout_on_unreachable(loaddata: Redis, start_server: int, http
         timeout=30,
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# /resolve trust mark verification (spec §8.3, §8.3.2)
+# ---------------------------------------------------------------------------
+#
+# These tests exercise verify_trust_marks_for_resolve in src/lib.rs. Each test
+# spins up a `fake_subject` HTTP server on a loopback port, configures it to
+# return a custom entity configuration (built fresh, signed with an ephemeral
+# subject key, with TA-signed trust marks embedded), registers a subordinate
+# statement for the subject in Redis, and resolves it. The TA's allow_http
+# test config lets the resolver fetch http://127.0.0.1:PORT/.well-known/...
+#
+# Trust marks are signed with the TA's own private key (loaded from
+# private.json) so the TA-issued verification path
+# (verify_ta_issued_trust_mark in lib.rs) verifies them against the TA's
+# in-memory public keyset.
+
+
+def test_resolve_includes_ta_issued_trust_mark(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Active TA-issued trust mark must appear in /resolve response (spec §8.3)."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1
+    assert marks[0]["trust_mark_type"] == _TM_TYPE
+    assert marks[0]["trust_mark"] == tm_obj["trust_mark"]
+
+
+def test_resolve_excludes_revoked_ta_issued_trust_mark(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "A revoked TA-issued trust mark must not appear in /resolve response."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+    rdb.hset(f"inmor:tm:{subject_id}", _TM_TYPE, "revoked")
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload
+
+
+def test_resolve_excludes_unrecognized_trust_mark_type(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Trust marks whose type is not in trust_mark_issuers must be excluded."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)  # uses _TM_TYPE
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    # Restrict the federation to a different type — the subject's mark is unrecognised.
+    _set_trust_mark_issuers(rdb, {"https://example.com/some_other_type": []})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload
+
+
+def test_resolve_excludes_trust_mark_from_disallowed_issuer(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Trust mark whose `iss` is not in the allowed list for its type must be excluded."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)  # iss=_TA_ENTITY_ID
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    # Allowed list for the type contains a different issuer — TA's iss must not pass.
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: ["https://other-issuer.example.com"]})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload
+
+
+def test_resolve_includes_trust_mark_when_issuer_list_empty(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Empty allowed-issuer list means anyone may issue (spec §3.1.2)."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: []})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1
+    assert marks[0]["trust_mark_type"] == _TM_TYPE
+
+
+def test_resolve_omits_trust_marks_claim_when_no_trust_mark_issuers(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "If the TA's entity config has no trust_mark_issuers claim, no marks are recognised."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, None)
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload
+
+
+def test_resolve_exp_is_min_of_chain_and_trust_marks(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Per spec §8.3.2, response exp = min(chain exp, trust mark exp)."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    # Trust mark expires soon (5 minutes); chain entries are typically longer.
+    tm_obj = _build_trust_mark(subject_id, exp_offset=300)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1, "trust mark must be included"
+
+    tm_exp = int(_decode_jwt_payload(tm_obj["trust_mark"])["exp"])
+    chain_exps = []
+    for entry in payload.get("trust_chain", []):
+        chain_payload = _decode_jwt_payload(entry)
+        if "exp" in chain_payload:
+            chain_exps.append(int(chain_payload["exp"]))
+    assert chain_exps, "trust chain must have at least one exp"
+
+    expected_min = min(min(chain_exps), tm_exp)
+    response_exp = int(payload["exp"])
+    assert response_exp <= expected_min, (
+        f"response exp {response_exp} must be <= min(chain exp {min(chain_exps)}, "
+        f"trust mark exp {tm_exp}) = {expected_min}"
+    )
+
+
+def test_resolve_excludes_unknown_trust_mark(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "A trust mark whose hash is not in inmor:tm:alltime must be excluded."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+    tm_obj = _build_trust_mark(subject_id)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    # Intentionally skip _accept_trust_mark — the SISMEMBER check fails.
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload
+
+
+def test_resolve_caps_trust_marks_at_limit(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Subject EC with more marks than MAX_TRUST_MARKS_PER_RESOLVE must be capped."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+
+    # 50 valid TA-issued marks (well over the 32 cap).
+    marks = [_build_trust_mark(subject_id) for _ in range(50)]
+    _build_subject(rdb, fake_subject, trust_marks=marks)
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    for m in marks:
+        _accept_trust_mark(rdb, subject_id, m)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    response_marks = payload.get("trust_marks") or []
+    assert len(response_marks) <= 32, (
+        f"response carried {len(response_marks)} marks; resolver must cap at 32"
+    )
+
+
+def test_resolve_rejects_outer_inner_trust_mark_type_mismatch(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Per spec §7.4, outer trust_mark_type MUST equal inner; mismatch → skip."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+
+    # Build a perfectly valid TA-issued mark (inner trust_mark_type=_TM_TYPE).
+    tm_obj = _build_trust_mark(subject_id)
+    # Then lie in the outer wrapper.
+    tampered = {
+        "trust_mark": tm_obj["trust_mark"],
+        "trust_mark_type": "https://example.com/some_other_type",
+    }
+    _build_subject(rdb, fake_subject, trust_marks=[tampered])
+    # Recognise BOTH types so the mismatch (not the recognition gate) is what skips it.
+    _set_trust_mark_issuers(
+        rdb,
+        {
+            _TM_TYPE: [_TA_ENTITY_ID],
+            "https://example.com/some_other_type": [_TA_ENTITY_ID],
+        },
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, (
+        "outer/inner trust_mark_type mismatch must be rejected (spec §7.4)"
+    )
+
+
+def test_resolve_rejects_trust_mark_for_different_subject(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "A trust mark whose inner `sub` differs from the resolve subject must be skipped."
+    rdb = loaddata
+    port = start_server
+
+    subject_id = fake_subject.entity_id
+
+    # Build a mark issued to someone else and embed it in our subject's EC.
+    other_entity = "https://other.example.com"
+    foreign_mark = _build_trust_mark(other_entity)
+    _build_subject(rdb, fake_subject, trust_marks=[foreign_mark])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    # Accept the mark under the *correct* (foreign) subject — so the only
+    # remaining barrier is the sub-mismatch check we're testing.
+    _accept_trust_mark(rdb, other_entity, foreign_mark)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, (
+        "trust mark whose JWT sub doesn't match the resolve subject must not be included"
+    )
