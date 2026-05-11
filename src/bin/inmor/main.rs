@@ -1,32 +1,15 @@
-#![allow(unused)]
-
-use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer, Responder, error, get, middleware, web,
-};
+use actix_web::{App, HttpResponse, HttpServer, Responder, error, get, middleware, web};
 use lazy_static::lazy_static;
-use redis::Client;
-use redis::Commands;
-use serde::Deserialize;
-use serde::Serialize;
-use std::fmt::format;
+use log::info;
 use std::fs;
-use std::ops::Deref;
 use std::sync::Mutex;
 use std::{env, io};
 
 use clap::Parser;
 use inmor::*;
-use josekit::{
-    JoseError,
-    jwk::{Jwk, JwkSet},
-    jws::{JwsHeader, RS256},
-    jwt::{self, JwtPayload},
-};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
-use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
 
 lazy_static! {
     static ref TERA: tera::Tera = {
@@ -175,10 +158,15 @@ async fn main() -> io::Result<()> {
     //
     //
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+    // Touch the signing key so a missing private.json crashes us here, not on
+    // the first request that needs to sign.
+    inmor::ensure_signing_key_loaded();
+
     let redis =
         redis::Client::open(server_config.redis_uri.as_str()).expect("Failed to connect to Redis");
 
-    let mut federation = Federation {
+    let federation = Federation {
         entities: Mutex::new(HashMap::new()),
     };
 
@@ -210,6 +198,11 @@ async fn main() -> io::Result<()> {
             .service(federation_historical_keys)
             .service(health)
             .service(server_status)
+            .wrap(
+                middleware::DefaultHeaders::new()
+                    .add(("X-Content-Type-Options", "nosniff"))
+                    .add(("X-Frame-Options", "DENY")),
+            )
             .wrap(middleware::NormalizePath::trim())
             .wrap(middleware::Logger::default())
     })
@@ -220,8 +213,8 @@ async fn main() -> io::Result<()> {
         let tls_cert_path = server_config.tls_cert.as_ref().unwrap();
         let tls_key_path = server_config.tls_key.as_ref().unwrap();
 
-        eprintln!("Loading TLS certificate from: {}", tls_cert_path);
-        eprintln!("Loading TLS key from: {}", tls_key_path);
+        info!("Loading TLS certificate from: {}", tls_cert_path);
+        info!("Loading TLS key from: {}", tls_key_path);
 
         // Load TLS certificate and key
         let cert_file = &mut io::BufReader::new(fs::File::open(tls_cert_path)?);
@@ -265,13 +258,13 @@ async fn main() -> io::Result<()> {
                 )
             })?;
 
-        eprintln!("Starting HTTPS server on 0.0.0.0:{}", port);
+        info!("Starting HTTPS server on 0.0.0.0:{}", port);
         http_server
             .bind_rustls_0_23(("0.0.0.0", port), tls_config)?
             .run()
             .await
     } else {
-        eprintln!("Starting HTTP server on 0.0.0.0:{}", port);
+        info!("Starting HTTP server on 0.0.0.0:{}", port);
         http_server.bind(("0.0.0.0", port))?.run().await
     }
 }
