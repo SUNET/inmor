@@ -77,10 +77,35 @@ def create_server_statement() -> str:
     if len(tms) > 0:
         sub_data["trust_marks"] = tms
 
-    # Any trusted trustmark issuers
-    tm_trusted_issuers = settings.TA_TRUSTED_TRUSTMARK_ISSUERS
-    if len(tm_trusted_issuers) > 0:
-        sub_data["trust_mark_issuers"] = tm_trusted_issuers
+    # Any trusted trustmark issuers.
+    # Settings holds *external* issuers; the TA's own entity_id
+    # (settings.TRUSTMARK_PROVIDER, which is the `iss` of every trust mark this
+    # admin issues) is auto-included for every active TrustMarkType so that
+    # /resolve will recognise marks issued by this TA without operators having
+    # to restate that fact in localsettings.py.
+    #
+    # Per spec §3.1.2, an empty list for a type means "anyone may issue". We
+    # treat an explicit `{type: []}` in settings as a deliberate "open" marker
+    # and skip auto-include for that type — otherwise auto-include would flip
+    # the operator's intent from "any issuer" to "TA only".
+    from trustmarks.models import TrustMarkType
+
+    explicitly_open: set[str] = {
+        k for k, v in settings.TA_TRUSTED_TRUSTMARK_ISSUERS.items() if v == []
+    }
+    issuers: dict[str, list[str]] = {
+        k: list(v) for k, v in settings.TA_TRUSTED_TRUSTMARK_ISSUERS.items()
+    }
+    ta_issuer_id = settings.TRUSTMARK_PROVIDER
+    for tmt in TrustMarkType.objects.filter(active=True):
+        if tmt.tmtype in explicitly_open:
+            # Operator deliberately set [] for this type — preserve "any issuer".
+            continue
+        issuers.setdefault(tmt.tmtype, [])
+        if ta_issuer_id not in issuers[tmt.tmtype]:
+            issuers[tmt.tmtype].append(ta_issuer_id)
+    if issuers:
+        sub_data["trust_mark_issuers"] = issuers
 
     # Set creation and expiry time
     now = datetime.now()

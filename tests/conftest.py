@@ -1,6 +1,8 @@
+import http.server
 import os
 import subprocess
 import tempfile
+import threading
 import time
 
 import httpx
@@ -37,6 +39,70 @@ def loaddata(rdb: Redis) -> Redis:
         # Now redis-cli against this
         _ = subprocess.run(["redis-cli", "-p", "6088", "--pipe"], input=data)
     return redis
+
+
+class _FakeSubject:
+    """A dynamically-controllable fake federation subject.
+
+    Listens on a loopback HTTP port and serves whatever JWT body has been
+    registered via `set_entity_configuration()`. Used to test /resolve
+    trust-mark behaviour: the resolver fetches `<entity_id>/.well-known/openid-federation`
+    and we control the response.
+    """
+
+    def __init__(self, port: int, server: http.server.HTTPServer):
+        self.port = port
+        self.entity_id = f"http://127.0.0.1:{port}"
+        self._server = server
+        self._body: bytes | None = None
+
+    def set_entity_configuration(self, jwt_body: str) -> None:
+        self._server.entity_config = jwt_body.encode()  # type: ignore[attr-defined]
+
+    def shutdown(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+class _SubjectHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 — required by stdlib API
+        if self.path == "/.well-known/openid-federation":
+            body = getattr(self.server, "entity_config", None)
+            if not body:
+                self.send_response(503)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/entity-statement+jwt")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, *_):  # silence stderr spam
+        return
+
+
+@pytest.fixture(scope="function")
+def fake_subject():
+    """A loopback HTTP server that the TA can `GET` as a federation subject.
+
+    Binds to port 0 and reads back the OS-assigned port from `server_address`
+    after bind — no race window between port discovery and listener creation.
+    """
+    server = http.server.HTTPServer(("127.0.0.1", 0), _SubjectHandler)
+    port = server.server_address[1]
+    server.entity_config = None  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    fs = _FakeSubject(port, server)
+    try:
+        yield fs
+    finally:
+        fs.shutdown()
+        thread.join(timeout=2)
 
 
 @pytest.fixture(scope="session")
