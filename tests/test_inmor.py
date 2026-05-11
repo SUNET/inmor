@@ -48,7 +48,12 @@ def _ta_signing_key() -> jwk.JWK:
 
 
 def _resign_payload(payload: dict, original_header: dict) -> str:
-    """Sign `payload` with the TA's signing key, preserving header `kid`/`typ`."""
+    """Sign `payload` with the TA's signing key, preserving the original `typ`.
+
+    The `kid` is taken from the signing key (or its thumbprint if the key has
+    none); we don't carry over `original_header["kid"]` because the signature
+    has to validate against whatever key we're actually signing with.
+    """
     key = _ta_signing_key()
     header = {
         "alg": "RS256",
@@ -154,8 +159,9 @@ def _build_subject(
     fake_subject.set_entity_configuration(subject_ec_token.serialize())
 
     # Register a subordinate statement for this subject in the TA. The TA's
-    # /fetch endpoint reads `inmor:subordinates:jwt`. The statement asserts
-    # the subject's keyset and is signed by the TA.
+    # /fetch endpoint reads it via `HGET inmor:subordinates {subject_id}` (see
+    # `fetch_subordinates` in src/lib.rs). The statement asserts the subject's
+    # keyset and is signed by the TA.
     sub_statement = _sign_with_ta(
         {
             "iss": _TA_ENTITY_ID,

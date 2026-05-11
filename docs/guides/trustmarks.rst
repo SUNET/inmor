@@ -405,9 +405,10 @@ single trust mark to be omitted from the resolve response. The rest of the
 resolve still succeeds. Skipped marks are logged at WARN.
 
 If an external issuer does **not** advertise
-``federation_trust_mark_status_endpoint``, marks issued by it will be silently
-excluded. Issuers that want their marks honoured by Inmor MUST publish a
-status endpoint (per spec §8.4.1).
+``federation_trust_mark_status_endpoint``, marks issued by it are omitted from
+the resolve response (and logged at WARN, like every other skipped mark).
+Issuers that want their marks honoured by Inmor MUST publish a status endpoint
+(per spec §8.4.1).
 
 The resolve response's ``exp`` claim is the minimum of every trust chain
 ``exp`` and every included trust mark's ``exp`` (per spec §8.3.2).

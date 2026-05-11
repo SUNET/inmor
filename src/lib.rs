@@ -1128,34 +1128,36 @@ async fn verify_ta_issued_trust_mark(
     }
 }
 
-/// Verify a single trust mark from a subject's entity configuration.
-///
-/// If the mark was issued by this TA (`issuer == ta_entity_id`), this delegates to
-/// `verify_ta_issued_trust_mark` (local Redis + signature). Otherwise it calls the
-/// issuer's `federation_trust_mark_status_endpoint` (per spec §8.4.1) and accepts
-/// the mark only if the response JWT's signature verifies against the issuer's JWKS
-/// AND its `status` claim is `"active"`.
-///
-/// Fail-closed at every step: any network error, parse error, signature failure,
-/// missing endpoint, or non-active status returns `false` and logs at WARN.
-async fn verify_single_trust_mark(
-    trust_mark_jwt: &str,
-    issuer: &str,
-    ta_entity_id: &str,
-    ta_public_keyset: &JwkSet,
-    conn: &mut redis::aio::ConnectionManager,
-) -> bool {
-    if issuer == ta_entity_id {
-        return verify_ta_issued_trust_mark(trust_mark_jwt, ta_public_keyset, conn).await;
-    }
+/// Cached per-issuer data resolved during one /resolve invocation.
+#[derive(Clone)]
+struct IssuerInfo {
+    jwks: JwkSet,
+    status_endpoint: String,
+}
 
-    // External issuer path.
+/// Memoizes external-issuer lookups for the duration of a single /resolve call.
+///
+/// A subject can carry several marks from the same issuer; without this each
+/// would refetch the issuer's entity configuration (and possibly its
+/// `jwks_uri`) — burning the 30s trust-mark wall-clock budget on duplicate
+/// work. `None` caches a prior failure so we don't retry within the request.
+type IssuerInfoCache = HashMap<String, Option<IssuerInfo>>;
+
+/// Fetch + verify an external issuer's entity configuration, returning the data
+/// needed to call its trust-mark-status endpoint.
+///
+/// Returns `None` (and logs at WARN) on any failure: fetch error, parse error,
+/// JWKS resolution failure, signature failure, or missing status endpoint.
+async fn resolve_external_issuer(
+    issuer: &str,
+    conn: &mut redis::aio::ConnectionManager,
+) -> Option<IssuerInfo> {
     // 1. Fetch the issuer's entity configuration over the SSRF-safe path.
     let ec_jwt = match get_entity_configruation_as_jwt(issuer).await {
         Ok(s) => s,
         Err(e) => {
             warn!("trust mark: failed to fetch entity configuration for issuer {issuer}: {e}");
-            return false;
+            return None;
         }
     };
 
@@ -1167,14 +1169,14 @@ async fn verify_single_trust_mark(
         Ok(p) => p,
         Err(e) => {
             warn!("trust mark: failed to parse entity configuration for issuer {issuer}: {e}");
-            return false;
+            return None;
         }
     };
     let issuer_jwks = match get_jwks_from_payload_or_uri(&ec_payload_unverified, conn).await {
         Ok(j) => j,
         Err(e) => {
             warn!("trust mark: failed to obtain JWKS for issuer {issuer}: {e}");
-            return false;
+            return None;
         }
     };
 
@@ -1186,7 +1188,7 @@ async fn verify_single_trust_mark(
             warn!(
                 "trust mark: entity configuration signature/temporal verification failed for issuer {issuer}: {e}"
             );
-            return false;
+            return None;
         }
     };
 
@@ -1202,22 +1204,90 @@ async fn verify_single_trust_mark(
             warn!(
                 "trust mark: issuer {issuer} does not advertise federation_trust_mark_status_endpoint; skipping"
             );
+            return None;
+        }
+    };
+
+    Some(IssuerInfo {
+        jwks: issuer_jwks,
+        status_endpoint,
+    })
+}
+
+/// Verify a single trust mark from a subject's entity configuration.
+///
+/// If the mark was issued by this TA (`issuer == ta_entity_id`), this delegates to
+/// `verify_ta_issued_trust_mark` (local Redis + signature). Otherwise it:
+///
+/// 1. Resolves the issuer's JWKS + status endpoint (memoized in `issuer_cache`).
+/// 2. Verifies the trust-mark JWT itself (signature + exp/nbf/iat) against the
+///    issuer's JWKS. Without this step the resolve-response `exp` calculation
+///    would fold in an attacker-controlled `exp` claim from an unverified JWT,
+///    and a malformed mark whose status endpoint happens to misbehave could
+///    still slip through.
+/// 3. POSTs the mark to the issuer's `federation_trust_mark_status_endpoint`
+///    (spec §8.4.1) and accepts the mark only if the response JWT verifies
+///    against the same JWKS, its `trust_mark` claim echoes back the posted JWT,
+///    its `iss` matches the queried issuer, and `status == "active"`.
+///
+/// Fail-closed at every step: any network error, parse error, signature failure,
+/// missing endpoint, or non-active status returns `false` and logs at WARN.
+async fn verify_single_trust_mark(
+    trust_mark_jwt: &str,
+    issuer: &str,
+    ta_entity_id: &str,
+    ta_public_keyset: &JwkSet,
+    conn: &mut redis::aio::ConnectionManager,
+    issuer_cache: &mut IssuerInfoCache,
+) -> bool {
+    if issuer == ta_entity_id {
+        return verify_ta_issued_trust_mark(trust_mark_jwt, ta_public_keyset, conn).await;
+    }
+
+    // 1. Resolve the issuer's JWKS + status endpoint, caching per /resolve.
+    let issuer_info = if let Some(cached) = issuer_cache.get(issuer) {
+        match cached {
+            Some(info) => info.clone(),
+            None => return false, // cached failure
+        }
+    } else {
+        let resolved = resolve_external_issuer(issuer, conn).await;
+        issuer_cache.insert(issuer.to_string(), resolved.clone());
+        match resolved {
+            Some(info) => info,
+            None => return false,
+        }
+    };
+
+    // 2. Verify the trust mark JWT itself against the issuer's JWKS. This
+    //    enforces signature + exp/nbf/iat *before* the network round-trip and
+    //    before its `exp` is folded into the resolve-response `exp`.
+    if let Err(e) = verify_jwt_with_jwks(trust_mark_jwt, Some(issuer_info.jwks.clone())) {
+        warn!(
+            "trust mark: JWT signature/temporal verification failed against issuer {issuer} JWKS: {e}"
+        );
+        return false;
+    }
+
+    // 3. POST the trust mark to the status endpoint.
+    let response_jwt = match post_form_query(
+        &issuer_info.status_endpoint,
+        &[("trust_mark", trust_mark_jwt)],
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                "trust mark: POST {} failed: {e}",
+                issuer_info.status_endpoint
+            );
             return false;
         }
     };
 
-    // 5. POST the trust mark to the status endpoint.
-    let response_jwt =
-        match post_form_query(&status_endpoint, &[("trust_mark", trust_mark_jwt)]).await {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("trust mark: POST {status_endpoint} failed: {e}");
-                return false;
-            }
-        };
-
-    // 6. Verify signature and temporal claims of the status response.
-    let (status_payload, _) = match verify_jwt_with_jwks(&response_jwt, Some(issuer_jwks)) {
+    // 4. Verify signature and temporal claims of the status response.
+    let (status_payload, _) = match verify_jwt_with_jwks(&response_jwt, Some(issuer_info.jwks)) {
         Ok(p) => p,
         Err(e) => {
             warn!(
@@ -1227,7 +1297,7 @@ async fn verify_single_trust_mark(
         }
     };
 
-    // 7. Defense-in-depth: bind the status response to the request and the
+    // 5. Defense-in-depth: bind the status response to the request and the
     //    queried issuer. Without these, a buggy or compromised issuer could
     //    return a cached "active" response for a *different* mark, or a JWT
     //    whose `iss` doesn't match the issuer whose keys we just trusted.
@@ -1249,7 +1319,7 @@ async fn verify_single_trust_mark(
         return false;
     }
 
-    // 8. Inspect the `status` claim. Anything other than "active" → skip.
+    // 6. Inspect the `status` claim. Anything other than "active" → skip.
     let status = status_payload
         .claim("status")
         .and_then(|v| v.as_str())
@@ -1345,6 +1415,10 @@ async fn verify_trust_marks_for_resolve(
     }
 
     let mut verified: Vec<Value> = Vec::new();
+    // Per-resolve memoization for external issuers. A subject can carry several
+    // marks from the same issuer; without this we'd refetch the issuer EC (and
+    // potentially its `jwks_uri`) once per mark and burn the 30s budget.
+    let mut issuer_cache: IssuerInfoCache = HashMap::new();
     for tm in trust_marks.iter().take(MAX_TRUST_MARKS_PER_RESOLVE) {
         let tm_obj = match tm.as_object() {
             Some(o) => o,
@@ -1417,7 +1491,16 @@ async fn verify_trust_marks_for_resolve(
             }
         }
 
-        if verify_single_trust_mark(jwt_str, &issuer, ta_entity_id, ta_public_keyset, conn).await {
+        if verify_single_trust_mark(
+            jwt_str,
+            &issuer,
+            ta_entity_id,
+            ta_public_keyset,
+            conn,
+            &mut issuer_cache,
+        )
+        .await
+        {
             verified.push(tm.clone());
         }
     }

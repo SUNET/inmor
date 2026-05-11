@@ -54,7 +54,6 @@ class _FakeSubject:
         self.port = port
         self.entity_id = f"http://127.0.0.1:{port}"
         self._server = server
-        self._body: bytes | None = None
 
     def set_entity_configuration(self, jwt_body: str) -> None:
         self._server.entity_config = jwt_body.encode()  # type: ignore[attr-defined]
