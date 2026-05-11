@@ -777,13 +777,17 @@ def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_cli
     port = start_server
     url = f"https://localhost:{port}/resolve"
     # Try to resolve an entity at a private IP — should fail with 400
-    # because the entity configuration cannot be fetched
+    # because the entity configuration cannot be fetched. We allow up to 30s
+    # because the server's outbound reqwest client has a 5s connect timeout
+    # and a 10s overall timeout; depending on the network's response to a
+    # blackhole IP the connect can wait the full window before returning.
     resp = http_client.get(
         url,
         params={
             "sub": "https://192.168.1.1:9999",
             "trust_anchor": f"https://localhost:{port}",
         },
+        timeout=30,
     )
     assert resp.status_code == 400
 
