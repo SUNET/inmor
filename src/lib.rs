@@ -1099,44 +1099,72 @@ pub struct Constraints {
 }
 
 impl Constraints {
-    /// Parse a `constraints` claim out of a JWT payload. Returns `Default`
-    /// when the claim is absent or malformed (the walker treats no-constraint
-    /// the same as the field-not-set case).
-    pub fn from_payload(payload: &JwtPayload) -> Self {
+    /// Parse a `constraints` claim out of a JWT payload.
+    ///
+    /// * Absent `constraints` returns `Ok(Self::default())` — no constraint
+    ///   set by this statement is valid.
+    /// * Present but malformed `constraints` (non-object, wrong field types,
+    ///   `max_path_length` out of `u8` range, non-string entries inside an
+    ///   array) returns `Err(...)`. The walker treats that error as a
+    ///   verification failure and skips the offending authority, so a
+    ///   constraint issuer cannot disable enforcement by sending a broken
+    ///   `constraints` object.
+    pub fn from_payload(payload: &JwtPayload) -> Result<Self> {
         let Some(c) = payload.claim("constraints") else {
-            return Self::default();
+            return Ok(Self::default());
         };
         let Some(obj) = c.as_object() else {
-            return Self::default();
+            bail!("constraints claim must be a JSON object");
         };
-        let max_path_length = obj
-            .get("max_path_length")
-            .and_then(|v| v.as_u64())
-            .and_then(|n| u8::try_from(n).ok());
-        let pull_string_array = |key: &str| -> Vec<String> {
-            obj.get(key)
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|e| e.as_str().map(str::to_string))
-                        .collect()
+        let max_path_length = match obj.get("max_path_length") {
+            None => None,
+            Some(v) => {
+                let n = v.as_u64().ok_or_else(|| {
+                    anyhow!("constraints.max_path_length must be a non-negative integer")
+                })?;
+                Some(u8::try_from(n).map_err(|_| {
+                    anyhow!("constraints.max_path_length {n} out of u8 range (0..=255)")
+                })?)
+            }
+        };
+        let pull_string_array = |key: &str| -> Result<Vec<String>> {
+            let Some(v) = obj.get(key) else {
+                return Ok(Vec::new());
+            };
+            let arr = v
+                .as_array()
+                .ok_or_else(|| anyhow!("constraints.{key} must be an array of strings"))?;
+            arr.iter()
+                .map(|e| {
+                    e.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| anyhow!("constraints.{key} contains non-string entry"))
                 })
-                .unwrap_or_default()
+                .collect()
         };
-        let pull_opt_string_array = |key: &str| -> Option<Vec<String>> {
-            obj.get(key).and_then(|v| v.as_array()).map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.as_str().map(str::to_string))
-                    .collect()
-            })
+        let pull_opt_string_array = |key: &str| -> Result<Option<Vec<String>>> {
+            let Some(v) = obj.get(key) else {
+                return Ok(None);
+            };
+            let arr = v
+                .as_array()
+                .ok_or_else(|| anyhow!("constraints.{key} must be an array of strings"))?;
+            arr.iter()
+                .map(|e| {
+                    e.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| anyhow!("constraints.{key} contains non-string entry"))
+                })
+                .collect::<Result<Vec<_>>>()
+                .map(Some)
         };
-        Self {
+        Ok(Self {
             max_path_length,
-            permitted_subtrees: pull_string_array("permitted_subtrees"),
-            excluded_subtrees: pull_string_array("excluded_subtrees"),
-            allowed_entity_types: pull_opt_string_array("allowed_entity_types"),
-            allowed_leaf_entity_types: pull_opt_string_array("allowed_leaf_entity_types"),
-        }
+            permitted_subtrees: pull_string_array("permitted_subtrees")?,
+            excluded_subtrees: pull_string_array("excluded_subtrees")?,
+            allowed_entity_types: pull_opt_string_array("allowed_entity_types")?,
+            allowed_leaf_entity_types: pull_opt_string_array("allowed_leaf_entity_types")?,
+        })
     }
 
     /// Check the resolve subject against these constraints.
@@ -1182,6 +1210,12 @@ impl Constraints {
             bail!("subject {subject} under excluded_subtree {bad}");
         }
         if let Some(allowed) = &self.allowed_entity_types {
+            // A subject with no declared metadata keys has no way to satisfy
+            // an allowlist constraint — fail closed so a subject can't bypass
+            // an entity-type restriction by simply omitting `metadata`.
+            if subject_entity_types.is_empty() {
+                bail!("allowed_entity_types is set but subject has no declared entity types");
+            }
             let allowed_set: HashSet<&str> = allowed.iter().map(String::as_str).collect();
             for t in subject_entity_types {
                 if !allowed_set.contains(t.as_str()) {
@@ -1190,6 +1224,10 @@ impl Constraints {
             }
         }
         if is_leaf && let Some(allowed) = &self.allowed_leaf_entity_types {
+            // Same fail-closed treatment for the leaf-only variant.
+            if subject_entity_types.is_empty() {
+                bail!("allowed_leaf_entity_types is set but leaf has no declared entity types");
+            }
             let allowed_set: HashSet<&str> = allowed.iter().map(String::as_str).collect();
             for t in subject_entity_types {
                 if !allowed_set.contains(t.as_str()) {
@@ -1286,6 +1324,21 @@ impl WalkContext {
 /// §6.2.1 `max_path_length` as a defense-in-depth backstop.
 const MAX_RESOLVE_DEPTH: u8 = 10;
 
+/// Return `Err(FetchError::transient)` if the walk context's deadline has
+/// passed. Called immediately before every outbound fetch inside the
+/// walker so a single frame can't busy-loop past the §10.5 budget.
+fn check_chain_fetch_budget(ctx: Option<&WalkContext>, sub: &str) -> Result<()> {
+    if let Some(c) = ctx
+        && SystemTime::now() > c.fetch_deadline
+    {
+        return Err(anyhow::Error::new(FetchError::transient(
+            None,
+            format!("chain-fetch budget of {CHAIN_FETCH_BUDGET_SECS}s exceeded for {sub}"),
+        )));
+    }
+    Ok(())
+}
+
 /// Maximum number of trust marks the resolver will verify per /resolve request.
 /// Each external-issued mark may trigger up to two outbound HTTP requests
 /// (each capped by `HTTP_CLIENT`'s 10s timeout); an attacker-controlled subject
@@ -1333,17 +1386,11 @@ pub async fn resolve_entity_to_trustanchor(
     debug!("Received {sub} with trust anchors {trust_anchors:?}");
 
     // Spec §10.5 — chain-fetch deadline. We check the deadline once per
-    // walker invocation (before each fetch in this frame), turning a
-    // timeout into a transient `FetchError` that the resolve handler maps
-    // to HTTP 503.
-    if let Some(c) = ctx
-        && SystemTime::now() > c.fetch_deadline
-    {
-        return Err(anyhow::Error::new(FetchError::transient(
-            None,
-            format!("chain-fetch budget of {CHAIN_FETCH_BUDGET_SECS}s exceeded for {sub}"),
-        )));
-    }
+    // walker invocation AND immediately before each outbound fetch in this
+    // frame. Without the per-fetch checks, a single recursion-frame loop
+    // over many authority_hints could blow past the budget before the
+    // next recursion's entry check fires.
+    check_chain_fetch_budget(ctx, sub)?;
 
     let empty_authority: Vec<String> = Vec::new();
     let eal = json!(empty_authority);
@@ -1418,6 +1465,8 @@ pub async fn resolve_entity_to_trustanchor(
             // Means we found our trust anchor
             ta_flag = true;
         }
+        // §10.5 — re-check budget before each outbound fetch in the loop.
+        check_chain_fetch_budget(Some(walk_ctx), sub)?;
         // Fetch the authority's entity configuration
         let ah_jwt = match get_entity_configruation_as_jwt(ah_entity).await {
             Ok(res) => res,
@@ -1465,6 +1514,8 @@ pub async fn resolve_entity_to_trustanchor(
             );
             continue;
         };
+        // §10.5 — re-check budget before each outbound fetch.
+        check_chain_fetch_budget(Some(walk_ctx), sub)?;
         // Fetch the entity statement/ subordinate statement
         let sub_statement = match fetch_subordinate_statement(fetch_endpoint_str, sub).await {
             Ok(res) => res,
@@ -1529,7 +1580,17 @@ pub async fn resolve_entity_to_trustanchor(
         // types) against the resolve subject. `depth` at this point is the
         // number of entities below `sub` in the chain (depth=0 means `sub`
         // is the leaf and the SS is directly about it).
-        let ss_constraints = Constraints::from_payload(&subs_payload);
+        let ss_constraints = match Constraints::from_payload(&subs_payload) {
+            Ok(c) => c,
+            Err(e) => {
+                // Malformed `constraints` is a verification failure for
+                // this SS — refuse to silently disable enforcement.
+                warn!(
+                    "trust chain: malformed constraints in subordinate statement from {ah_entity} ({e}); skipping authority"
+                );
+                continue;
+            }
+        };
         let is_leaf = depth == 0;
         if let Err(e) = ss_constraints.check_subject(
             &walk_ctx.original_subject,
@@ -1551,6 +1612,10 @@ pub async fn resolve_entity_to_trustanchor(
             result.push(ajwt);
             return Ok(result);
         } else {
+            // §10.5 — budget check before descending one more level so a
+            // pathological intermediate can't burn the whole budget on
+            // recursive fetches before bailing out.
+            check_chain_fetch_budget(Some(walk_ctx), sub)?;
             // Now do a recursive query
             let r_result = Box::pin(resolve_entity_to_trustanchor(
                 ah_entity,
@@ -2416,6 +2481,14 @@ pub async fn trust_mark_status(
     let jwks = state.public_keyset.clone();
     let status = match verify_jwt_signature_with_jwks(&trust_mark, Some(jwks)) {
         Err(_) => "invalid",
+        // Spec §3.1.1 — an unknown critical claim makes the mark
+        // unprocessable. Classify it as "invalid" alongside bad-signature
+        // failures rather than letting it through to the active/expired
+        // logic. The `crit` check is a structural check and intentionally
+        // does not interfere with the active-vs-expired distinction:
+        // a signed-but-expired mark with a clean `crit` is still
+        // classified as "expired".
+        Ok((payload, _)) if enforce_crit_claim(&payload).is_err() => "invalid",
         Ok((payload, _)) => {
             let expired = payload
                 .expires_at()
@@ -2668,19 +2741,30 @@ fn validate_entity_type(etype: &str) -> Result<(), &'static str> {
 
 /// Validates a URL for federation use: HTTPS scheme, no private IPs.
 /// When `allow_http` is true (development mode), all checks are relaxed.
+/// SSRF gate + scheme allowlist for outbound federation URLs.
+///
+/// Failures are classified as `FetchError`:
+/// * URL parse / scheme block / no host / private-IP block are *permanent*
+///   — no amount of retrying changes the answer, and propagating them as
+///   transient would let callers burn retries on a policy denial.
+/// * DNS resolution failure (incl. empty resolution) is *transient* — a
+///   resolver hiccup is exactly the kind of thing §10.5 says to retry.
 async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> {
-    let parsed =
-        url::Url::parse(url_str).map_err(|e| anyhow!("Invalid URL '{}': {}", url_str, e))?;
+    let parsed = url::Url::parse(url_str).map_err(|e| {
+        anyhow::Error::new(FetchError::permanent(format!(
+            "Invalid URL '{url_str}': {e}"
+        )))
+    })?;
 
     // 1. Scheme check
     match parsed.scheme() {
         "https" => {}
         "http" if allow_http => {}
-        scheme => bail!(
-            "Blocked scheme '{}' in URL '{}' — only HTTPS allowed",
-            scheme,
-            url_str
-        ),
+        scheme => {
+            return Err(anyhow::Error::new(FetchError::permanent(format!(
+                "Blocked scheme '{scheme}' in URL '{url_str}' — only HTTPS allowed"
+            ))));
+        }
     }
 
     // In development mode, skip DNS/IP validation
@@ -2689,29 +2773,40 @@ async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> 
     }
 
     // 2. Must have a host
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| anyhow!("URL '{}' has no host", url_str))?;
+    let host = parsed.host_str().ok_or_else(|| {
+        anyhow::Error::new(FetchError::permanent(format!(
+            "URL '{url_str}' has no host"
+        )))
+    })?;
 
     // 3. Resolve DNS and check all IPs
     let port = parsed.port_or_known_default().unwrap_or(443);
     let addr = format!("{}:{}", host, port);
     let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&addr)
         .await
-        .map_err(|e| anyhow!("DNS resolution failed for '{}': {}", host, e))?
+        .map_err(|e| {
+            // DNS failures (incl. SERVFAIL, timeout, no nameservers) are
+            // transient per §10.5.
+            anyhow::Error::new(FetchError::transient(
+                None,
+                format!("DNS resolution failed for '{host}': {e}"),
+            ))
+        })?
         .collect();
 
     if resolved.is_empty() {
-        bail!("DNS resolution returned no addresses for '{}'", host);
+        return Err(anyhow::Error::new(FetchError::transient(
+            None,
+            format!("DNS resolution returned no addresses for '{host}'"),
+        )));
     }
 
     for sock_addr in &resolved {
         if is_private_ip(&sock_addr.ip()) {
-            bail!(
-                "Blocked request to private/internal IP {} (resolved from '{}')",
-                sock_addr.ip(),
-                host
-            );
+            return Err(anyhow::Error::new(FetchError::permanent(format!(
+                "Blocked request to private/internal IP {} (resolved from '{host}')",
+                sock_addr.ip()
+            ))));
         }
     }
 
@@ -2763,68 +2858,45 @@ pub async fn post_form_query(url: &str, form: &[(&str, &str)]) -> Result<String>
 /// `FetchError::permanent(...)`. Callers that care can downcast the
 /// returned `anyhow::Error` to `FetchError` to distinguish.
 pub async fn get_query(url: &str) -> Result<String> {
-    if let Err(e) =
-        validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await
-    {
-        // SSRF / scheme rejection is permanent — never retry these.
-        return Err(anyhow::Error::new(FetchError::permanent(format!(
-            "url validation failed for '{url}': {e}"
-        ))));
-    }
-
     let mut backoff_ms = FETCH_BACKOFF_INITIAL_MS;
     let mut last_transient_msg = String::new();
     let mut last_retry_after: Option<u64> = None;
 
     for attempt in 0..=FETCH_MAX_RETRIES {
-        match HTTP_CLIENT.get(url).send().await {
-            Ok(response) => {
-                let status = response.status();
-                if status.is_success() {
-                    return read_response_body(url, response).await;
-                }
-                // 429 → transient with server-supplied Retry-After when present.
-                // 5xx → transient.
-                if status.as_u16() == 429 || status.is_server_error() {
-                    last_retry_after = response
-                        .headers()
-                        .get(reqwest::header::RETRY_AFTER)
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok());
-                    last_transient_msg = format!("HTTP {} from '{}'", status, url);
-                    if attempt < FETCH_MAX_RETRIES {
-                        let sleep_ms = match last_retry_after {
-                            // Honour Retry-After when shorter than the
-                            // computed backoff; cap so a malicious upstream
-                            // can't stall us with a very large value.
-                            Some(s) => (s.saturating_mul(1_000))
-                                .min(FETCH_BACKOFF_CAP_MS)
-                                .max(backoff_ms),
-                            None => backoff_ms,
-                        };
-                        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-                        backoff_ms = (backoff_ms.saturating_mul(2)).min(FETCH_BACKOFF_CAP_MS);
-                        continue;
+        match try_one_fetch(url).await {
+            Ok(body) => return Ok(body),
+            Err(e) => {
+                let fe = e.downcast_ref::<FetchError>();
+                match fe {
+                    // Permanent — never retry.
+                    Some(f) if !f.transient => return Err(e),
+                    // Transient (classified) — capture details, then back off.
+                    Some(f) => {
+                        last_retry_after = f.retry_after_seconds;
+                        last_transient_msg = f.message.clone();
                     }
+                    // Untyped — treat as transient and retry. The classifier
+                    // is best-effort; if a code path produces an unclassified
+                    // error we err on the side of retrying.
+                    None => {
+                        last_retry_after = None;
+                        last_transient_msg = format!("{e}");
+                    }
+                }
+                if attempt >= FETCH_MAX_RETRIES {
                     break;
                 }
-                // Any other status (4xx other than 429, 3xx misuse) is
-                // permanent — don't retry.
-                return Err(anyhow::Error::new(FetchError::permanent(format!(
-                    "HTTP {status} from '{url}'"
-                ))));
-            }
-            Err(e) => {
-                // Network-level failure — treat as transient (connect
-                // refused, DNS failure, timeout, TCP reset). reqwest does
-                // not strongly classify these, so we err on the side of
-                // retrying.
-                last_transient_msg = format!("transport error fetching '{url}': {e}");
-                if attempt < FETCH_MAX_RETRIES {
-                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                    backoff_ms = (backoff_ms.saturating_mul(2)).min(FETCH_BACKOFF_CAP_MS);
-                    continue;
-                }
+                // Honour an upstream Retry-After (capped) when provided —
+                // it overrides our local backoff so a shorter server hint
+                // can speed recovery. Without a hint, use our exponential
+                // backoff. The cap guards against a malicious upstream
+                // requesting a very large delay.
+                let sleep_ms = match last_retry_after {
+                    Some(s) => (s.saturating_mul(1_000)).min(FETCH_BACKOFF_CAP_MS),
+                    None => backoff_ms,
+                };
+                tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                backoff_ms = (backoff_ms.saturating_mul(2)).min(FETCH_BACKOFF_CAP_MS);
             }
         }
     }
@@ -2833,6 +2905,40 @@ pub async fn get_query(url: &str) -> Result<String> {
         last_retry_after,
         last_transient_msg,
     )))
+}
+
+/// One attempt of the get_query pipeline: SSRF gate -> HTTP request ->
+/// body drain. Returns a typed `FetchError` (wrapped in `anyhow::Error`)
+/// so the retry loop can decide permanent-vs-transient. Body-read failures
+/// and DNS hiccups inside the SSRF gate both surface as transient and
+/// participate in the retry loop.
+async fn try_one_fetch(url: &str) -> Result<String> {
+    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
+    let response = HTTP_CLIENT.get(url).send().await.map_err(|e| {
+        anyhow::Error::new(FetchError::transient(
+            None,
+            format!("transport error fetching '{url}': {e}"),
+        ))
+    })?;
+    let status = response.status();
+    if status.is_success() {
+        return read_response_body(url, response).await;
+    }
+    if status.as_u16() == 429 || status.is_server_error() {
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        return Err(anyhow::Error::new(FetchError::transient(
+            retry_after,
+            format!("HTTP {status} from '{url}'"),
+        )));
+    }
+    // 4xx other than 429, 3xx that the client still surfaced — permanent.
+    Err(anyhow::Error::new(FetchError::permanent(format!(
+        "HTTP {status} from '{url}'"
+    ))))
 }
 
 /// Drain a successful response into a UTF-8 string, enforcing the body cap.
@@ -3394,7 +3500,7 @@ mod tests {
     #[test]
     fn test_constraints_from_payload_empty_when_missing() {
         let p = JwtPayload::new();
-        let c = Constraints::from_payload(&p);
+        let c = Constraints::from_payload(&p).expect("absent constraints is fine");
         assert!(c.max_path_length.is_none());
         assert!(c.permitted_subtrees.is_empty());
         assert!(c.excluded_subtrees.is_empty());
@@ -3411,7 +3517,7 @@ mod tests {
             "allowed_entity_types": ["openid_provider"],
             "allowed_leaf_entity_types": ["openid_relying_party"],
         }));
-        let c = Constraints::from_payload(&p);
+        let c = Constraints::from_payload(&p).expect("valid constraints");
         assert_eq!(c.max_path_length, Some(2));
         assert_eq!(c.permitted_subtrees.len(), 2);
         assert_eq!(c.excluded_subtrees, vec!["https://bad.example/"]);
@@ -3423,6 +3529,29 @@ mod tests {
             c.allowed_leaf_entity_types.as_deref(),
             Some(["openid_relying_party".to_string()].as_slice())
         );
+    }
+
+    #[test]
+    fn test_constraints_rejects_non_object() {
+        let p = make_payload_with_constraints(json!("oops"));
+        assert!(
+            Constraints::from_payload(&p).is_err(),
+            "non-object constraints must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_constraints_rejects_out_of_range_max_path_length() {
+        let p = make_payload_with_constraints(json!({"max_path_length": 9999}));
+        let err = Constraints::from_payload(&p).unwrap_err().to_string();
+        assert!(err.contains("max_path_length"));
+    }
+
+    #[test]
+    fn test_constraints_rejects_non_string_subtree() {
+        let p = make_payload_with_constraints(json!({"permitted_subtrees": [42]}));
+        let err = Constraints::from_payload(&p).unwrap_err().to_string();
+        assert!(err.contains("permitted_subtrees"));
     }
 
     fn empty_types() -> HashSet<String> {
@@ -3511,6 +3640,34 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("allowed_entity_types"));
+    }
+
+    #[test]
+    fn test_constraints_allowed_entity_types_rejects_empty_subject_types() {
+        // Fail-closed: a subject with no declared entity types cannot
+        // satisfy an allowlist constraint.
+        let c = Constraints {
+            allowed_entity_types: Some(vec!["openid_provider".into()]),
+            ..Default::default()
+        };
+        let err = c
+            .check_subject("https://leaf.example", &empty_types(), false, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("allowed_entity_types"));
+    }
+
+    #[test]
+    fn test_constraints_allowed_leaf_entity_types_rejects_empty_subject_types() {
+        let c = Constraints {
+            allowed_leaf_entity_types: Some(vec!["openid_provider".into()]),
+            ..Default::default()
+        };
+        let err = c
+            .check_subject("https://leaf.example", &empty_types(), true, 0)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("allowed_leaf_entity_types"));
     }
 
     #[test]
