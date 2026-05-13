@@ -768,19 +768,20 @@ def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_cli
     """C1: SSRF protection blocks requests to private IPs when not in dev mode.
 
     Note: The test server runs with allow_http=true so it allows private IPs.
-    This test verifies the resolve endpoint correctly returns 400 for an
-    unreachable private IP target (the request fails during fetch, not SSRF block,
-    because dev mode is enabled). To fully test SSRF blocking, see the Rust
-    unit tests in ssrf_tests module.
+    This test verifies the resolve endpoint correctly classifies an
+    unreachable private IP target as a transient fetch failure per spec
+    §10.5 — the request fails during fetch, not SSRF block, because dev
+    mode is enabled. To fully test SSRF blocking, see the Rust unit tests
+    in ssrf_tests module.
     """
     _rdb = loaddata
     port = start_server
     url = f"https://localhost:{port}/resolve"
-    # Try to resolve an entity at a private IP — should fail with 400
-    # because the entity configuration cannot be fetched. We allow up to 30s
-    # because the server's outbound reqwest client has a 5s connect timeout
-    # and a 10s overall timeout; depending on the network's response to a
-    # blackhole IP the connect can wait the full window before returning.
+    # Try to resolve an entity at a private IP. Connection-level failures
+    # (TCP reset, connect timeout) are transient per spec §10.5, so the
+    # resolver returns HTTP 503 + Retry-After. We allow up to 30s because
+    # get_query retries twice on transient errors with exponential backoff,
+    # and reqwest's 5s connect / 10s overall timeouts apply per attempt.
     resp = http_client.get(
         url,
         params={
@@ -789,7 +790,10 @@ def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_cli
         },
         timeout=30,
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 503, (
+        f"transient fetch failure must surface as 503, got {resp.status_code}"
+    )
+    assert "Retry-After" in resp.headers, "503 transient response must include Retry-After"
 
 
 def test_resolve_timeout_on_unreachable(loaddata: Redis, start_server: int, http_client: Client):
@@ -797,8 +801,10 @@ def test_resolve_timeout_on_unreachable(loaddata: Redis, start_server: int, http
     _rdb = loaddata
     port = start_server
     url = f"https://localhost:{port}/resolve"
-    # TEST-NET-2 (198.51.100.0/24) is reserved and won't respond.
-    # The server's 10s request timeout should kick in instead of hanging.
+    # TEST-NET-2 (198.51.100.0/24) is reserved and won't respond. The
+    # server's 10s request timeout kicks in instead of hanging. Per spec
+    # §10.5 this is a transient failure (connect timeout / unreachable
+    # host) and the resolver returns 503 + Retry-After.
     resp = http_client.get(
         url,
         params={
@@ -807,7 +813,10 @@ def test_resolve_timeout_on_unreachable(loaddata: Redis, start_server: int, http
         },
         timeout=30,
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 503, (
+        f"transient fetch failure must surface as 503, got {resp.status_code}"
+    )
+    assert "Retry-After" in resp.headers, "503 transient response must include Retry-After"
 
 
 # ---------------------------------------------------------------------------

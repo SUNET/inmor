@@ -260,6 +260,11 @@ The ``trust_chain`` array contains:
 2. Subordinate statement from the TA (or intermediate)
 3. TA's entity configuration
 
+Per OpenID Federation §4.3, the same chain also rides in the JWS header
+of the resolve response as the ``trust_chain`` header parameter. Clients
+may read either form; the header lets them short-circuit chain resolution
+without parsing the payload.
+
 **Examples:**
 
 .. code-block:: bash
@@ -609,7 +614,145 @@ All error responses follow this format:
 
 * ``not_found`` - Resource not found
 * ``invalid_request`` - Missing or invalid parameters
+* ``invalid_trust_chain`` - Trust chain build, signature, temporal, or policy
+  validation failed. ``error_description`` carries a precise reason in two
+  cases that the resolver propagates verbatim:
+
+  - Leaf entity-configuration verification failures detected at the start
+    of the walk (bad self-signature, missing ``jwks``, ``iss`` / ``sub``
+    mismatch under §3.1, or an unknown ``crit`` entry under §3.1.1 -- the
+    offending claim name appears in the message).
+  - Metadata-policy merge failures from the ``oidfed_metadata_policy`` crate
+    (§6.1.3.2), including the offending critical operator name when
+    ``metadata_policy_crit`` rejects it.
+
+  Other chain-walking failures (subordinate-statement signature, constraint
+  violation, permitted/excluded-subtree mismatch) cause the walker to skip
+  the offending authority and try another branch. If no chain reaches a
+  trust anchor after exploring all branches, the response is the generic
+  ``"Failed to find trust chain"`` -- the per-authority reasons are
+  recorded in the server log rather than surfaced to the client.
 * ``server_error`` - Internal server error
+
+Chain constraints (§6.2)
+------------------------
+
+Subordinate Statements can carry a ``constraints`` object that restricts
+which entities may appear below the SS subject in the chain. inmor parses
+and enforces all four standard constraint shapes during trust-chain
+walking:
+
+* ``max_path_length`` (§6.2.1) — the SS rejects any chain where the leaf is
+  more than ``max_path_length`` entities below the SS subject. inmor also
+  retains a fixed depth backstop (``MAX_RESOLVE_DEPTH = 10``).
+* ``permitted_subtrees`` (§6.2.2) — array of URL prefixes. The resolve
+  subject MUST be a subordinate of at least one entry. Matching is
+  URL-component-aware: scheme + host case-insensitive, port (or scheme
+  default) equal, path is a prefix at a path-segment boundary, trailing
+  slashes normalized. A subtree containing a query or fragment is treated
+  as malformed.
+* ``excluded_subtrees`` (§6.2.2) — array of URL prefixes the resolve
+  subject MUST NOT be a subordinate of.
+* ``allowed_entity_types`` / ``allowed_leaf_entity_types`` (§6.2.3) — every
+  entity type the subject declares (top-level keys of its ``metadata``)
+  MUST appear in the allowlist (subset semantics). A subject that declares
+  even one disallowed type is rejected, so an entity cannot mix an allowed
+  type with a disallowed one to slip through. A subject with no declared
+  entity types is also rejected when the allowlist is set (fail-closed:
+  a missing or empty ``metadata`` cannot bypass the restriction). The
+  ``leaf`` variant applies only when the subject is the chain leaf.
+
+A violation by any single Subordinate Statement causes the walker to skip
+that authority and try sibling branches. The conjunction across all
+superiors falls out of these per-SS checks against the same leaf.
+
+**Example** — a Subordinate Statement issued by an intermediate that wants
+to scope its subordinates to one URL subtree and limit chain depth:
+
+.. code-block:: json
+
+   {
+     "iss": "https://intermediate.example",
+     "sub": "https://leaf.example",
+     "constraints": {
+       "max_path_length": 1,
+       "permitted_subtrees": ["https://leaf.example/"],
+       "excluded_subtrees": ["https://leaf.example/banned/"],
+       "allowed_entity_types": ["openid_relying_party", "federation_entity"]
+     }
+   }
+
+Signed JWKS URIs (§5.2.1)
+-------------------------
+
+When an Entity Configuration sets ``signed_jwks_uri``, inmor's JWKS
+resolver fetches the URL and treats the response body as a JWT whose
+payload contains a JWKS. The JWT MUST be signed by a key that appears in
+that same inner JWKS (self-signing, mirroring the entity-configuration
+pattern). Verification covers signature, ``exp`` / ``nbf`` / ``iat``,
+``kid`` resolution against the inner JWKS, and the ``crit`` allowlist.
+
+Preference order when multiple key sources are present:
+
+#. Inline ``jwks`` claim — used directly without a network round-trip.
+#. ``signed_jwks_uri`` — fetched and verified.
+#. ``jwks_uri`` — fetched, no signature on the response itself; this is
+   the unsigned fallback path.
+
+If ``signed_jwks_uri`` fetch or verification fails, the resolver logs a
+warning and falls back to ``jwks_uri`` when one is configured. This
+preserves resilience during signed-JWKS rollout but does introduce a
+documented downgrade-attack surface: a network attacker who can disrupt
+the signed path AND tamper with the unsigned path can force the
+downgrade. Operators that want strict-signed-only behavior should omit
+the plain ``jwks_uri``.
+
+Verified signed-JWKS responses are **not** cached today. A Redis cache
+parallel to ``inmor:jwks_cache:*`` (keyed by the URI hash, TTL bounded by
+the inner JWT's ``exp``) is tracked as future work.
+
+Transient-error retry semantics (§10.5)
+---------------------------------------
+
+Outbound federation fetches (Entity Configurations, Subordinate Statements,
+JWKS) classify upstream failures into two categories:
+
+* **Transient** — HTTP 5xx, HTTP 429, connection-level errors (TCP reset,
+  connect timeout, DNS failure). ``get_query`` retries up to
+  ``FETCH_MAX_RETRIES = 2`` times with exponential backoff starting at
+  250 ms, capped at 1 s. When the upstream provides a ``Retry-After``
+  header, the resolver honours it (capped at the backoff ceiling).
+* **Permanent** — HTTP 4xx other than 429, SSRF gate denial, body cap
+  exceeded, malformed UTF-8. Not retried.
+
+The chain walker also enforces a 15-second wall-clock budget for the
+combined chain-fetch phase of a ``/resolve`` request. Exceeding it is
+treated as transient.
+
+At the ``/resolve`` boundary:
+
+* **Transient failure** → HTTP 503 ``Service Unavailable`` with a
+  ``Retry-After`` header (10 s default, or the upstream's value if shorter)
+  and a JSON body ``{"error": "temporarily_unavailable",
+  "error_description": "..."}``. Clients should back off and retry.
+* **Permanent failure** → existing HTTP 400 with ``{"error":
+  "invalid_trust_chain", ...}``.
+
+Critical-claim handling
+-----------------------
+
+Per OpenID Federation §3.1.1, an issuer may attach a ``crit`` claim listing
+claim names that recipients MUST understand. The Trust Anchor enforces this
+inside ``verify_jwt_with_jwks`` against a static allowlist (``KNOWN_CLAIMS``
+in ``src/lib.rs``) of every claim this codebase parses. A statement whose
+``crit`` contains an unknown name is rejected. During trust-chain walking
+this manifests as the offending authority being skipped (the walker tries
+sibling authorities); for an entity's self-signed configuration the
+verification error propagates to the caller.
+
+The allowlist is parser capability, not per-federation policy. Producer-side
+per-tenant ``crit`` policy on outgoing statements is deferred to the
+multi-tenant track tracked in ``multitenant_plan.md``.
 
 Content Types
 -------------
