@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import httpx
 from django.conf import settings
@@ -113,9 +114,12 @@ def create_server_statement() -> str:
     # We validate strictly here so a typo in localsettings.py fails the
     # regenerate command immediately rather than producing a TA EC that
     # silently fails delegation checks at resolve time.
-    owners_setting = settings.TA_TRUST_MARK_OWNERS
-    if owners_setting:
-        owners = _validate_trust_mark_owners(owners_setting)
+    #
+    # Validation runs unconditionally so a wrong type (None, [], a string)
+    # raises at regenerate time. Only the legitimate empty-dict default
+    # (no delegations configured) skips emission of the claim.
+    owners = _validate_trust_mark_owners(settings.TA_TRUST_MARK_OWNERS)
+    if owners:
         sub_data["trust_mark_owners"] = owners
 
     # Set creation and expiry time
@@ -137,6 +141,23 @@ def create_server_statement() -> str:
     return token_data
 
 
+def _is_http_url(value: Any) -> bool:
+    """True iff `value` is a string parsing as an http(s) URL with a host.
+
+    Used to validate entity identifiers in `TA_TRUST_MARK_OWNERS`. A bare
+    string check would accept typos like `"not-a-url"`, which only fail
+    at delegation-match time; insisting on a parsed scheme + netloc
+    surfaces those mistakes at regenerate time.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
 def _validate_trust_mark_owners(raw: dict[Any, Any]) -> dict[str, dict[str, Any]]:
     """Validate `TA_TRUST_MARK_OWNERS` and return a payload-ready dict.
 
@@ -148,13 +169,13 @@ def _validate_trust_mark_owners(raw: dict[Any, Any]) -> dict[str, dict[str, Any]
         raise ValueError("TA_TRUST_MARK_OWNERS must be a dict")
     out: dict[str, dict[str, Any]] = {}
     for tm_type, entry in raw.items():
-        if not isinstance(tm_type, str) or not tm_type:
-            raise ValueError(f"TA_TRUST_MARK_OWNERS key {tm_type!r} must be a non-empty string")
+        if not _is_http_url(tm_type):
+            raise ValueError(f"TA_TRUST_MARK_OWNERS key {tm_type!r} must be an http(s) URL")
         if not isinstance(entry, dict):
             raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}] must be a dict with sub + jwks")
         sub = entry.get("sub")
-        if not isinstance(sub, str) or not sub:
-            raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].sub must be a non-empty string")
+        if not _is_http_url(sub):
+            raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].sub must be an http(s) URL")
         jwks = entry.get("jwks")
         if not isinstance(jwks, dict):
             raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks must be a JWKS object")

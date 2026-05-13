@@ -2298,14 +2298,23 @@ async fn verify_trust_marks_for_resolve(
         .cloned()
         .unwrap_or_default();
     // Trust Mark Owners pinned by the TA (spec sec 7.2). Parsed from the same
-    // TA EC payload. A malformed claim is logged and treated as "no owners
-    // pinned" -- fail-closed: delegation checks will reject marks of types
-    // that should have been pinned, rather than silently accepting them.
+    // TA EC payload.
+    //
+    // FAIL-CLOSED on malformed `trust_mark_owners`: if the TA's own EC has
+    // a broken owners claim, fall back to an empty result. Treating it as
+    // "no owners pinned" would silently disable delegation enforcement for
+    // any owned type that is *also* listed in `trust_mark_issuers` -- a
+    // mark of that type would fall through to the issuer allowlist and be
+    // accepted without delegation validation. A malformed TA EC is an
+    // operator bug and the right reaction is to refuse trust marks until
+    // the EC is regenerated cleanly.
     let trust_mark_owners = match TrustMarkOwners::from_ta_payload(&ta_payload) {
         Ok(o) => o,
         Err(e) => {
-            warn!("trust mark resolve: malformed trust_mark_owners claim: {e}");
-            TrustMarkOwners::default()
+            warn!(
+                "trust mark resolve: malformed trust_mark_owners claim in TA EC ({e}); refusing trust marks until operator fixes it"
+            );
+            return Vec::new();
         }
     };
     // A mark is *recognised* if either:

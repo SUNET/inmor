@@ -139,8 +139,20 @@ def test_create_server_statement_omits_trust_mark_owners_when_empty(db_with_fixt
     [
         # Outer container wrong type
         pytest.param(["not", "a", "dict"], id="outer-not-dict"),
+        # Falsy non-dict values: previously silently bypassed validation.
+        pytest.param(None, id="outer-none"),
+        pytest.param([], id="outer-empty-list"),
+        pytest.param("", id="outer-empty-string"),
         # Empty key
         pytest.param({"": _VALID_OWNER}, id="empty-type-key"),
+        # trust_mark_type that isn't a URL
+        pytest.param({"not-a-url": _VALID_OWNER}, id="tm-type-not-url"),
+        pytest.param({"ftp://owner.test/tm": _VALID_OWNER}, id="tm-type-non-http-scheme"),
+        # sub that isn't a URL
+        pytest.param(
+            {"https://x.test/tm": {"sub": "not-a-url", "jwks": _VALID_OWNER["jwks"]}},
+            id="sub-not-url",
+        ),
         # Entry not a dict
         pytest.param({"https://x.test/tm": "string-instead-of-dict"}, id="entry-not-dict"),
         # Missing sub
