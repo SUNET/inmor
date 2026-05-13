@@ -107,6 +107,17 @@ def create_server_statement() -> str:
     if issuers:
         sub_data["trust_mark_issuers"] = issuers
 
+    # Trust Mark Owners (spec sec 3.1.2, 7.2). The TA publishes inline JWKS
+    # for each Trust Mark Owner so /resolve can validate
+    # trust-mark-delegation+jwt documents against keys anchored by this TA.
+    # We validate strictly here so a typo in localsettings.py fails the
+    # regenerate command immediately rather than producing a TA EC that
+    # silently fails delegation checks at resolve time.
+    owners_setting = settings.TA_TRUST_MARK_OWNERS
+    if owners_setting:
+        owners = _validate_trust_mark_owners(owners_setting)
+        sub_data["trust_mark_owners"] = owners
+
     # Set creation and expiry time
     now = datetime.now()
     exp = now + timedelta(hours=settings.SERVER_EXPIRY)
@@ -124,6 +135,45 @@ def create_server_statement() -> str:
     key = settings.SIGNING_PRIVATE_KEY
     token_data = create_signed_jwt(sub_data, key, "entity-statement+jwt")
     return token_data
+
+
+def _validate_trust_mark_owners(raw: dict[Any, Any]) -> dict[str, dict[str, Any]]:
+    """Validate `TA_TRUST_MARK_OWNERS` and return a payload-ready dict.
+
+    Raises ValueError on the first malformed entry so the operator gets
+    an unambiguous failure at regenerate time instead of an EC that
+    silently fails delegation checks later.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("TA_TRUST_MARK_OWNERS must be a dict")
+    out: dict[str, dict[str, Any]] = {}
+    for tm_type, entry in raw.items():
+        if not isinstance(tm_type, str) or not tm_type:
+            raise ValueError(f"TA_TRUST_MARK_OWNERS key {tm_type!r} must be a non-empty string")
+        if not isinstance(entry, dict):
+            raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}] must be a dict with sub + jwks")
+        sub = entry.get("sub")
+        if not isinstance(sub, str) or not sub:
+            raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].sub must be a non-empty string")
+        jwks = entry.get("jwks")
+        if not isinstance(jwks, dict):
+            raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks must be a JWKS object")
+        keys = jwks.get("keys")
+        if not isinstance(keys, list) or not keys:
+            raise ValueError(
+                f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks.keys must be a non-empty list"
+            )
+        for idx, k in enumerate(keys):
+            if not isinstance(k, dict):
+                raise ValueError(
+                    f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks.keys[{idx}] must be an object"
+                )
+            if not isinstance(k.get("kty"), str) or not k["kty"]:
+                raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks.keys[{idx}].kty required")
+            if not isinstance(k.get("kid"), str) or not k["kid"]:
+                raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks.keys[{idx}].kid required")
+        out[tm_type] = {"sub": sub, "jwks": jwks}
+    return out
 
 
 def create_subordinate_statement(

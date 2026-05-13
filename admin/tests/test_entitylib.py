@@ -84,3 +84,108 @@ def test_create_server_statement_merges_external_issuers_with_ta(db_with_fixture
     assert settings.TRUSTMARK_PROVIDER in allowed, (
         "TA must still be appended for an active TrustMarkType"
     )
+
+
+# ---------------------------------------------------------------------------
+# create_server_statement() -- trust_mark_owners emission (spec sec 7.2)
+# ---------------------------------------------------------------------------
+
+
+_VALID_OWNER = {
+    "sub": "https://owner.example.org",
+    "jwks": {
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": "owner-key-1",
+                "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx",
+                "e": "AQAB",
+            }
+        ]
+    },
+}
+
+
+@pytest.mark.django_db
+def test_create_server_statement_emits_trust_mark_owners(db_with_fixtures, settings):
+    "A valid TA_TRUST_MARK_OWNERS dict appears verbatim in the TA EC payload."
+    tmtype = "https://refeds.org/sirtfi"
+    settings.TA_TRUST_MARK_OWNERS = {tmtype: _VALID_OWNER}
+
+    token = lib.create_server_statement()
+    payload = get_payload(token)
+
+    owners = payload.get("trust_mark_owners")
+    assert owners is not None, "trust_mark_owners must be published when set"
+    assert tmtype in owners
+    assert owners[tmtype]["sub"] == _VALID_OWNER["sub"]
+    assert owners[tmtype]["jwks"]["keys"][0]["kid"] == "owner-key-1"
+
+
+@pytest.mark.django_db
+def test_create_server_statement_omits_trust_mark_owners_when_empty(db_with_fixtures, settings):
+    "Empty TA_TRUST_MARK_OWNERS must NOT emit the claim (spec: OPTIONAL when no delegations)."
+    settings.TA_TRUST_MARK_OWNERS = {}
+
+    token = lib.create_server_statement()
+    payload = get_payload(token)
+
+    assert "trust_mark_owners" not in payload
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "broken",
+    [
+        # Outer container wrong type
+        pytest.param(["not", "a", "dict"], id="outer-not-dict"),
+        # Empty key
+        pytest.param({"": _VALID_OWNER}, id="empty-type-key"),
+        # Entry not a dict
+        pytest.param({"https://x.test/tm": "string-instead-of-dict"}, id="entry-not-dict"),
+        # Missing sub
+        pytest.param({"https://x.test/tm": {"jwks": _VALID_OWNER["jwks"]}}, id="missing-sub"),
+        # sub not a string
+        pytest.param(
+            {"https://x.test/tm": {"sub": 42, "jwks": _VALID_OWNER["jwks"]}},
+            id="sub-not-string",
+        ),
+        # Missing jwks
+        pytest.param({"https://x.test/tm": {"sub": "https://o.test"}}, id="missing-jwks"),
+        # jwks not a dict
+        pytest.param(
+            {"https://x.test/tm": {"sub": "https://o.test", "jwks": "not-a-dict"}},
+            id="jwks-not-dict",
+        ),
+        # jwks.keys empty
+        pytest.param(
+            {"https://x.test/tm": {"sub": "https://o.test", "jwks": {"keys": []}}},
+            id="keys-empty",
+        ),
+        # key missing kid
+        pytest.param(
+            {
+                "https://x.test/tm": {
+                    "sub": "https://o.test",
+                    "jwks": {"keys": [{"kty": "RSA"}]},
+                }
+            },
+            id="key-missing-kid",
+        ),
+        # key missing kty
+        pytest.param(
+            {
+                "https://x.test/tm": {
+                    "sub": "https://o.test",
+                    "jwks": {"keys": [{"kid": "k1"}]},
+                }
+            },
+            id="key-missing-kty",
+        ),
+    ],
+)
+def test_create_server_statement_rejects_malformed_owner(db_with_fixtures, settings, broken):
+    "Each malformed shape must raise ValueError at regenerate time (fail fast)."
+    settings.TA_TRUST_MARK_OWNERS = broken
+    with pytest.raises(ValueError):
+        lib.create_server_statement()

@@ -1075,3 +1075,293 @@ def test_resolve_rejects_trust_mark_for_different_subject(
     assert "trust_marks" not in payload, (
         "trust mark whose JWT sub doesn't match the resolve subject must not be included"
     )
+
+
+# ---------------------------------------------------------------------------
+# Trust Mark Delegation (spec sec 7.2)
+# ---------------------------------------------------------------------------
+#
+# All delegation tests use TA-issued marks (mark.iss == TA) so we don't have
+# to stand up a fake external Trust Mark Issuer + status endpoint. The
+# delegation gate is applied uniformly to both TA-issued and external paths
+# (delegation_gate_for_ta_issued / inline check in verify_single_trust_mark),
+# so testing one path is sufficient to validate the matrix.
+
+_OWNER_ENTITY_ID = "https://owner.example.test"
+
+
+def _make_owner_keypair() -> jwk.JWK:
+    "Fresh RSA keypair acting as a Trust Mark Owner."
+    k = jwk.JWK.generate(kty="RSA", size=2048, alg="RS256", use="sig")
+    k.kid = k.thumbprint()
+    return k
+
+
+def _owner_public_jwks(owner_key: jwk.JWK) -> dict:
+    return {"keys": [json.loads(owner_key.export(private_key=False))]}
+
+
+def _set_trust_mark_owners(rdb: Redis, owners: dict | None) -> None:
+    """Set or clear the TA's trust_mark_owners claim."""
+    _repatch_ta_ec(rdb, trust_mark_owners=owners)
+
+
+def _build_delegation_jwt(
+    owner_key: jwk.JWK,
+    owner_id: str,
+    tmi_entity_id: str,
+    trust_mark_id: str,
+    exp_offset: int = 3600,
+) -> str:
+    "Sign a trust-mark-delegation+jwt with the owner's key."
+    now = int(time.time())
+    payload = {
+        "iss": owner_id,
+        "sub": tmi_entity_id,
+        "iat": now,
+        "exp": now + exp_offset,
+        "trust_mark_id": trust_mark_id,
+    }
+    header = {
+        "alg": "RS256",
+        "kid": owner_key.kid,
+        "typ": "trust-mark-delegation+jwt",
+    }
+    token = jwt.JWT(header=header, claims=payload)
+    token.make_signed_token(owner_key)
+    return token.serialize()
+
+
+def _build_trust_mark_with_delegation(
+    sub: str,
+    delegation_jwt: str | None,
+    trust_mark_type: str = _TM_TYPE,
+    issuer: str = _TA_ENTITY_ID,
+    exp_offset: int = 3600,
+) -> dict:
+    "Build a TA-signed trust mark, optionally carrying a delegation claim."
+    now = int(time.time())
+    payload = {
+        "iss": issuer,
+        "sub": sub,
+        "iat": now,
+        "exp": now + exp_offset,
+        "trust_mark_type": trust_mark_type,
+    }
+    if delegation_jwt is not None:
+        payload["delegation"] = delegation_jwt
+    jwt_str = _sign_with_ta(payload, "trust-mark+jwt")
+    return {"trust_mark": jwt_str, "trust_mark_type": trust_mark_type}
+
+
+def test_resolve_accepts_mark_with_valid_delegation(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Owner pinned + valid delegation -> mark passes (TA acts as delegated TMI)."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    owner_key = _make_owner_keypair()
+    delegation = _build_delegation_jwt(
+        owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE
+    )
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1
+
+
+def test_resolve_drops_mark_with_delegation_signed_by_wrong_key(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Delegation signed by a key not in the pinned owner JWKS -> mark dropped."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    real_owner_key = _make_owner_keypair()
+    attacker_key = _make_owner_keypair()  # signs delegation but is NOT pinned
+
+    delegation = _build_delegation_jwt(
+        attacker_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE
+    )
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(real_owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, (
+        "delegation signed by a key not pinned for the owner must be rejected"
+    )
+
+
+def test_resolve_drops_mark_with_delegation_sub_mismatch(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "delegation.sub names a TMI that didn't issue the mark -> mark dropped."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    owner_key = _make_owner_keypair()
+    # The delegation authorizes a different TMI than the actual mark issuer (TA).
+    delegation = _build_delegation_jwt(
+        owner_key, _OWNER_ENTITY_ID, "https://other-tmi.example.test", _TM_TYPE
+    )
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, (
+        "delegation.sub != mark.iss must reject the mark"
+    )
+
+
+def test_resolve_drops_mark_with_delegation_trust_mark_id_mismatch(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "delegation.trust_mark_id names a different type than the mark -> drop."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    owner_key = _make_owner_keypair()
+    delegation = _build_delegation_jwt(
+        owner_key,
+        _OWNER_ENTITY_ID,
+        _TA_ENTITY_ID,
+        "https://example.com/another_tm_type",  # not _TM_TYPE
+    )
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, (
+        "delegation.trust_mark_id != mark.trust_mark_type must reject the mark"
+    )
+
+
+def test_resolve_drops_mark_with_expired_delegation(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "An expired delegation JWT must reject the mark."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    owner_key = _make_owner_keypair()
+    delegation = _build_delegation_jwt(
+        owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE, exp_offset=-60
+    )
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, "expired delegation must reject the mark"
+
+
+def test_resolve_drops_mark_owned_type_no_delegation_iss_ne_owner(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Owner pinned + iss != owner.sub + no delegation -> mark dropped (the security check)."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    owner_key = _make_owner_keypair()
+    # No delegation attached; mark is issued by TA but owner is some external entity.
+    tm_obj = _build_trust_mark_with_delegation(subject_id, None)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    assert "trust_marks" not in payload, (
+        "without delegation, a non-owner issuer cannot issue an owned trust mark type"
+    )
+
+
+def test_resolve_accepts_mark_when_ta_is_pinned_owner_no_delegation(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Owner pinned == TA + no delegation -> direct issuance, accepted."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    # Owner == TA: the TA acts as both Trust Mark Owner and Trust Mark Issuer.
+    # No delegation needed because mark.iss == owner.sub.
+    ta_key = _ta_signing_key()
+    ta_public_jwks = {"keys": [json.loads(ta_key.export(private_key=False))]}
+    tm_obj = _build_trust_mark_with_delegation(subject_id, None)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(rdb, {_TM_TYPE: {"sub": _TA_ENTITY_ID, "jwks": ta_public_jwks}})
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1, (
+        "TA as both owner and issuer should accept marks without a delegation"
+    )
+
+
+def test_resolve_falls_through_when_delegation_present_but_owner_unpinned(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    "Delegation present + owner NOT pinned -> fall through to issuers gate."
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    # Random delegation -- never validated because no owner is pinned. The mark
+    # still passes via the normal trust_mark_issuers recognition path.
+    rogue_key = _make_owner_keypair()
+    delegation = _build_delegation_jwt(rogue_key, "https://rogue.example", _TA_ENTITY_ID, _TM_TYPE)
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
+    _set_trust_mark_owners(rdb, None)  # no owners pinned
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1, (
+        "unpinned-owner + delegation must fall through to the issuers gate"
+    )
