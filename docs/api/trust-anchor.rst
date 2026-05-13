@@ -615,11 +615,23 @@ All error responses follow this format:
 * ``not_found`` - Resource not found
 * ``invalid_request`` - Missing or invalid parameters
 * ``invalid_trust_chain`` - Trust chain build, signature, temporal, or policy
-  validation failed. The ``error_description`` carries the underlying reason,
-  including the offending claim name when a statement's ``crit`` claim lists
-  something this implementation does not understand (OpenID Federation
-  §3.1.1) or the offending operator name when ``metadata_policy_crit`` /
-  the metadata-policy crate rejects a critical operator (§6.1.3.2).
+  validation failed. ``error_description`` carries a precise reason in two
+  cases that the resolver propagates verbatim:
+
+  - Leaf entity-configuration verification failures detected at the start
+    of the walk (bad self-signature, missing ``jwks``, ``iss`` / ``sub``
+    mismatch under §3.1, or an unknown ``crit`` entry under §3.1.1 -- the
+    offending claim name appears in the message).
+  - Metadata-policy merge failures from the ``oidfed_metadata_policy`` crate
+    (§6.1.3.2), including the offending critical operator name when
+    ``metadata_policy_crit`` rejects it.
+
+  Other chain-walking failures (subordinate-statement signature, constraint
+  violation, permitted/excluded-subtree mismatch) cause the walker to skip
+  the offending authority and try another branch. If no chain reaches a
+  trust anchor after exploring all branches, the response is the generic
+  ``"Failed to find trust chain"`` -- the per-authority reasons are
+  recorded in the server log rather than surfaced to the client.
 * ``server_error`` - Internal server error
 
 Chain constraints (§6.2)
@@ -641,10 +653,14 @@ walking:
   as malformed.
 * ``excluded_subtrees`` (§6.2.2) — array of URL prefixes the resolve
   subject MUST NOT be a subordinate of.
-* ``allowed_entity_types`` / ``allowed_leaf_entity_types`` (§6.2.3) — set
-  intersection against the subject's declared entity types (top-level
-  keys of its ``metadata``). The ``leaf`` variant applies only when the
-  subject is the chain leaf.
+* ``allowed_entity_types`` / ``allowed_leaf_entity_types`` (§6.2.3) — every
+  entity type the subject declares (top-level keys of its ``metadata``)
+  MUST appear in the allowlist (subset semantics). A subject that declares
+  even one disallowed type is rejected, so an entity cannot mix an allowed
+  type with a disallowed one to slip through. A subject with no declared
+  entity types is also rejected when the allowlist is set (fail-closed:
+  a missing or empty ``metadata`` cannot bypass the restriction). The
+  ``leaf`` variant applies only when the subject is the chain leaf.
 
 A violation by any single Subordinate Statement causes the walker to skip
 that authority and try sibling branches. The conjunction across all

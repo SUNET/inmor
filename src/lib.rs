@@ -2191,7 +2191,18 @@ pub async fn resolve_entity(
                             "error_description": fe.message,
                         })));
                 }
-                return error_response_400("invalid_trust_chain", "Failed to find trust chain");
+                // Surface the underlying error message. The early walker
+                // returns from this branch are dominated by leaf EC
+                // self-verification failures (bad signature, missing
+                // jwks, unknown critical claim per §3.1.1, iss != sub)
+                // -- exactly the cases where a precise reason helps the
+                // operator diagnose a federation misconfiguration. The
+                // messages come from internal verifier code, not user
+                // input, so echoing them is safe.
+                return error_response_400(
+                    "invalid_trust_chain",
+                    &format!("Failed to find trust chain: {e}"),
+                );
             }
         };
 
@@ -2845,13 +2856,30 @@ pub async fn post_form_query(url: &str, form: &[(&str, &str)]) -> Result<String>
         .map_err(|e| anyhow!("Response from '{}' is not valid UTF-8: {}", url, e))
 }
 
+/// Sleep duration (ms) for the next retry of `get_query`.
+///
+/// We honour an upstream `Retry-After` only when it is *shorter* than the
+/// next computed local backoff. That way a server can signal "come back
+/// sooner" but a malicious or buggy upstream cannot stall us beyond our
+/// own retry pacing by returning a very large `Retry-After`. The local
+/// backoff is already capped at `FETCH_BACKOFF_CAP_MS`, so the result
+/// inherits that bound.
+fn compute_retry_sleep_ms(local_backoff_ms: u64, retry_after_seconds: Option<u64>) -> u64 {
+    match retry_after_seconds {
+        Some(s) => s.saturating_mul(1_000).min(local_backoff_ms),
+        None => local_backoff_ms,
+    }
+}
+
 /// To do a GET query. Uses the shared HTTP client with timeouts and connection limits.
 /// Enforces a maximum response body size of `MAX_RESPONSE_BYTES`.
 ///
 /// Per OpenID Federation §10.5, transient failures (HTTP 5xx, 429,
 /// connection / DNS / timeout) are retried with exponential backoff up to
 /// `FETCH_MAX_RETRIES` times. The server's `Retry-After` header is
-/// honoured when shorter than the next backoff. After retries are
+/// honoured only when it is shorter than the next computed local backoff
+/// (so a large server-supplied value cannot stall us beyond our own
+/// retry pacing). After retries are
 /// exhausted the error is returned as a `FetchError::transient(...)`
 /// wrapped in `anyhow::Error`; permanent failures (4xx other than 429,
 /// SSRF denial, body-cap exceeded, malformed body) are returned as
@@ -2886,15 +2914,7 @@ pub async fn get_query(url: &str) -> Result<String> {
                 if attempt >= FETCH_MAX_RETRIES {
                     break;
                 }
-                // Honour an upstream Retry-After (capped) when provided —
-                // it overrides our local backoff so a shorter server hint
-                // can speed recovery. Without a hint, use our exponential
-                // backoff. The cap guards against a malicious upstream
-                // requesting a very large delay.
-                let sleep_ms = match last_retry_after {
-                    Some(s) => (s.saturating_mul(1_000)).min(FETCH_BACKOFF_CAP_MS),
-                    None => backoff_ms,
-                };
+                let sleep_ms = compute_retry_sleep_ms(backoff_ms, last_retry_after);
                 tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
                 backoff_ms = (backoff_ms.saturating_mul(2)).min(FETCH_BACKOFF_CAP_MS);
             }
@@ -3900,6 +3920,22 @@ mod tests {
         let fe = wrapped.downcast_ref::<FetchError>().expect("downcast");
         assert!(fe.transient);
         assert_eq!(fe.retry_after_seconds, Some(3));
+    }
+
+    #[test]
+    fn test_compute_retry_sleep_ms_honours_shorter_server_hint() {
+        // No upstream hint -> use local backoff verbatim.
+        assert_eq!(compute_retry_sleep_ms(500, None), 500);
+        // Server says "come back sooner" (300ms) than our backoff (500ms)
+        // -> use the shorter server value.
+        assert_eq!(compute_retry_sleep_ms(500, Some(0)), 0);
+        // Server-supplied value larger than local backoff is *not* honoured;
+        // a malicious upstream returning Retry-After: 3600 cannot inflate
+        // our wait beyond the next local backoff step.
+        assert_eq!(compute_retry_sleep_ms(500, Some(30)), 500);
+        // Saturating_mul guard: u64::MAX seconds must not overflow into a
+        // shorter sleep.
+        assert_eq!(compute_retry_sleep_ms(500, Some(u64::MAX)), 500);
     }
 
     #[tokio::test]
