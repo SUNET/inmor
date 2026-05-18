@@ -1180,6 +1180,40 @@ def test_resolve_accepts_mark_with_valid_delegation(
     assert marks is not None and len(marks) == 1
 
 
+def test_resolve_accepts_mark_recognized_only_via_trust_mark_owners(
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+):
+    """Additive recognition: the type is absent from trust_mark_issuers and is
+    recognised solely because trust_mark_owners pins an owner for it. A valid
+    delegation must still be accepted -- a regression that ignored
+    trust_mark_owners whenever trust_mark_issuers omits the type would drop
+    the mark here."""
+    rdb = loaddata
+    port = start_server
+    subject_id = fake_subject.entity_id
+
+    owner_key = _make_owner_keypair()
+    delegation = _build_delegation_jwt(
+        owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE
+    )
+    tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    # trust_mark_issuers lists an unrelated type only -- _TM_TYPE is NOT in it.
+    _set_trust_mark_issuers(rdb, {"https://example.com/some_other_type": []})
+    _set_trust_mark_owners(
+        rdb,
+        {_TM_TYPE: {"sub": _OWNER_ENTITY_ID, "jwks": _owner_public_jwks(owner_key)}},
+    )
+    _accept_trust_mark(rdb, subject_id, tm_obj)
+
+    payload = _resolve_payload(http_client, port, subject_id)
+    marks = payload.get("trust_marks")
+    assert marks is not None and len(marks) == 1, (
+        "a type pinned only via trust_mark_owners must be recognised when the "
+        "delegation is valid"
+    )
+
+
 def test_resolve_drops_mark_with_delegation_signed_by_wrong_key(
     loaddata: Redis, start_server: int, http_client: Client, fake_subject
 ):

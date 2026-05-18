@@ -1313,10 +1313,15 @@ impl TrustMarkOwners {
     /// Configuration payload.
     ///
     /// * Absent claim returns `Ok(Self::default())` — no owners pinned.
-    /// * Present but malformed claim returns `Err(...)`. The caller should
-    ///   fall back to `Self::default()` and log a warning: a malformed
-    ///   `trust_mark_owners` in the TA's own EC is operational breakage,
-    ///   but failing-closed (no owners) keeps delegation checks safe.
+    /// * Present but malformed claim returns `Err(...)`. The caller MUST
+    ///   fail closed -- refuse to return any trust marks -- and log a
+    ///   warning. Falling back to `Self::default()` (no owners pinned)
+    ///   would silently disable delegation enforcement for any owned type
+    ///   that is also listed in `trust_mark_issuers`: a mark of that type
+    ///   would fall through to the issuer allowlist and be accepted
+    ///   without delegation validation. A malformed `trust_mark_owners`
+    ///   in the TA's own EC is an operator bug; the safe reaction is to
+    ///   refuse trust marks until the EC is regenerated cleanly.
     pub fn from_ta_payload(payload: &JwtPayload) -> Result<Self> {
         let Some(claim) = payload.claim("trust_mark_owners") else {
             return Ok(Self::default());
