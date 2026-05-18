@@ -682,6 +682,96 @@ to scope its subordinates to one URL subtree and limit chain depth:
      }
    }
 
+Trust Mark Delegation (§7.2)
+----------------------------
+
+A Trust Mark Owner can delegate authority to issue marks of a given type
+to one or more Trust Mark Issuers. Inmor enforces this on the consume
+side -- when /resolve verifies a subject's trust marks, marks carrying a
+``delegation`` claim are validated against the owner's keys *pinned by the
+Trust Anchor itself* in its Entity Configuration's ``trust_mark_owners``
+claim. Owner keys discovered any other way (e.g. self-asserted by the
+delegation's claimed issuer) are NOT trusted -- the binding owner-to-keys
+must be anchored in the TA so the federation has a single authoritative
+source for who owns what.
+
+Configure pinned owners in ``localsettings.py``::
+
+    TA_TRUST_MARK_OWNERS = {
+        "https://refeds.org/sirtfi": {
+            "sub": "https://refeds.org",
+            "jwks": {
+                "keys": [
+                    {"kty": "RSA", "kid": "owner-key-1", "n": "...", "e": "AQAB"}
+                ]
+            },
+        },
+    }
+
+The regenerate-entity command validates this dict strictly and fails
+fast on any malformed entry so the TA never publishes a half-baked owner
+record. Each entry must satisfy:
+
+* the map key (the trust mark type) must be an ``http``/``https`` URL
+  with a host -- values like ``not-a-url`` or non-http schemes are
+  rejected;
+* ``sub`` must likewise be an ``http``/``https`` URL with a host, not
+  merely a non-empty string;
+* ``jwks`` must contain a non-empty ``keys`` array, and each key must
+  carry ``kid`` and ``kty``.
+
+Recognition is **additive**: a trust mark type is recognised when either
+``trust_mark_issuers`` lists it OR ``trust_mark_owners`` pins an owner for
+it. When the owner is pinned, the owner is the authority and the
+``trust_mark_issuers`` gate is bypassed -- a valid delegation suffices.
+When no owner is pinned, the existing ``trust_mark_issuers`` recognition
+gate is the only authority.
+
+The delegation gate is applied uniformly to both TA-issued and externally-
+issued marks. The failure matrix:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 20 40
+
+   * - Owner pinned?
+     - Delegation present?
+     - ``mark.iss == owner.sub``?
+     - Decision
+   * - No
+     - No
+     - --
+     - Existing ``trust_mark_issuers`` recognition path. No change.
+   * - No
+     - Yes
+     - --
+     - The delegation cannot be validated against any anchored owner. The
+       resolver logs a warning and falls through to the
+       ``trust_mark_issuers`` gate. The delegation is *not* a free pass
+       -- the mark must still be accepted by the issuers list.
+   * - Yes
+     - Yes
+     - --
+     - Validate the delegation JWT against the pinned owner's keys.
+       Required: signature, ``exp``/``nbf``/``iat``, ``crit`` allowlist,
+       ``delegation.iss == owner.sub``, ``delegation.sub == mark.iss``,
+       ``delegation.trust_mark_id == mark.trust_mark_type``. Drop on any
+       failure.
+   * - Yes
+     - No
+     - Yes
+     - Direct issuance by the owner. Accept.
+   * - Yes
+     - No
+     - No
+     - The pinned owner did not authorize this issuer to mint marks of
+       this type. Drop.
+
+``delegation.exp`` is enforced via the JWT temporal claims check but is
+NOT folded into the resolve response's ``exp`` claim. The response
+``exp`` remains ``min(chain exp, mark exp)``; stale delegations are
+caught on the next resolve.
+
 Signed JWKS URIs (§5.2.1)
 -------------------------
 

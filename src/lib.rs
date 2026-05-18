@@ -91,6 +91,7 @@ pub const KNOWN_CLAIMS: &[&str] = &[
     "authority_hints",
     "constraints",
     "trust_mark_type",
+    "trust_mark_id",
     "trust_mark",
     "status",
     "logo_uri",
@@ -1285,6 +1286,100 @@ pub fn is_subordinate_of(entity_url: &str, subtree: &str) -> bool {
     rest.is_empty() || rest.starts_with('/')
 }
 
+/// Pinned identity + key material for one Trust Mark Owner.
+///
+/// Spec §7.2: the Trust Anchor publishes its known Trust Mark Owners via
+/// the `trust_mark_owners` claim so resolvers can validate
+/// `trust-mark-delegation+jwt` documents against keys anchored by the TA
+/// itself rather than against keys self-asserted by the delegation's
+/// claimed issuer.
+#[derive(Debug, Clone)]
+pub struct OwnerInfo {
+    /// Entity identifier of the Trust Mark Owner. The delegation JWT's
+    /// `iss` claim MUST equal this value.
+    pub sub: String,
+    /// Public JWKS of the owner used to verify delegation JWT signatures.
+    /// Pinned inline by the TA — the spec does not allow `jwks_uri` here.
+    pub jwks: JwkSet,
+}
+
+/// Map of trust_mark_type -> pinned `OwnerInfo`, built from the TA's own
+/// Entity Configuration at resolve time.
+#[derive(Debug, Clone, Default)]
+pub struct TrustMarkOwners(HashMap<String, OwnerInfo>);
+
+impl TrustMarkOwners {
+    /// Parse the `trust_mark_owners` claim out of the TA's Entity
+    /// Configuration payload.
+    ///
+    /// * Absent claim returns `Ok(Self::default())` — no owners pinned.
+    /// * Present but malformed claim returns `Err(...)`. The caller MUST
+    ///   fail closed -- refuse to return any trust marks -- and log a
+    ///   warning. Falling back to `Self::default()` (no owners pinned)
+    ///   would silently disable delegation enforcement for any owned type
+    ///   that is also listed in `trust_mark_issuers`: a mark of that type
+    ///   would fall through to the issuer allowlist and be accepted
+    ///   without delegation validation. A malformed `trust_mark_owners`
+    ///   in the TA's own EC is an operator bug; the safe reaction is to
+    ///   refuse trust marks until the EC is regenerated cleanly.
+    pub fn from_ta_payload(payload: &JwtPayload) -> Result<Self> {
+        let Some(claim) = payload.claim("trust_mark_owners") else {
+            return Ok(Self::default());
+        };
+        let Some(obj) = claim.as_object() else {
+            bail!("trust_mark_owners claim must be a JSON object");
+        };
+        let mut out: HashMap<String, OwnerInfo> = HashMap::with_capacity(obj.len());
+        for (tm_type, entry) in obj {
+            if tm_type.is_empty() {
+                bail!("trust_mark_owners has empty trust_mark_type key");
+            }
+            let Some(entry_obj) = entry.as_object() else {
+                bail!("trust_mark_owners[{tm_type}] must be a JSON object");
+            };
+            let sub = entry_obj
+                .get("sub")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    anyhow!("trust_mark_owners[{tm_type}].sub must be a non-empty string")
+                })?;
+            let jwks_value = entry_obj
+                .get("jwks")
+                .ok_or_else(|| anyhow!("trust_mark_owners[{tm_type}].jwks is required"))?;
+            let keys = jwks_value
+                .get("keys")
+                .ok_or_else(|| anyhow!("trust_mark_owners[{tm_type}].jwks.keys is required"))?;
+            if keys.as_array().is_none_or(|a| a.is_empty()) {
+                bail!("trust_mark_owners[{tm_type}].jwks.keys must be a non-empty array");
+            }
+            let mut internal_map: Map<String, Value> = Map::new();
+            internal_map.insert("keys".to_string(), keys.clone());
+            let jwks = JwkSet::from_map(internal_map).map_err(|e| {
+                anyhow!("trust_mark_owners[{tm_type}].jwks failed to parse as JWKS: {e}")
+            })?;
+            out.insert(
+                tm_type.clone(),
+                OwnerInfo {
+                    sub: sub.to_string(),
+                    jwks,
+                },
+            );
+        }
+        Ok(Self(out))
+    }
+
+    /// Return the pinned owner for `trust_mark_type`, if any.
+    pub fn get(&self, trust_mark_type: &str) -> Option<&OwnerInfo> {
+        self.0.get(trust_mark_type)
+    }
+
+    /// True when this TA has not pinned any trust mark owners.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// Per-walk state carried through `resolve_entity_to_trustanchor`.
 ///
 /// Holds the resolve subject's identity (for §6.2 constraint checks
@@ -1713,8 +1808,11 @@ fn create_resolve_response_jwt(
 /// Mirrors the active-status decision in `trust_mark_status` (Section 8.4.1).
 async fn verify_ta_issued_trust_mark(
     trust_mark_jwt: &str,
+    ta_entity_id: &str,
     ta_public_keyset: &JwkSet,
     conn: &mut redis::aio::ConnectionManager,
+    trust_mark_owners: &TrustMarkOwners,
+    trust_mark_type: &str,
 ) -> bool {
     // 1. Was this mark ever issued by us?
     let mut hasher = Sha256::new();
@@ -1745,27 +1843,82 @@ async fn verify_ta_issued_trust_mark(
             }
         };
 
+    // 2b. Trust Mark Delegation (spec sec 7.2). The same failure matrix
+    //     applied to externally-issued marks applies here too -- a TA may
+    //     issue a mark for a type whose owner is some other entity only if
+    //     a valid delegation accompanies the mark.
+    if !delegation_gate_for_ta_issued(&payload, ta_entity_id, trust_mark_type, trust_mark_owners) {
+        return false;
+    }
+
     // 3. Revocation lookup.
     let sub = payload.subject().unwrap_or("");
-    let trust_mark_type = payload
+    let trust_mark_type_claim = payload
         .claim("trust_mark_type")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if validate_redis_key_input(sub).is_err() || validate_redis_key_input(trust_mark_type).is_err()
+    if validate_redis_key_input(sub).is_err()
+        || validate_redis_key_input(trust_mark_type_claim).is_err()
     {
         warn!("trust mark sub or trust_mark_type fails Redis key validation; hash={hash}");
         return false;
     }
     let hkey = format!("inmor:tm:{sub}");
-    match redis::Cmd::hget(hkey, trust_mark_type)
+    match redis::Cmd::hget(hkey, trust_mark_type_claim)
         .query_async::<String>(conn)
         .await
     {
         Ok(mark) => mark != "revoked",
         Err(e) => {
-            warn!("redis HGET inmor:tm:{sub} {trust_mark_type} failed: {e}");
+            warn!("redis HGET inmor:tm:{sub} {trust_mark_type_claim} failed: {e}");
             false
         }
+    }
+}
+
+/// Apply the spec sec 7.2 delegation failure matrix for a TA-issued mark.
+///
+/// Returns true if the mark should proceed to status/revocation checks, false
+/// if it must be dropped. The TA is the mark issuer here, so the
+/// "direct issuance by owner" branch matches when the TA is also the pinned
+/// owner; a TA-issued mark of a type owned by someone else needs a valid
+/// delegation just like an external-issuer mark would.
+fn delegation_gate_for_ta_issued(
+    mark_payload: &JwtPayload,
+    ta_entity_id: &str,
+    trust_mark_type: &str,
+    trust_mark_owners: &TrustMarkOwners,
+) -> bool {
+    let delegation_present = mark_payload.claim("delegation").is_some();
+    match (trust_mark_owners.get(trust_mark_type), delegation_present) {
+        (Some(owner), true) => {
+            if let Err(e) =
+                verify_delegation_against_owner(mark_payload, owner, ta_entity_id, trust_mark_type)
+            {
+                warn!(
+                    "trust mark: TA-issued mark delegation validation failed for type {trust_mark_type}: {e}"
+                );
+                return false;
+            }
+            true
+        }
+        (Some(owner), false) => {
+            if owner.sub != ta_entity_id {
+                warn!(
+                    "trust mark: TA-issued mark of type {trust_mark_type} but pinned owner is {}; rejecting (no delegation present)",
+                    owner.sub
+                );
+                return false;
+            }
+            true // TA is the owner, direct issuance.
+        }
+        (None, true) => {
+            warn!(
+                "trust mark: TA-issued mark of unpinned type {trust_mark_type} carries a delegation; ignoring delegation and accepting via TA-direct-issuance path"
+            );
+            true
+        }
+        (None, false) => true, // unpinned, no delegation -- existing path.
     }
 }
 
@@ -1873,6 +2026,73 @@ async fn resolve_external_issuer(
 ///
 /// Fail-closed at every step: any network error, parse error, signature failure,
 /// missing endpoint, or non-active status returns `false` and logs at WARN.
+/// Validate a `trust-mark-delegation+jwt` against a TA-pinned owner.
+///
+/// Spec §7.2.1: the delegation JWT is signed by the Trust Mark Owner and
+/// authorizes a specific Trust Mark Issuer (`sub`) to mint marks of a
+/// specific trust mark type (`trust_mark_id`). To accept the chain, all
+/// of these must hold:
+///
+///   * delegation signature verifies against the owner's pinned JWKS
+///     (and the JWT's `exp`/`nbf`/`iat` are valid; `crit` is allowlisted)
+///   * the JWT header `typ` is `trust-mark-delegation+jwt` -- an
+///     owner-signed JWT of any other type (entity statement, trust mark)
+///     MUST NOT be accepted as a delegation even if its claims line up
+///   * `delegation.iss` equals the pinned `owner.sub`
+///   * `delegation.sub` equals the mark's `iss` -- the owner authorized
+///     this specific issuer, not some other one
+///   * `delegation.trust_mark_id` equals the mark's `trust_mark_type` --
+///     the delegation is scoped to this trust mark type
+fn verify_delegation_against_owner(
+    mark_payload: &JwtPayload,
+    owner: &OwnerInfo,
+    mark_iss: &str,
+    mark_trust_mark_type: &str,
+) -> Result<()> {
+    let delegation_jwt = mark_payload
+        .claim("delegation")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("delegation claim missing or not a string"))?;
+    let (deleg_payload, deleg_header) =
+        verify_jwt_with_jwks(delegation_jwt, Some(owner.jwks.clone()))
+            .map_err(|e| anyhow!("delegation JWT signature/temporal verification failed: {e}"))?;
+    // Spec §7.2.1: the delegation document MUST be typed
+    // `trust-mark-delegation+jwt`. Enforcing the header `typ` blocks
+    // cross-JWT confusion -- another owner-signed JWT (an entity
+    // statement, a trust mark) whose iss/sub/trust_mark_id happen to line
+    // up MUST NOT ride through as a delegation.
+    let deleg_typ = deleg_header.token_type().unwrap_or("");
+    if deleg_typ != "trust-mark-delegation+jwt" {
+        bail!("delegation JWT typ ({deleg_typ}) is not trust-mark-delegation+jwt");
+    }
+    let deleg_iss = deleg_payload.issuer().unwrap_or("");
+    if deleg_iss != owner.sub {
+        bail!(
+            "delegation.iss ({deleg_iss}) does not equal pinned owner ({})",
+            owner.sub
+        );
+    }
+    let deleg_sub = deleg_payload.subject().unwrap_or("");
+    if deleg_sub != mark_iss {
+        bail!("delegation.sub ({deleg_sub}) does not equal mark.iss ({mark_iss})");
+    }
+    let deleg_tm_id = deleg_payload
+        .claim("trust_mark_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if deleg_tm_id != mark_trust_mark_type {
+        bail!(
+            "delegation.trust_mark_id ({deleg_tm_id}) does not equal mark.trust_mark_type ({mark_trust_mark_type})"
+        );
+    }
+    Ok(())
+}
+
+// Threading 8 distinct contextual inputs through this function is cleaner
+// than packaging them into an ad-hoc struct -- each parameter is consumed
+// once for an explicit purpose (TA vs external dispatch, signature
+// verification, delegation pinning, cache memoization).
+#[allow(clippy::too_many_arguments)]
 async fn verify_single_trust_mark(
     trust_mark_jwt: &str,
     issuer: &str,
@@ -1880,9 +2100,19 @@ async fn verify_single_trust_mark(
     ta_public_keyset: &JwkSet,
     conn: &mut redis::aio::ConnectionManager,
     issuer_cache: &mut IssuerInfoCache,
+    trust_mark_owners: &TrustMarkOwners,
+    trust_mark_type: &str,
 ) -> bool {
     if issuer == ta_entity_id {
-        return verify_ta_issued_trust_mark(trust_mark_jwt, ta_public_keyset, conn).await;
+        return verify_ta_issued_trust_mark(
+            trust_mark_jwt,
+            ta_entity_id,
+            ta_public_keyset,
+            conn,
+            trust_mark_owners,
+            trust_mark_type,
+        )
+        .await;
     }
 
     // 1. Resolve the issuer's JWKS + status endpoint, caching per /resolve.
@@ -1903,11 +2133,59 @@ async fn verify_single_trust_mark(
     // 2. Verify the trust mark JWT itself against the issuer's JWKS. This
     //    enforces signature + exp/nbf/iat *before* the network round-trip and
     //    before its `exp` is folded into the resolve-response `exp`.
-    if let Err(e) = verify_jwt_with_jwks(trust_mark_jwt, Some(issuer_info.jwks.clone())) {
-        warn!(
-            "trust mark: JWT signature/temporal verification failed against issuer {issuer} JWKS: {e}"
-        );
-        return false;
+    let (mark_payload, _) = match verify_jwt_with_jwks(
+        trust_mark_jwt,
+        Some(issuer_info.jwks.clone()),
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(
+                "trust mark: JWT signature/temporal verification failed against issuer {issuer} JWKS: {e}"
+            );
+            return false;
+        }
+    };
+
+    // 2b. Trust Mark Delegation (spec sec 7.2). The trust mark's `delegation`
+    //     claim, if present, is a JWT signed by the Trust Mark Owner. Validate
+    //     it against the owner pinned in the TA's `trust_mark_owners` claim.
+    //     Failure modes:
+    //       owner pinned + delegation present  -> validate; reject mark on failure
+    //       owner pinned + no delegation + iss == owner.sub -> direct issuance, accept
+    //       owner pinned + no delegation + iss != owner.sub -> reject (non-owner cannot issue)
+    //       owner not pinned + delegation present -> log warning, fall through (the
+    //          existing trust_mark_issuers gate is the only authority we have)
+    //       owner not pinned + no delegation -> existing path, accept
+    let delegation_present = mark_payload.claim("delegation").is_some();
+    match (trust_mark_owners.get(trust_mark_type), delegation_present) {
+        (Some(owner), true) => {
+            if let Err(e) =
+                verify_delegation_against_owner(&mark_payload, owner, issuer, trust_mark_type)
+            {
+                warn!(
+                    "trust mark: delegation validation failed for mark of type {trust_mark_type} from issuer {issuer}: {e}"
+                );
+                return false;
+            }
+        }
+        (Some(owner), false) => {
+            if owner.sub != issuer {
+                warn!(
+                    "trust mark: type {trust_mark_type} has pinned owner {} but mark.iss={issuer} and no delegation; rejecting",
+                    owner.sub
+                );
+                return false;
+            }
+            // owner.sub == issuer -> direct issuance by the owner, accept.
+        }
+        (None, true) => {
+            warn!(
+                "trust mark: delegation present on mark of unpinned type {trust_mark_type}; falling through to trust_mark_issuers gate"
+            );
+        }
+        (None, false) => {
+            // Unowned type, no delegation -- existing recognition path.
+        }
     }
 
     // 3. POST the trust mark to the status endpoint.
@@ -2032,16 +2310,42 @@ async fn verify_trust_marks_for_resolve(
             return Vec::new();
         }
     };
-    let trust_mark_issuers = match ta_payload
+    let trust_mark_issuers = ta_payload
         .claim("trust_mark_issuers")
         .and_then(|v| v.as_object())
-    {
-        Some(obj) => obj.clone(),
-        None => {
-            // No `trust_mark_issuers` claim → no recognised types in this federation.
+        .cloned()
+        .unwrap_or_default();
+    // Trust Mark Owners pinned by the TA (spec sec 7.2). Parsed from the same
+    // TA EC payload.
+    //
+    // FAIL-CLOSED on malformed `trust_mark_owners`: if the TA's own EC has
+    // a broken owners claim, fall back to an empty result. Treating it as
+    // "no owners pinned" would silently disable delegation enforcement for
+    // any owned type that is *also* listed in `trust_mark_issuers` -- a
+    // mark of that type would fall through to the issuer allowlist and be
+    // accepted without delegation validation. A malformed TA EC is an
+    // operator bug and the right reaction is to refuse trust marks until
+    // the EC is regenerated cleanly.
+    let trust_mark_owners = match TrustMarkOwners::from_ta_payload(&ta_payload) {
+        Ok(o) => o,
+        Err(e) => {
+            warn!(
+                "trust mark resolve: malformed trust_mark_owners claim in TA EC ({e}); refusing trust marks until operator fixes it"
+            );
             return Vec::new();
         }
     };
+    // A mark is *recognised* if either:
+    //   * its trust_mark_type appears in trust_mark_issuers (federation-pinned
+    //     recognition list, may be empty meaning "any issuer"), OR
+    //   * its trust_mark_type appears in trust_mark_owners (owner authority --
+    //     the owner can authorize issuers via delegation regardless of
+    //     trust_mark_issuers).
+    // If neither map mentions the type, the federation has no opinion at all
+    // and the mark is dropped.
+    if trust_mark_issuers.is_empty() && trust_mark_owners.is_empty() {
+        return Vec::new();
+    }
 
     // 3. Filter and verify each mark.
     //
@@ -2074,10 +2378,16 @@ async fn verify_trust_marks_for_resolve(
             None => continue,
         };
 
-        let allowed = match trust_mark_issuers.get(tm_type).and_then(|v| v.as_array()) {
-            Some(a) => a,
-            None => continue, // type not recognised by federation
-        };
+        // Recognition gate (spec sec 3.1.2 + sec 7.2). A type is recognised
+        // when EITHER `trust_mark_issuers` lists it OR `trust_mark_owners`
+        // pins an owner for it -- the owner provides an additive recognition
+        // channel via delegation. If neither map mentions the type, the
+        // federation has no opinion and the mark is dropped.
+        let allowed = trust_mark_issuers.get(tm_type).and_then(|v| v.as_array());
+        let owner = trust_mark_owners.get(tm_type);
+        if allowed.is_none() && owner.is_none() {
+            continue;
+        }
 
         let (unverified_payload, _) = match get_unverified_payload_header(jwt_str) {
             Ok(p) => p,
@@ -2121,14 +2431,23 @@ async fn verify_trust_marks_for_resolve(
             continue;
         }
 
-        // Empty allowed list = any issuer (per spec §3.1.2).
-        if !allowed.is_empty() {
-            let issuer_ok = allowed.iter().any(|v| v.as_str() == Some(issuer.as_str()));
-            if !issuer_ok {
-                warn!(
-                    "trust mark resolve: issuer {issuer} not in allowed list for type {tm_type}; skipping"
-                );
-                continue;
+        // Issuer-side recognition. When the owner is pinned the owner is the
+        // authority and the trust_mark_issuers gate is bypassed -- a valid
+        // delegation (checked inside verify_single_trust_mark) or direct
+        // owner-issuance suffices. When no owner is pinned, the existing
+        // trust_mark_issuers gate is the only authority: an empty list still
+        // means "any issuer" per spec sec 3.1.2.
+        if owner.is_none() {
+            let allowed =
+                allowed.expect("recognition gate above guarantees Some when owner is None");
+            if !allowed.is_empty() {
+                let issuer_ok = allowed.iter().any(|v| v.as_str() == Some(issuer.as_str()));
+                if !issuer_ok {
+                    warn!(
+                        "trust mark resolve: issuer {issuer} not in allowed list for type {tm_type}; skipping"
+                    );
+                    continue;
+                }
             }
         }
 
@@ -2139,6 +2458,8 @@ async fn verify_trust_marks_for_resolve(
             ta_public_keyset,
             conn,
             &mut issuer_cache,
+            &trust_mark_owners,
+            tm_type,
         )
         .await
         {
@@ -3991,6 +4312,274 @@ mod tests {
         assert!(
             missing.is_empty(),
             "every claim name parsed in lib.rs must be in KNOWN_CLAIMS; missing: {missing:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Trust Mark Delegation (spec sec 7.2) -- parser + verifier tests
+    // -----------------------------------------------------------------
+
+    /// Build a TA-EC-shaped payload carrying the supplied trust_mark_owners.
+    fn ta_payload_with_owners(owners: Value) -> JwtPayload {
+        let mut p = JwtPayload::new();
+        p.set_claim("trust_mark_owners", Some(owners))
+            .expect("set trust_mark_owners");
+        p
+    }
+
+    /// Public JWKS shape for a given owner key (kid stamped in).
+    fn owner_public_jwks(key: &Jwk) -> Value {
+        let mut public_key = key.to_public_key().expect("to_public_key");
+        if let Some(kid) = key.key_id() {
+            let mut pub_map = public_key.as_ref().clone();
+            pub_map.insert("kid".to_string(), json!(kid));
+            public_key = Jwk::from_map(pub_map).expect("from_map");
+        }
+        json!({"keys": [public_key.as_ref()]})
+    }
+
+    #[test]
+    fn test_trust_mark_owners_parses_minimal_payload() {
+        let key = first_private_key();
+        let payload = ta_payload_with_owners(json!({
+            "https://refeds.org/sirtfi": {
+                "sub": "https://owner.example",
+                "jwks": owner_public_jwks(&key),
+            }
+        }));
+        let owners = TrustMarkOwners::from_ta_payload(&payload).expect("parse");
+        let owner = owners
+            .get("https://refeds.org/sirtfi")
+            .expect("owner present");
+        assert_eq!(owner.sub, "https://owner.example");
+    }
+
+    #[test]
+    fn test_trust_mark_owners_absent_claim_is_default() {
+        let p = JwtPayload::new();
+        let owners = TrustMarkOwners::from_ta_payload(&p).expect("ok");
+        assert!(owners.is_empty());
+    }
+
+    #[test]
+    fn test_trust_mark_owners_rejects_missing_sub() {
+        let key = first_private_key();
+        let payload = ta_payload_with_owners(json!({
+            "https://example.com/tm": {
+                "jwks": owner_public_jwks(&key),
+            }
+        }));
+        assert!(TrustMarkOwners::from_ta_payload(&payload).is_err());
+    }
+
+    #[test]
+    fn test_trust_mark_owners_rejects_malformed_jwks() {
+        let payload = ta_payload_with_owners(json!({
+            "https://example.com/tm": {
+                "sub": "https://owner.example",
+                "jwks": {"keys": []},
+            }
+        }));
+        assert!(TrustMarkOwners::from_ta_payload(&payload).is_err());
+    }
+
+    #[test]
+    fn test_trust_mark_owners_rejects_non_object_entry() {
+        let payload = ta_payload_with_owners(json!({
+            "https://example.com/tm": "not-a-dict"
+        }));
+        assert!(TrustMarkOwners::from_ta_payload(&payload).is_err());
+    }
+
+    /// Build a signed delegation JWT (typ=trust-mark-delegation+jwt) for the
+    /// given owner+TMI+trust_mark_id triple.
+    fn build_delegation_jwt(
+        owner_key: &Jwk,
+        owner_id: &str,
+        tmi_id: &str,
+        trust_mark_id: &str,
+        ttl_secs: u64,
+    ) -> String {
+        let mut payload = JwtPayload::new();
+        payload.set_issuer(owner_id);
+        payload.set_subject(tmi_id);
+        payload
+            .set_claim("trust_mark_id", Some(json!(trust_mark_id)))
+            .expect("set trust_mark_id");
+        let now = SystemTime::now();
+        payload.set_issued_at(&now);
+        payload.set_expires_at(&(now + Duration::from_secs(ttl_secs)));
+        create_signed_jwt(&payload, owner_key, Some("trust-mark-delegation+jwt"))
+            .expect("sign delegation")
+    }
+
+    fn make_mark_payload_with_delegation(delegation_jwt: &str) -> JwtPayload {
+        let mut p = JwtPayload::new();
+        p.set_claim("delegation", Some(json!(delegation_jwt)))
+            .expect("set delegation");
+        p
+    }
+
+    fn owner_info_from(key: &Jwk, owner_id: &str) -> OwnerInfo {
+        let jwks_value = owner_public_jwks(key);
+        let mut internal: Map<String, Value> = Map::new();
+        internal.insert("keys".to_string(), jwks_value.get("keys").unwrap().clone());
+        OwnerInfo {
+            sub: owner_id.to_string(),
+            jwks: JwkSet::from_map(internal).expect("JwkSet"),
+        }
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_happy_path() {
+        let owner_key = first_private_key();
+        let owner_id = "https://owner.example";
+        let tmi_id = "https://tmi.example";
+        let tm_id = "https://refeds.org/sirtfi";
+        let delegation = build_delegation_jwt(&owner_key, owner_id, tmi_id, tm_id, 3600);
+        let mark = make_mark_payload_with_delegation(&delegation);
+        let owner = owner_info_from(&owner_key, owner_id);
+        verify_delegation_against_owner(&mark, &owner, tmi_id, tm_id)
+            .expect("valid delegation accepted");
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_wrong_typ() {
+        // An owner-signed JWT whose iss/sub/trust_mark_id all line up, but
+        // whose header `typ` is NOT trust-mark-delegation+jwt, must be
+        // rejected -- otherwise a different owner-signed token type could
+        // be confused for a delegation.
+        let owner_key = first_private_key();
+        let owner_id = "https://owner.example";
+        let tmi_id = "https://tmi.example";
+        let tm_id = "https://refeds.org/sirtfi";
+        let mut payload = JwtPayload::new();
+        payload.set_issuer(owner_id);
+        payload.set_subject(tmi_id);
+        payload
+            .set_claim("trust_mark_id", Some(json!(tm_id)))
+            .expect("set trust_mark_id");
+        let now = SystemTime::now();
+        payload.set_issued_at(&now);
+        payload.set_expires_at(&(now + Duration::from_secs(3600)));
+        // Signed as a trust-mark+jwt, not a delegation.
+        let not_a_delegation =
+            create_signed_jwt(&payload, &owner_key, Some("trust-mark+jwt")).expect("sign");
+        let mark = make_mark_payload_with_delegation(&not_a_delegation);
+        let owner = owner_info_from(&owner_key, owner_id);
+        let err = verify_delegation_against_owner(&mark, &owner, tmi_id, tm_id)
+            .expect_err("must reject a JWT whose typ is not trust-mark-delegation+jwt");
+        assert!(err.to_string().contains("typ"));
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_iss_mismatch() {
+        let owner_key = first_private_key();
+        let real_owner = "https://owner.example";
+        // Signed by `real_owner` but the pinned owner says someone else.
+        let delegation = build_delegation_jwt(
+            &owner_key,
+            real_owner,
+            "https://tmi.example",
+            "https://refeds.org/sirtfi",
+            3600,
+        );
+        let mark = make_mark_payload_with_delegation(&delegation);
+        let owner = owner_info_from(&owner_key, "https://different-owner.example");
+        let err = verify_delegation_against_owner(
+            &mark,
+            &owner,
+            "https://tmi.example",
+            "https://refeds.org/sirtfi",
+        )
+        .expect_err("must reject when pinned owner != delegation.iss");
+        assert!(err.to_string().contains("pinned owner"));
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_sub_mismatch() {
+        let owner_key = first_private_key();
+        let owner_id = "https://owner.example";
+        let delegation = build_delegation_jwt(
+            &owner_key,
+            owner_id,
+            "https://other-tmi.example",
+            "https://refeds.org/sirtfi",
+            3600,
+        );
+        let mark = make_mark_payload_with_delegation(&delegation);
+        let owner = owner_info_from(&owner_key, owner_id);
+        // Mark's iss is a different TMI than the delegation authorizes.
+        let err = verify_delegation_against_owner(
+            &mark,
+            &owner,
+            "https://tmi.example",
+            "https://refeds.org/sirtfi",
+        )
+        .expect_err("must reject when delegation.sub != mark.iss");
+        assert!(err.to_string().contains("mark.iss"));
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_trust_mark_id_mismatch() {
+        let owner_key = first_private_key();
+        let owner_id = "https://owner.example";
+        let tmi_id = "https://tmi.example";
+        // Delegation authorizes a DIFFERENT trust mark type than what the
+        // mark itself claims.
+        let delegation = build_delegation_jwt(
+            &owner_key,
+            owner_id,
+            tmi_id,
+            "https://example.com/another-tm",
+            3600,
+        );
+        let mark = make_mark_payload_with_delegation(&delegation);
+        let owner = owner_info_from(&owner_key, owner_id);
+        let err =
+            verify_delegation_against_owner(&mark, &owner, tmi_id, "https://refeds.org/sirtfi")
+                .expect_err("must reject when trust_mark_id != mark.trust_mark_type");
+        assert!(err.to_string().contains("trust_mark_id"));
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_expired() {
+        let owner_key = first_private_key();
+        let owner_id = "https://owner.example";
+        let tmi_id = "https://tmi.example";
+        let tm_id = "https://refeds.org/sirtfi";
+        // Build a delegation that is already expired by setting a negative
+        // ttl via JwtPayload directly (build_delegation_jwt uses
+        // saturating add on SystemTime).
+        let mut payload = JwtPayload::new();
+        payload.set_issuer(owner_id);
+        payload.set_subject(tmi_id);
+        payload
+            .set_claim("trust_mark_id", Some(json!(tm_id)))
+            .expect("set trust_mark_id");
+        let then = SystemTime::now() - Duration::from_secs(3600);
+        payload.set_issued_at(&then);
+        payload.set_expires_at(&(then + Duration::from_secs(60)));
+        let delegation = create_signed_jwt(&payload, &owner_key, Some("trust-mark-delegation+jwt"))
+            .expect("sign");
+        let mark = make_mark_payload_with_delegation(&delegation);
+        let owner = owner_info_from(&owner_key, owner_id);
+        assert!(verify_delegation_against_owner(&mark, &owner, tmi_id, tm_id).is_err());
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_missing_delegation_claim() {
+        let owner_key = first_private_key();
+        let mark = JwtPayload::new();
+        let owner = owner_info_from(&owner_key, "https://owner.example");
+        assert!(
+            verify_delegation_against_owner(
+                &mark,
+                &owner,
+                "https://tmi.example",
+                "https://refeds.org/sirtfi",
+            )
+            .is_err()
         );
     }
 }

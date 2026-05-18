@@ -285,6 +285,17 @@ TA_DEFAULTS = {
 TA_TRUSTMARKS = []
 # Any trusted trustmark issuers can be added in localsettings.py
 TA_TRUSTED_TRUSTMARK_ISSUERS = {}
+# Trust Mark Owners published in the TA's Entity Configuration (spec sec 3.1.2,
+# 7.2). Each entry pins an inline JWKS for an owner so /resolve can validate
+# trust-mark-delegation+jwt documents against keys anchored by the TA itself.
+# Shape:
+#   TA_TRUST_MARK_OWNERS = {
+#       "https://refeds.org/sirtfi": {
+#           "sub": "https://refeds.org",
+#           "jwks": {"keys": [{"kty": "RSA", "kid": "...", "n": "...", "e": "AQAB"}]},
+#       },
+#   }
+TA_TRUST_MARK_OWNERS: dict[str, dict] = {}
 
 # django-allauth MFA settings
 MFA_SUPPORTED_TYPES = ["totp", "webauthn"]
