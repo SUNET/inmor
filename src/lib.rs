@@ -2035,6 +2035,9 @@ async fn resolve_external_issuer(
 ///
 ///   * delegation signature verifies against the owner's pinned JWKS
 ///     (and the JWT's `exp`/`nbf`/`iat` are valid; `crit` is allowlisted)
+///   * the JWT header `typ` is `trust-mark-delegation+jwt` -- an
+///     owner-signed JWT of any other type (entity statement, trust mark)
+///     MUST NOT be accepted as a delegation even if its claims line up
 ///   * `delegation.iss` equals the pinned `owner.sub`
 ///   * `delegation.sub` equals the mark's `iss` -- the owner authorized
 ///     this specific issuer, not some other one
@@ -2050,8 +2053,18 @@ fn verify_delegation_against_owner(
         .claim("delegation")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("delegation claim missing or not a string"))?;
-    let (deleg_payload, _) = verify_jwt_with_jwks(delegation_jwt, Some(owner.jwks.clone()))
-        .map_err(|e| anyhow!("delegation JWT signature/temporal verification failed: {e}"))?;
+    let (deleg_payload, deleg_header) =
+        verify_jwt_with_jwks(delegation_jwt, Some(owner.jwks.clone()))
+            .map_err(|e| anyhow!("delegation JWT signature/temporal verification failed: {e}"))?;
+    // Spec §7.2.1: the delegation document MUST be typed
+    // `trust-mark-delegation+jwt`. Enforcing the header `typ` blocks
+    // cross-JWT confusion -- another owner-signed JWT (an entity
+    // statement, a trust mark) whose iss/sub/trust_mark_id happen to line
+    // up MUST NOT ride through as a delegation.
+    let deleg_typ = deleg_header.token_type().unwrap_or("");
+    if deleg_typ != "trust-mark-delegation+jwt" {
+        bail!("delegation JWT typ ({deleg_typ}) is not trust-mark-delegation+jwt");
+    }
     let deleg_iss = deleg_payload.issuer().unwrap_or("");
     if deleg_iss != owner.sub {
         bail!(
@@ -4428,6 +4441,35 @@ mod tests {
         let owner = owner_info_from(&owner_key, owner_id);
         verify_delegation_against_owner(&mark, &owner, tmi_id, tm_id)
             .expect("valid delegation accepted");
+    }
+
+    #[test]
+    fn test_verify_delegation_against_owner_rejects_wrong_typ() {
+        // An owner-signed JWT whose iss/sub/trust_mark_id all line up, but
+        // whose header `typ` is NOT trust-mark-delegation+jwt, must be
+        // rejected -- otherwise a different owner-signed token type could
+        // be confused for a delegation.
+        let owner_key = first_private_key();
+        let owner_id = "https://owner.example";
+        let tmi_id = "https://tmi.example";
+        let tm_id = "https://refeds.org/sirtfi";
+        let mut payload = JwtPayload::new();
+        payload.set_issuer(owner_id);
+        payload.set_subject(tmi_id);
+        payload
+            .set_claim("trust_mark_id", Some(json!(tm_id)))
+            .expect("set trust_mark_id");
+        let now = SystemTime::now();
+        payload.set_issued_at(&now);
+        payload.set_expires_at(&(now + Duration::from_secs(3600)));
+        // Signed as a trust-mark+jwt, not a delegation.
+        let not_a_delegation =
+            create_signed_jwt(&payload, &owner_key, Some("trust-mark+jwt")).expect("sign");
+        let mark = make_mark_payload_with_delegation(&not_a_delegation);
+        let owner = owner_info_from(&owner_key, owner_id);
+        let err = verify_delegation_against_owner(&mark, &owner, tmi_id, tm_id)
+            .expect_err("must reject a JWT whose typ is not trust-mark-delegation+jwt");
+        assert!(err.to_string().contains("typ"));
     }
 
     #[test]

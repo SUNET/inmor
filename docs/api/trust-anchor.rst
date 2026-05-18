@@ -708,10 +708,17 @@ Configure pinned owners in ``localsettings.py``::
         },
     }
 
-The regenerate-entity command validates this dict strictly (sub must be
-a non-empty string, jwks must contain a non-empty ``keys`` array, each
-key must carry ``kid`` and ``kty``) and fails fast on any malformed
-entry so the TA never publishes a half-baked owner record.
+The regenerate-entity command validates this dict strictly and fails
+fast on any malformed entry so the TA never publishes a half-baked owner
+record. Each entry must satisfy:
+
+* the map key (the trust mark type) must be an ``http``/``https`` URL
+  with a host -- values like ``not-a-url`` or non-http schemes are
+  rejected;
+* ``sub`` must likewise be an ``http``/``https`` URL with a host, not
+  merely a non-empty string;
+* ``jwks`` must contain a non-empty ``keys`` array, and each key must
+  carry ``kid`` and ``kty``.
 
 Recognition is **additive**: a trust mark type is recognised when either
 ``trust_mark_issuers`` lists it OR ``trust_mark_owners`` pins an owner for
