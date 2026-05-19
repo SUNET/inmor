@@ -351,6 +351,20 @@ The Trust Anchor stores federation data in Redis:
      - Set of entity IDs with this trust mark type
    * - ``inmor:tm:alltime``
      - Set of all trust mark SHA256 hashes (for validation)
+   * - ``inmor:collection:entities``
+     - Hash: entity_id → JSON entity object (populated by ``inmor-collection``)
+   * - ``inmor:collection:by_type:{type}``
+     - Set of entity IDs of a given entity type
+   * - ``inmor:collection:by_trustmark:{type}``
+     - Set of entity IDs with a verified trust mark of a given type
+   * - ``inmor:collection:trustmark_types``
+     - Set: registry of indexed trust mark types
+   * - ``inmor:collection:trust_anchor``
+     - Entity Identifier the collection was walked from
+   * - ``inmor:collection:all_sorted``
+     - Sorted set of entity IDs for consistent ordering
+   * - ``inmor:collection:last_updated``
+     - Unix timestamp of the last collection walk
 
 Example Configuration Files
 ---------------------------
