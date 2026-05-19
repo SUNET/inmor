@@ -515,21 +515,68 @@ pub fn create_signed_jwt_with_header(
     Ok(jwt)
 }
 
-/// Returns entities from the collection data populated by inmor-collection.
-/// If entity_type filter is given, reads from `inmor:collection:by_type:{type}` sets,
-/// otherwise reads all from `inmor:collection:entities` hash.
-async fn get_collection_entities(
+/// Default page size for `/collection` when `limit` is omitted.
+const COLLECTION_DEFAULT_LIMIT: usize = 100;
+/// Practical upper bound for a `/collection` page (spec sec 3.1.2).
+const COLLECTION_MAX_LIMIT: usize = 500;
+
+/// Clamps a requested `limit` to the supported range. `None` (parameter
+/// absent) falls back to the default page size.
+fn clamp_limit(requested: Option<usize>) -> usize {
+    match requested {
+        Some(n) => n.clamp(1, COLLECTION_MAX_LIMIT),
+        None => COLLECTION_DEFAULT_LIMIT,
+    }
+}
+
+/// Encodes an entity_id into the opaque pagination cursor carried by the
+/// `from` / `next` parameters.
+fn encode_cursor(entity_id: &str) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(entity_id)
+}
+
+/// Decodes a pagination cursor back into an entity_id. Returns `None` when the
+/// cursor is not valid base64url-encoded UTF-8.
+fn decode_cursor(cursor: &str) -> Option<String> {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor)
+        .ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+/// Implementation-defined `query` filter (spec sec 3.3.1-2.6.1): a
+/// case-insensitive substring match over the entity_id and any UI display
+/// names.
+fn query_matches(entity: &EntityCollectionResponse, query: &str) -> bool {
+    let needle = query.to_lowercase();
+    if entity.entity_id.to_lowercase().contains(&needle) {
+        return true;
+    }
+    if let Some(ui_infos) = &entity.ui_infos {
+        for ui in ui_infos.values() {
+            if let Some(name) = &ui.display_name
+                && name.to_lowercase().contains(&needle)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Returns the entity_id-sorted candidate ids matching the `entity_type`
+/// (OR) and `trust_mark_type` (AND) filters. Only ids are read here -- no
+/// entity records are materialized -- so a paginated request can fetch just
+/// the page it serves rather than the whole filtered set.
+async fn collect_collection_ids(
     conn: &mut redis::aio::ConnectionManager,
     entity_types: &[String],
-) -> Result<Vec<EntityCollectionResponse>> {
-    let entity_ids: Vec<String> = if entity_types.is_empty() {
-        // No filter: get all entity_ids from the hash
-        redis::Cmd::hkeys("inmor:collection:entities")
-            .query_async(conn)
-            .await
-            .unwrap_or_default()
+    trust_mark_types: &[String],
+) -> Result<Vec<String>> {
+    // entity_type filter: union (OR) of by_type sets.
+    let etype_ids: Option<HashSet<String>> = if entity_types.is_empty() {
+        None
     } else {
-        // Get union of entity_ids across requested types
         let mut ids = HashSet::new();
         for etype in entity_types {
             validate_entity_type(etype)
@@ -541,11 +588,52 @@ async fn get_collection_entities(
                     .unwrap_or_default();
             ids.extend(type_ids);
         }
-        ids.into_iter().collect()
+        Some(ids)
     };
 
-    let mut result = Vec::new();
-    for eid in &entity_ids {
+    // trust_mark_type filter: intersection (AND) of by_trustmark sets.
+    let tmtype_ids: Option<HashSet<String>> = if trust_mark_types.is_empty() {
+        None
+    } else {
+        let mut acc: Option<HashSet<String>> = None;
+        for tmt in trust_mark_types {
+            let set: HashSet<String> =
+                redis::Cmd::smembers(format!("inmor:collection:by_trustmark:{tmt}"))
+                    .query_async(conn)
+                    .await
+                    .unwrap_or_default();
+            acc = Some(match acc {
+                None => set,
+                Some(prev) => prev.intersection(&set).cloned().collect(),
+            });
+        }
+        acc
+    };
+
+    // Combine the active filters (AND across filter kinds).
+    let mut entity_ids: Vec<String> = match (etype_ids, tmtype_ids) {
+        (None, None) => redis::Cmd::hkeys("inmor:collection:entities")
+            .query_async(conn)
+            .await
+            .unwrap_or_default(),
+        (Some(a), None) => a.into_iter().collect(),
+        (None, Some(b)) => b.into_iter().collect(),
+        (Some(a), Some(b)) => a.intersection(&b).cloned().collect(),
+    };
+
+    // Sort for consistent pagination ordering (spec sec 3.1.1).
+    entity_ids.sort();
+    Ok(entity_ids)
+}
+
+/// Fetches and deserializes the given entity records from the collection
+/// hash, preserving input order and skipping unreadable entries.
+async fn fetch_collection_records(
+    conn: &mut redis::aio::ConnectionManager,
+    ids: &[String],
+) -> Vec<EntityCollectionResponse> {
+    let mut records = Vec::with_capacity(ids.len());
+    for eid in ids {
         let json_str: Option<String> = redis::Cmd::hget("inmor:collection:entities", eid)
             .query_async(conn)
             .await
@@ -553,13 +641,57 @@ async fn get_collection_entities(
         if let Some(json_str) = json_str
             && let Ok(entry) = serde_json::from_str::<EntityCollectionResponse>(&json_str)
         {
-            result.push(entry);
+            records.push(entry);
         }
     }
+    records
+}
 
-    // Sort by entity_id for consistent ordering
-    result.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
-    Ok(result)
+/// Index of the first entity_id strictly greater than the `from` cursor in
+/// an ascending-sorted id slice -- i.e. the start of the page after the
+/// cursor. A `None` cursor starts at index 0. Binary search, since the slice
+/// is already sorted.
+fn page_start(sorted_ids: &[String], from: Option<&str>) -> usize {
+    match from {
+        None => 0,
+        Some(f) => sorted_ids.partition_point(|id| id.as_str() <= f),
+    }
+}
+
+/// Paginates the whole collection directly off the `all_sorted` ZSET. Used
+/// when no filter is active: `ZRANGEBYLEX` walks the ordered set from just
+/// after the cursor and fetches only one page, so the full id set is never
+/// loaded or sorted per request.
+async fn paginate_collection_zset(
+    conn: &mut redis::aio::ConnectionManager,
+    from: Option<&str>,
+    limit: usize,
+) -> (Vec<EntityCollectionResponse>, Option<String>) {
+    // `(value` is an exclusive lower bound; `-` is the start of the set.
+    let min = match from {
+        None => "-".to_string(),
+        Some(f) => format!("({f}"),
+    };
+    // Fetch one extra id to detect whether a further page exists.
+    let ids: Vec<String> = redis::cmd("ZRANGEBYLEX")
+        .arg("inmor:collection:all_sorted")
+        .arg(&min)
+        .arg("+")
+        .arg("LIMIT")
+        .arg(0)
+        .arg(limit + 1)
+        .query_async(conn)
+        .await
+        .unwrap_or_default();
+    let has_more = ids.len() > limit;
+    let page_ids: Vec<String> = ids.into_iter().take(limit).collect();
+    let next = if has_more {
+        page_ids.last().map(|id| encode_cursor(id))
+    } else {
+        None
+    };
+    let page = fetch_collection_records(conn, &page_ids).await;
+    (page, next)
 }
 
 /// TODO: We need to deal with query parameters in future
@@ -659,8 +791,10 @@ async fn list_subordinates(
     Ok(HttpResponse::Ok().json(res))
 }
 
-/// https://zachmann.github.io/openid-federation-entity-collection/main.html
-/// Entity collection endpoint. Reads data populated by inmor-collection CLI.
+/// Federation Entity Collection endpoint (Entity Collection spec sec 3).
+/// Reads data populated by the inmor-collection CLI. Supports `entity_type`
+/// (OR), `trust_mark_type` (AND), `trust_anchor`, and `query` filters plus
+/// `from` / `limit` pagination.
 #[get("/collection")]
 pub async fn fetch_collections(
     req: HttpRequest,
@@ -678,33 +812,159 @@ pub async fn fetch_collections(
         .map_err(error::ErrorInternalServerError)?;
 
     let mut entity_types: Vec<String> = Vec::new();
+    let mut trust_mark_types: Vec<String> = Vec::new();
+    let mut from_cursor: Option<String> = None;
+    let mut limit_param: Option<usize> = None;
+    let mut requested_ta: Option<String> = None;
+    let mut query: Option<String> = None;
 
-    // Parse query parameters
+    // Parse query parameters. Unknown parameters (including the optional
+    // entity_claims / ui_claims response-shaping parameters inmor does not
+    // implement) are rejected with unsupported_parameter per spec sec 3.4.2.
     for (q, p) in params.iter() {
         match q.as_str() {
-            "entity_type" => {
-                entity_types.push(p.clone());
+            "entity_type" => entity_types.push(p.clone()),
+            "trust_mark_type" => {
+                if let Err(e) = validate_redis_key_input(p) {
+                    return error_response_400(
+                        "invalid_request",
+                        &format!("invalid trust_mark_type: {e}"),
+                    );
+                }
+                trust_mark_types.push(p.clone());
             }
+            "from" => from_cursor = Some(p.clone()),
+            "limit" => match p.parse::<usize>() {
+                Ok(n) => limit_param = Some(n),
+                Err(_) => {
+                    return error_response_400(
+                        "invalid_request",
+                        "the 'limit' parameter must be a non-negative integer",
+                    );
+                }
+            },
+            "trust_anchor" => requested_ta = Some(p.clone()),
+            "query" => query = Some(p.clone()),
             _ => {
-                return error_response_400("unsupported_parameter", q);
+                return error_response_400(
+                    "unsupported_parameter",
+                    &format!("the '{q}' parameter is not supported by this endpoint"),
+                );
             }
         }
     }
 
-    let result = get_collection_entities(&mut conn, &entity_types)
-        .await
-        .map_err(error::ErrorInternalServerError)?;
-
-    // Get last_updated timestamp
-    let last_updated: Option<u64> = redis::Cmd::get("inmor:collection:last_updated")
+    // trust_anchor (spec sec 3.3.1-2.5.1): the collection is precomputed for a
+    // single Trust Anchor by the inmor-collection CLI. Accept the parameter
+    // only when it matches that Trust Anchor.
+    let collection_ta: Option<String> = redis::Cmd::get("inmor:collection:trust_anchor")
         .query_async(&mut conn)
         .await
         .ok();
+    if let Some(req_ta) = &requested_ta
+        && collection_ta.as_deref() != Some(req_ta.as_str())
+    {
+        return error_response_400(
+            "invalid_request",
+            "collection data is not available for the requested trust_anchor",
+        );
+    }
 
-    let response = json!({
-        "entities": result,
+    // Resolve the `from` cursor. page_not_found is checked against the full
+    // collection membership, independent of the active filters (spec sec 3.4.2).
+    let from_id: Option<String> = match &from_cursor {
+        None => None,
+        Some(cursor) => {
+            let Some(id) = decode_cursor(cursor) else {
+                return error_response_400(
+                    "invalid_request",
+                    "the 'from' parameter is not a valid pagination cursor",
+                );
+            };
+            let known: bool = redis::Cmd::hexists("inmor:collection:entities", &id)
+                .query_async(&mut conn)
+                .await
+                .unwrap_or(false);
+            if !known {
+                return error_response_404(
+                    "page_not_found",
+                    "the pagination pointer in 'from' is not or no longer known",
+                );
+            }
+            Some(id)
+        }
+    };
+
+    // Pagination (spec sec 3.1).
+    let limit = clamp_limit(limit_param);
+    let (page, next): (Vec<EntityCollectionResponse>, Option<String>) =
+        if entity_types.is_empty() && trust_mark_types.is_empty() && query.is_none() {
+            // No filter active: page straight off the ordered ZSET so the
+            // whole id set is never loaded just to serve one page.
+            paginate_collection_zset(&mut conn, from_id.as_deref(), limit).await
+        } else {
+            // A filter is active: resolve the candidate id set first.
+            let candidate_ids =
+                match collect_collection_ids(&mut conn, &entity_types, &trust_mark_types).await {
+                    Ok(ids) => ids,
+                    Err(e) => return error_response_400("invalid_request", &e.to_string()),
+                };
+            match query.as_deref() {
+                Some(q) => {
+                    // The query filter must inspect entity records, so the
+                    // candidate set is materialized before paging.
+                    let records: Vec<EntityCollectionResponse> =
+                        fetch_collection_records(&mut conn, &candidate_ids)
+                            .await
+                            .into_iter()
+                            .filter(|e| query_matches(e, q))
+                            .collect();
+                    let start = match from_id.as_deref() {
+                        None => 0,
+                        Some(f) => records.partition_point(|e| e.entity_id.as_str() <= f),
+                    };
+                    let has_more = start + limit < records.len();
+                    let page: Vec<EntityCollectionResponse> =
+                        records.into_iter().skip(start).take(limit).collect();
+                    let next = has_more
+                        .then(|| page.last().map(|e| encode_cursor(&e.entity_id)))
+                        .flatten();
+                    (page, next)
+                }
+                None => {
+                    // Type filter only: page the candidate ids, then fetch
+                    // only that page's records.
+                    let start = page_start(&candidate_ids, from_id.as_deref());
+                    let page_ids: Vec<String> = candidate_ids
+                        .iter()
+                        .skip(start)
+                        .take(limit)
+                        .cloned()
+                        .collect();
+                    let has_more = start + page_ids.len() < candidate_ids.len();
+                    let next = has_more
+                        .then(|| page_ids.last().map(|id| encode_cursor(id)))
+                        .flatten();
+                    let page = fetch_collection_records(&mut conn, &page_ids).await;
+                    (page, next)
+                }
+            }
+        };
+
+    // Default to 0 when no walk has populated the collection yet, so the
+    // response always carries a numeric `last_updated`.
+    let last_updated: u64 = redis::Cmd::get("inmor:collection:last_updated")
+        .query_async(&mut conn)
+        .await
+        .unwrap_or(0);
+
+    let mut response = json!({
+        "entities": page,
         "last_updated": last_updated,
     });
+    if let Some(next) = next {
+        response["next"] = json!(next);
+    }
 
     Ok(HttpResponse::Ok()
         .content_type("application/json")
@@ -2267,13 +2527,90 @@ async fn verify_single_trust_mark(
 ///
 /// The original `{trust_mark, trust_mark_type}` objects are returned unchanged so
 /// they can be embedded verbatim in the resolve response (per spec §8.3.2).
+/// Loads the federation recognition maps (`trust_mark_issuers` /
+/// `trust_mark_owners`) from inmor's own published Entity Configuration
+/// (`inmor:entity_id`). Returns empty maps when the EC is missing or its
+/// `trust_mark_owners` claim is malformed -- callers treat empty maps as
+/// "recognise nothing", which fails closed.
+pub async fn load_inmor_recognition_maps(
+    conn: &mut redis::aio::ConnectionManager,
+) -> (Map<String, Value>, TrustMarkOwners) {
+    // We trust Redis here -- it's our own data written by the admin process.
+    // Skipping the signature check is intentional: it avoids a needless
+    // self-verify on every resolve and matches the trust boundary used by
+    // other endpoints that read `inmor:entity_id`.
+    let ta_ec_jwt: String = match redis::Cmd::get("inmor:entity_id")
+        .query_async::<String>(conn)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("trust mark resolve: failed to GET inmor:entity_id from Redis: {e}");
+            return (Map::new(), TrustMarkOwners::default());
+        }
+    };
+    let (ta_payload, _) = match get_unverified_payload_header(&ta_ec_jwt) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("trust mark resolve: failed to parse TA entity configuration: {e}");
+            return (Map::new(), TrustMarkOwners::default());
+        }
+    };
+    let issuers = ta_payload
+        .claim("trust_mark_issuers")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    // FAIL-CLOSED on malformed `trust_mark_owners`: a broken owners claim in
+    // the TA's own EC would otherwise silently disable delegation enforcement
+    // for any owned type also listed in `trust_mark_issuers`.
+    let owners = match TrustMarkOwners::from_ta_payload(&ta_payload) {
+        Ok(o) => o,
+        Err(e) => {
+            warn!(
+                "trust mark resolve: malformed trust_mark_owners claim in TA EC ({e}); refusing trust marks until operator fixes it"
+            );
+            return (Map::new(), TrustMarkOwners::default());
+        }
+    };
+    (issuers, owners)
+}
+
+/// Thin wrapper over `verify_trust_marks` that sources the federation
+/// recognition maps from inmor's own published Entity Configuration. Used by
+/// `/resolve`.
 async fn verify_trust_marks_for_resolve(
     subject_payload: &JwtPayload,
     ta_entity_id: &str,
     ta_public_keyset: &JwkSet,
     conn: &mut redis::aio::ConnectionManager,
 ) -> Vec<Value> {
-    // 1. Subject's trust marks.
+    let (trust_mark_issuers, trust_mark_owners) = load_inmor_recognition_maps(conn).await;
+    verify_trust_marks(
+        subject_payload,
+        ta_entity_id,
+        ta_public_keyset,
+        &trust_mark_issuers,
+        &trust_mark_owners,
+        conn,
+    )
+    .await
+}
+
+/// Core trust-mark verification: given the federation recognition maps
+/// (`trust_mark_issuers` / `trust_mark_owners`), returns the subset of the
+/// subject's trust marks that verify. Shared by `/resolve` and the
+/// `inmor-collection` walker so marks are verified against the same Trust
+/// Anchor used to build the trust chain / collection (spec sec 3.3.1-2.4.1).
+pub async fn verify_trust_marks(
+    subject_payload: &JwtPayload,
+    ta_entity_id: &str,
+    ta_public_keyset: &JwkSet,
+    trust_mark_issuers: &Map<String, Value>,
+    trust_mark_owners: &TrustMarkOwners,
+    conn: &mut redis::aio::ConnectionManager,
+) -> Vec<Value> {
+    // Subject's trust marks.
     let trust_marks = match subject_payload
         .claim("trust_marks")
         .and_then(|v| v.as_array())
@@ -2288,53 +2625,6 @@ async fn verify_trust_marks_for_resolve(
     // accepted as its own.
     let resolve_sub = subject_payload.subject().unwrap_or("");
 
-    // 2. TA's own entity configuration → trust_mark_issuers map.
-    let ta_ec_jwt: String = match redis::Cmd::get("inmor:entity_id")
-        .query_async::<String>(conn)
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("trust mark resolve: failed to GET inmor:entity_id from Redis: {e}");
-            return Vec::new();
-        }
-    };
-    // We trust Redis here — it's our own data written by the admin process.
-    // Skipping the signature check is intentional: it avoids a needless self-verify
-    // on every resolve and matches the trust boundary used by other endpoints that
-    // read `inmor:entity_id`.
-    let (ta_payload, _) = match get_unverified_payload_header(&ta_ec_jwt) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!("trust mark resolve: failed to parse TA entity configuration: {e}");
-            return Vec::new();
-        }
-    };
-    let trust_mark_issuers = ta_payload
-        .claim("trust_mark_issuers")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
-    // Trust Mark Owners pinned by the TA (spec sec 7.2). Parsed from the same
-    // TA EC payload.
-    //
-    // FAIL-CLOSED on malformed `trust_mark_owners`: if the TA's own EC has
-    // a broken owners claim, fall back to an empty result. Treating it as
-    // "no owners pinned" would silently disable delegation enforcement for
-    // any owned type that is *also* listed in `trust_mark_issuers` -- a
-    // mark of that type would fall through to the issuer allowlist and be
-    // accepted without delegation validation. A malformed TA EC is an
-    // operator bug and the right reaction is to refuse trust marks until
-    // the EC is regenerated cleanly.
-    let trust_mark_owners = match TrustMarkOwners::from_ta_payload(&ta_payload) {
-        Ok(o) => o,
-        Err(e) => {
-            warn!(
-                "trust mark resolve: malformed trust_mark_owners claim in TA EC ({e}); refusing trust marks until operator fixes it"
-            );
-            return Vec::new();
-        }
-    };
     // A mark is *recognised* if either:
     //   * its trust_mark_type appears in trust_mark_issuers (federation-pinned
     //     recognition list, may be empty meaning "any issuer"), OR
@@ -2347,7 +2637,7 @@ async fn verify_trust_marks_for_resolve(
         return Vec::new();
     }
 
-    // 3. Filter and verify each mark.
+    // Filter and verify each mark.
     //
     // Hard cap: bounds the per-request HTTP fan-out (each external mark may
     // trigger two outbound calls). See MAX_TRUST_MARKS_PER_RESOLVE.
@@ -2458,7 +2748,7 @@ async fn verify_trust_marks_for_resolve(
             ta_public_keyset,
             conn,
             &mut issuer_cache,
-            &trust_mark_owners,
+            trust_mark_owners,
             tm_type,
         )
         .await
@@ -3048,7 +3338,7 @@ const KNOWN_ENTITY_TYPES: &[&str] = &[
 /// Validates that a user-supplied string is safe to use in a Redis key.
 /// Rejects control characters (including newlines and null bytes) and
 /// enforces a maximum length to prevent memory abuse.
-fn validate_redis_key_input(input: &str) -> Result<(), &'static str> {
+pub(crate) fn validate_redis_key_input(input: &str) -> Result<(), &'static str> {
     const MAX_KEY_INPUT_LEN: usize = 2048;
     if input.is_empty() {
         return Err("empty value");
@@ -4798,5 +5088,91 @@ mod ssrf_tests {
             .unwrap();
         let result = get_jwks_from_payload(&payload);
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+
+    #[test]
+    fn test_clamp_limit() {
+        // Absent parameter falls back to the default page size.
+        assert_eq!(clamp_limit(None), COLLECTION_DEFAULT_LIMIT);
+        assert_eq!(clamp_limit(Some(10)), 10);
+        // Zero is clamped up to a usable page size.
+        assert_eq!(clamp_limit(Some(0)), 1);
+        // Oversized requests are capped at the upper bound.
+        assert_eq!(
+            clamp_limit(Some(COLLECTION_MAX_LIMIT + 1000)),
+            COLLECTION_MAX_LIMIT
+        );
+        assert_eq!(
+            clamp_limit(Some(COLLECTION_MAX_LIMIT)),
+            COLLECTION_MAX_LIMIT
+        );
+    }
+
+    #[test]
+    fn test_page_start() {
+        let ids: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        // No cursor starts at the beginning.
+        assert_eq!(page_start(&ids, None), 0);
+        // Resume strictly after the cursor entity.
+        assert_eq!(page_start(&ids, Some("b")), 2);
+        // A cursor at or past the last id yields the end index (empty page).
+        assert_eq!(page_start(&ids, Some("d")), 4);
+        assert_eq!(page_start(&ids, Some("z")), 4);
+        // A cursor falling between ids resumes at the next one.
+        assert_eq!(page_start(&ids, Some("bb")), 2);
+    }
+
+    #[test]
+    fn test_cursor_round_trip() {
+        let id = "https://rp.example.com/path?x=1";
+        let cursor = encode_cursor(id);
+        // The cursor is opaque -- not the raw entity_id.
+        assert_ne!(cursor, id);
+        assert_eq!(decode_cursor(&cursor).as_deref(), Some(id));
+    }
+
+    #[test]
+    fn test_decode_cursor_rejects_garbage() {
+        // Not valid base64url-encoded UTF-8.
+        assert_eq!(decode_cursor("!!!not base64!!!"), None);
+    }
+
+    #[test]
+    fn test_query_matches_entity_id() {
+        let e = EntityCollectionResponse::new(
+            "https://OP.example.com".to_string(),
+            vec!["openid_provider".to_string()],
+        );
+        // Case-insensitive substring match on entity_id.
+        assert!(query_matches(&e, "op.example"));
+        assert!(query_matches(&e, "OP.EXAMPLE"));
+        assert!(!query_matches(&e, "missing"));
+    }
+
+    #[test]
+    fn test_query_matches_display_name() {
+        let mut ui = HashMap::new();
+        ui.insert(
+            "openid_provider".to_string(),
+            UiInfo {
+                display_name: Some("Example University".to_string()),
+                description: None,
+                logo_uri: None,
+                policy_uri: None,
+                information_uri: None,
+            },
+        );
+        let mut e = EntityCollectionResponse::new(
+            "https://op.example.com".to_string(),
+            vec!["openid_provider".to_string()],
+        );
+        e.ui_infos = Some(ui);
+        assert!(query_matches(&e, "university"));
+        assert!(!query_matches(&e, "college"));
     }
 }

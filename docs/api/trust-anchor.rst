@@ -516,6 +516,38 @@ This endpoint reads pre-populated data from Redis. The data is populated by runn
 ``inmor-collection`` CLI tool, which walks the federation tree from a trust anchor and
 stores entity information. See :ref:`collection-cli` for details.
 
+**Request Parameters:**
+
+All parameters are optional and passed as query parameters.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Parameter
+     - Description
+   * - ``entity_type``
+     - Repeatable. Filter to entities that include the given Entity Type.
+       Multiple values combine with **OR**.
+   * - ``trust_mark_type``
+     - Repeatable. Filter to entities that have a *verified* Trust Mark of the
+       given type. Multiple values combine with **AND**.
+   * - ``trust_anchor``
+     - The Trust Anchor the collection was built from. When omitted it
+       defaults to the collected Trust Anchor; a value that does not match it
+       returns ``invalid_request``.
+   * - ``query``
+     - Free-text filter. Matched case-insensitively as a substring against the
+       entity_id and any UI display names.
+   * - ``limit``
+     - Maximum number of entities in the response. Defaults to 100 and is
+       capped at 500.
+   * - ``from``
+     - Opaque pagination cursor. Pass the ``next`` value from a previous
+       response to fetch the following page.
+
+Filters of different kinds combine with **AND**.
+
 **Response (200 OK):**
 
 * Content-Type: ``application/json``
@@ -550,8 +582,12 @@ stores entity information. See :ref:`collection-cli` for details.
          }
        }
      ],
+     "next": "aHR0cHM6Ly9ycC5leGFtcGxlLmNvbQ",
      "last_updated": 1770983002
    }
+
+The ``next`` field is present only when more results are available beyond this
+page; pass it back as the ``from`` parameter to retrieve them.
 
 **Response Fields:**
 
@@ -571,6 +607,8 @@ stores entity information. See :ref:`collection-cli` for details.
      - Optional. UI information per entity type (display_name, logo_uri, policy_uri)
    * - ``entities[].trust_marks``
      - Optional. Array of trust marks attached to the entity
+   * - ``next``
+     - Optional. Opaque pagination cursor; present only when more results exist
    * - ``last_updated``
      - Unix timestamp of the last collection walk
 
@@ -582,6 +620,29 @@ stores entity information. See :ref:`collection-cli` for details.
 
 If no collection data has been populated yet, the response will be an empty entity list
 with ``last_updated: 0``.
+
+**Errors:**
+
+Error responses are JSON objects with ``error`` and ``error_description`` fields.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Error
+     - Status
+     - Cause
+   * - ``unsupported_parameter``
+     - 400
+     - The request used a query parameter the endpoint does not support
+   * - ``invalid_request``
+     - 400
+     - A malformed parameter -- a bad ``limit``, an unparseable ``from``
+       cursor, or a ``trust_anchor`` that does not match the collected one
+   * - ``page_not_found``
+     - 404
+     - The ``from`` cursor points at an entity the responder no longer knows;
+       restart pagination from the first page
 
 Index Page
 ^^^^^^^^^^

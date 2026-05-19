@@ -4,15 +4,16 @@
 //! subordinate entities and storing their collection data in Redis.
 
 use anyhow::Result;
-use log::{debug, error, info};
-use serde_json::Value;
+use josekit::jwk::JwkSet;
+use log::{debug, error, info, warn};
+use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    EntityCollectionResponse, UiInfo, get_entity_configruation_as_jwt,
+    EntityCollectionResponse, TrustMarkOwners, UiInfo, get_entity_configruation_as_jwt,
     get_jwks_from_payload_or_uri, get_query, get_unverified_payload_header, self_verify_jwt,
-    verify_jwt_with_jwks,
+    validate_redis_key_input, verify_jwt_with_jwks, verify_trust_marks,
 };
 
 /// Prefix for staging keys used during tree walk.
@@ -28,6 +29,21 @@ const KNOWN_ENTITY_TYPES: &[&str] = &[
     "oauth_client",
     "oauth_resource",
 ];
+
+/// Federation context captured once from the walk-from Trust Anchor's Entity
+/// Configuration and threaded through the recursion. Lets the walker verify
+/// each entity's Trust Marks against the same Trust Anchor used to collect the
+/// federation (spec sec 3.3.1-2.4.1).
+struct CollectionWalkContext {
+    /// Entity Identifier of the Trust Anchor the walk started from.
+    trust_anchor: String,
+    /// The Trust Anchor's federation signing keys.
+    ta_keyset: JwkSet,
+    /// `trust_mark_issuers` recognition map from the Trust Anchor's EC.
+    trust_mark_issuers: Map<String, Value>,
+    /// `trust_mark_owners` pinned by the Trust Anchor.
+    trust_mark_owners: TrustMarkOwners,
+}
 
 /// Fetches authority subordinate statements and stores them in Redis.
 async fn fetch_all_subordinate_statements(
@@ -184,6 +200,7 @@ async fn collection_tree_walking(
     conn: &mut redis::aio::ConnectionManager,
     visited: &mut HashSet<String>,
     depth: u8,
+    ctx: &CollectionWalkContext,
 ) {
     if depth > MAX_COLLECTION_DEPTH {
         error!(
@@ -312,6 +329,45 @@ async fn collection_tree_walking(
         debug!("Entity {entity_id} has {} trust mark(s)", tms.len());
     }
 
+    // Verify the entity's Trust Marks against the walk-from Trust Anchor so the
+    // trust_mark_type collection filter indexes only marks that actually pass
+    // verification (spec sec 3.3.1-2.4.1). The response `trust_marks` field
+    // keeps the raw array -- per Entity Collection spec sec 6.1 the returned
+    // marks are informational and MAY be unverified.
+    let verified_marks = verify_trust_marks(
+        &payload,
+        &ctx.trust_anchor,
+        &ctx.ta_keyset,
+        &ctx.trust_mark_issuers,
+        &ctx.trust_mark_owners,
+        conn,
+    )
+    .await;
+    // The trust mark type strings are federation-provided and get used
+    // verbatim in Redis key names (`...:by_trustmark:{tm_type}`). Drop any
+    // value with control characters or an abusive length before indexing it.
+    let verified_tm_types: Vec<String> = verified_marks
+        .iter()
+        .filter_map(|m| {
+            m.get("trust_mark_type")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .filter(|tm_type| match validate_redis_key_input(tm_type) {
+            Ok(()) => true,
+            Err(e) => {
+                warn!("Skipping unsafe trust mark type for {entity_id}: {e}");
+                false
+            }
+        })
+        .collect();
+    if !verified_tm_types.is_empty() {
+        debug!(
+            "Entity {entity_id} has {} verified trust mark type(s)",
+            verified_tm_types.len()
+        );
+    }
+
     // Build collection response
     let response = EntityCollectionResponse {
         entity_id: entity_id.to_string(),
@@ -347,6 +403,22 @@ async fn collection_tree_walking(
         redis::Cmd::zadd(format!("{STAGING_PREFIX}:all_sorted"), entity_id, 0i64)
             .query_async(conn)
             .await;
+
+    // Index verified trust mark types so the trust_mark_type filter can
+    // resolve entities by type. `trustmark_types` is a registry of every
+    // indexed type, needed because by_trustmark keys are dynamic URLs.
+    for tm_type in &verified_tm_types {
+        let _: Result<(), _> = redis::Cmd::sadd(
+            format!("{STAGING_PREFIX}:by_trustmark:{tm_type}"),
+            entity_id,
+        )
+        .query_async(conn)
+        .await;
+        let _: Result<(), _> =
+            redis::Cmd::sadd(format!("{STAGING_PREFIX}:trustmark_types"), tm_type)
+                .query_async(conn)
+                .await;
+    }
 
     // Also populate the existing inmor:op/rp/taia sets for backward compat
     if metadata.contains_key("openid_relying_party") {
@@ -389,8 +461,14 @@ async fn collection_tree_walking(
                                 continue;
                             }
                             info!("Found subordinate: {sub_str}");
-                            Box::pin(collection_tree_walking(sub_str, conn, visited, depth + 1))
-                                .await;
+                            Box::pin(collection_tree_walking(
+                                sub_str,
+                                conn,
+                                visited,
+                                depth + 1,
+                                ctx,
+                            ))
+                            .await;
                         }
                     }
                 }
@@ -406,12 +484,74 @@ async fn collection_tree_walking(
 
 /// Returns the list of known collection Redis keys for a given prefix.
 /// This avoids using the KEYS command which blocks the Redis event loop.
-fn known_collection_keys(prefix: &str) -> Vec<String> {
-    let mut keys = vec![format!("{prefix}:entities"), format!("{prefix}:all_sorted")];
+///
+/// `trustmark_types` enumerates the dynamic `by_trustmark:{type}` keys; pass
+/// the trust mark types recorded in the matching `trustmark_types` registry
+/// set for the prefix.
+fn known_collection_keys(prefix: &str, trustmark_types: &[String]) -> Vec<String> {
+    let mut keys = vec![
+        format!("{prefix}:entities"),
+        format!("{prefix}:all_sorted"),
+        format!("{prefix}:trust_anchor"),
+        format!("{prefix}:trustmark_types"),
+    ];
     for etype in KNOWN_ENTITY_TYPES {
         keys.push(format!("{prefix}:by_type:{etype}"));
     }
+    for tm_type in trustmark_types {
+        keys.push(format!("{prefix}:by_trustmark:{tm_type}"));
+    }
     keys
+}
+
+/// Fetches and verifies the walk-from Trust Anchor's Entity Configuration and
+/// extracts the recognition context used for Trust Mark verification.
+async fn build_walk_context(
+    trust_anchor: &str,
+    conn: &mut redis::aio::ConnectionManager,
+) -> Result<CollectionWalkContext> {
+    let jwt = get_entity_configruation_as_jwt(trust_anchor).await?;
+    let (payload, _) = match self_verify_jwt(&jwt) {
+        Ok(data) => data,
+        Err(_) => {
+            // Self-verification failed -- try the jwks_uri fallback.
+            let (unverified, _) = get_unverified_payload_header(&jwt)?;
+            let keyset = get_jwks_from_payload_or_uri(&unverified, conn).await?;
+            verify_jwt_with_jwks(&jwt, Some(keyset))?
+        }
+    };
+    // Resolve the Trust Anchor's federation keys allowing the jwks_uri /
+    // signed_jwks_uri fallback, so collection also works for a Trust Anchor
+    // that publishes its keys by reference rather than inline.
+    let ta_keyset = get_jwks_from_payload_or_uri(&payload, conn).await?;
+    // Recognition maps. A malformed `trust_mark_owners` claim fails closed:
+    // both maps are emptied so no trust mark is recognised. Keeping
+    // `trust_mark_issuers` while dropping owners would silently skip
+    // delegation enforcement for owned types that also appear in the issuers
+    // map (the fail-open case documented on `TrustMarkOwners::from_ta_payload`).
+    let (trust_mark_issuers, trust_mark_owners) = match TrustMarkOwners::from_ta_payload(&payload) {
+        Ok(owners) => {
+            let issuers = payload
+                .claim("trust_mark_issuers")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            (issuers, owners)
+        }
+        Err(e) => {
+            error!(
+                "Trust anchor {trust_anchor} has a malformed trust_mark_owners claim ({e}); \
+                 collection will recognise no trust marks at all"
+            );
+            (Map::new(), TrustMarkOwners::default())
+        }
+    };
+    Ok(CollectionWalkContext {
+        trust_anchor: trust_anchor.to_string(),
+        ta_keyset,
+        trust_mark_issuers,
+        trust_mark_owners,
+    })
 }
 
 /// Runs a full collection walk starting from the given trust anchor.
@@ -424,42 +564,83 @@ pub async fn run_collection_walk(
 ) -> Result<usize> {
     info!("Starting collection walk from {trust_anchor}");
 
-    // Clean any leftover staging data
-    let staging_keys = known_collection_keys(STAGING_PREFIX);
+    // Build the walk context (recognition maps + TA keys) up front. A failure
+    // here aborts before any live data is touched.
+    let ctx = build_walk_context(trust_anchor, conn).await?;
+
+    // Clean any leftover staging data, including dynamic by_trustmark keys
+    // left behind by a previous interrupted run.
+    let stale_types: Vec<String> =
+        redis::Cmd::smembers(format!("{STAGING_PREFIX}:trustmark_types"))
+            .query_async(conn)
+            .await
+            .unwrap_or_default();
+    let staging_keys = known_collection_keys(STAGING_PREFIX, &stale_types);
     debug!(
         "Cleaning {} possible leftover staging key(s)",
         staging_keys.len()
     );
     let _: Result<(), _> = redis::cmd("DEL").arg(&staging_keys).query_async(conn).await;
 
+    // Record the Trust Anchor this collection was built from so /collection
+    // can validate the request `trust_anchor` parameter against it.
+    let _: Result<(), _> = redis::Cmd::set(format!("{STAGING_PREFIX}:trust_anchor"), trust_anchor)
+        .query_async(conn)
+        .await;
+
     // Walk the tree
     debug!("Beginning recursive tree walk from {trust_anchor}");
     let mut visited = HashSet::new();
-    collection_tree_walking(trust_anchor, conn, &mut visited, 0).await;
+    collection_tree_walking(trust_anchor, conn, &mut visited, 0, &ctx).await;
 
     let entity_count = visited.len();
     info!("Walk complete: {entity_count} entities discovered");
 
-    // Atomic swap: delete old live keys, rename staging → live
-    debug!("Preparing atomic swap of staging → live keys");
+    // Atomic swap: delete old live keys, rename staging -> live.
+    debug!("Preparing atomic swap of staging -> live keys");
+
+    // Trust mark types discovered in this walk drive the staging by_trustmark
+    // key set; the previous live set drives the old-key cleanup.
+    let new_types: Vec<String> = redis::Cmd::smembers(format!("{STAGING_PREFIX}:trustmark_types"))
+        .query_async(conn)
+        .await
+        .unwrap_or_default();
+    let old_types: Vec<String> = redis::Cmd::smembers("inmor:collection:trustmark_types")
+        .query_async(conn)
+        .await
+        .unwrap_or_default();
+
+    // RENAME errors on a missing source key, so swap only the staging keys
+    // actually written during this walk.
+    let candidate_staging = known_collection_keys(STAGING_PREFIX, &new_types);
+    let mut exists_pipe = redis::pipe();
+    for key in &candidate_staging {
+        exists_pipe.cmd("EXISTS").arg(key);
+    }
+    let exists_flags: Vec<bool> = exists_pipe.query_async(conn).await?;
+    let existing_staging: Vec<&String> = candidate_staging
+        .iter()
+        .zip(exists_flags)
+        .filter_map(|(key, exists)| if exists { Some(key) } else { None })
+        .collect();
+
     let mut pipe = redis::pipe();
 
-    // Delete old live collection keys
-    let mut live_keys = known_collection_keys("inmor:collection");
+    // Delete old live collection keys.
+    let mut live_keys = known_collection_keys("inmor:collection", &old_types);
     live_keys.push("inmor:collection:last_updated".to_string());
     debug!("Deleting {} old live key(s)", live_keys.len());
     pipe.cmd("DEL").arg(&live_keys).ignore();
 
-    // Rename staging keys to live
-    let staging_keys = known_collection_keys(STAGING_PREFIX);
-    debug!("Renaming {} staging key(s) to live", staging_keys.len());
-    for staging_key in &staging_keys {
+    // Rename staging keys to live.
+    debug!("Renaming {} staging key(s) to live", existing_staging.len());
+    for staging_key in &existing_staging {
         let live_key = staging_key.replace("inmor:collection:staging:", "inmor:collection:");
-        debug!("  {staging_key} → {live_key}");
-        pipe.cmd("RENAME").arg(staging_key).arg(&live_key).ignore();
+        debug!("  {staging_key} -> {live_key}");
+        pipe.cmd("RENAME").arg(*staging_key).arg(&live_key).ignore();
     }
 
-    // Set last_updated timestamp
+    // Set last_updated timestamp.
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

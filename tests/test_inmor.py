@@ -102,10 +102,7 @@ def _accept_trust_mark(rdb: Redis, sub: str, trust_mark_obj: dict) -> None:
 
 
 def _resolve_payload(http_client: Client, port: int, sub: str) -> dict:
-    url = (
-        f"https://localhost:{port}/resolve"
-        f"?sub={sub}&trust_anchor={_TA_ENTITY_ID}"
-    )
+    url = f"https://localhost:{port}/resolve?sub={sub}&trust_anchor={_TA_ENTITY_ID}"
     resp = http_client.get(url)
     assert resp.status_code == 200, resp.text
     return _decode_jwt_payload(resp.text)
@@ -707,7 +704,7 @@ def test_historical_keys_revoked_field(loaddata: Redis, start_server: int, http_
             assert "reason" in revoked, "revoked object should contain reason"
             # Check reason is valid per spec
             assert revoked.get("reason") in ["unspecified", "compromised", "superseded"], (
-                f"revoked reason should be one of: unspecified, compromised, superseded"
+                "revoked reason should be one of: unspecified, compromised, superseded"
             )
 
 
@@ -1163,9 +1160,7 @@ def test_resolve_accepts_mark_with_valid_delegation(
     subject_id = fake_subject.entity_id
 
     owner_key = _make_owner_keypair()
-    delegation = _build_delegation_jwt(
-        owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE
-    )
+    delegation = _build_delegation_jwt(owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE)
     tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
     _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
     _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
@@ -1193,9 +1188,7 @@ def test_resolve_accepts_mark_recognized_only_via_trust_mark_owners(
     subject_id = fake_subject.entity_id
 
     owner_key = _make_owner_keypair()
-    delegation = _build_delegation_jwt(
-        owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE
-    )
+    delegation = _build_delegation_jwt(owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE)
     tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
     _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
     # trust_mark_issuers lists an unrelated type only -- _TM_TYPE is NOT in it.
@@ -1209,8 +1202,7 @@ def test_resolve_accepts_mark_recognized_only_via_trust_mark_owners(
     payload = _resolve_payload(http_client, port, subject_id)
     marks = payload.get("trust_marks")
     assert marks is not None and len(marks) == 1, (
-        "a type pinned only via trust_mark_owners must be recognised when the "
-        "delegation is valid"
+        "a type pinned only via trust_mark_owners must be recognised when the delegation is valid"
     )
 
 
@@ -1225,9 +1217,7 @@ def test_resolve_drops_mark_with_delegation_signed_by_wrong_key(
     real_owner_key = _make_owner_keypair()
     attacker_key = _make_owner_keypair()  # signs delegation but is NOT pinned
 
-    delegation = _build_delegation_jwt(
-        attacker_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE
-    )
+    delegation = _build_delegation_jwt(attacker_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE)
     tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
     _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
     _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
@@ -1266,9 +1256,7 @@ def test_resolve_drops_mark_with_delegation_sub_mismatch(
     _accept_trust_mark(rdb, subject_id, tm_obj)
 
     payload = _resolve_payload(http_client, port, subject_id)
-    assert "trust_marks" not in payload, (
-        "delegation.sub != mark.iss must reject the mark"
-    )
+    assert "trust_marks" not in payload, "delegation.sub != mark.iss must reject the mark"
 
 
 def test_resolve_drops_mark_with_delegation_trust_mark_id_mismatch(
@@ -1399,3 +1387,258 @@ def test_resolve_falls_through_when_delegation_present_but_owner_unpinned(
     assert marks is not None and len(marks) == 1, (
         "unpinned-owner + delegation must fall through to the issuers gate"
     )
+
+
+# --- /collection endpoint -------------------------------------------------
+#
+# The Federation Entity Collection endpoint serves data the inmor-collection
+# CLI writes into `inmor:collection:*` Redis keys. These tests seed those keys
+# directly so the endpoint behaviour can be exercised without a full walk.
+
+_COLLECTION_TA = "https://collection-ta.example.com"
+
+
+def _b64url(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
+
+
+def _reset_collection(rdb: Redis) -> None:
+    for key in rdb.keys("inmor:collection:*"):
+        rdb.delete(key)
+
+
+def _seed_collection(rdb: Redis, entities, trust_anchor: str = _COLLECTION_TA) -> None:
+    """Seed the `inmor:collection:*` keys for one collection.
+
+    `entities` is a list of dicts, each with `entity_id`, `entity_types`, and
+    optional `ui_infos` and `trust_mark_types` (the verified trust mark types
+    to index for that entity).
+    """
+    _reset_collection(rdb)
+    for ent in entities:
+        record = {"entity_id": ent["entity_id"], "entity_types": ent["entity_types"]}
+        if "ui_infos" in ent:
+            record["ui_infos"] = ent["ui_infos"]
+        rdb.hset("inmor:collection:entities", ent["entity_id"], json.dumps(record))
+        for etype in ent["entity_types"]:
+            rdb.sadd(f"inmor:collection:by_type:{etype}", ent["entity_id"])
+        rdb.zadd("inmor:collection:all_sorted", {ent["entity_id"]: 0})
+        for tmt in ent.get("trust_mark_types", []):
+            rdb.sadd(f"inmor:collection:by_trustmark:{tmt}", ent["entity_id"])
+            rdb.sadd("inmor:collection:trustmark_types", tmt)
+    rdb.set("inmor:collection:trust_anchor", trust_anchor)
+    rdb.set("inmor:collection:last_updated", int(time.time()))
+
+
+def test_collection_lists_seeded_entities(loaddata: Redis, start_server: int, http_client: Client):
+    "GET /collection returns every seeded entity, entity_id-sorted."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [
+            {
+                "entity_id": "https://a.example.com",
+                "entity_types": ["openid_provider", "federation_entity"],
+            },
+            {
+                "entity_id": "https://b.example.com",
+                "entity_types": ["openid_relying_party", "federation_entity"],
+            },
+        ],
+    )
+    resp = http_client.get(f"https://localhost:{port}/collection")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [e["entity_id"] for e in data["entities"]] == [
+        "https://a.example.com",
+        "https://b.example.com",
+    ]
+    assert data["last_updated"] is not None
+    assert "next" not in data
+
+
+def test_collection_entity_type_filter_is_or(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Multiple entity_type parameters combine with OR (spec sec 3.3.1-2.3.1)."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [
+            {
+                "entity_id": "https://op.example.com",
+                "entity_types": ["openid_provider", "federation_entity"],
+            },
+            {
+                "entity_id": "https://rp.example.com",
+                "entity_types": ["openid_relying_party", "federation_entity"],
+            },
+            {
+                "entity_id": "https://as.example.com",
+                "entity_types": ["oauth_authorization_server", "federation_entity"],
+            },
+        ],
+    )
+    resp = http_client.get(
+        f"https://localhost:{port}/collection",
+        params=[
+            ("entity_type", "openid_provider"),
+            ("entity_type", "openid_relying_party"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    ids = sorted(e["entity_id"] for e in resp.json()["entities"])
+    assert ids == ["https://op.example.com", "https://rp.example.com"]
+
+
+def test_collection_trust_mark_type_filter_is_and(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Multiple trust_mark_type parameters combine with AND (spec sec 3.3.1-2.4.1)."
+    rdb = loaddata
+    port = start_server
+    tm_a = "https://example.com/tm/a"
+    tm_b = "https://example.com/tm/b"
+    _seed_collection(
+        rdb,
+        [
+            {
+                "entity_id": "https://x.example.com",
+                "entity_types": ["federation_entity"],
+                "trust_mark_types": [tm_a],
+            },
+            {
+                "entity_id": "https://y.example.com",
+                "entity_types": ["federation_entity"],
+                "trust_mark_types": [tm_a, tm_b],
+            },
+            {
+                "entity_id": "https://z.example.com",
+                "entity_types": ["federation_entity"],
+                "trust_mark_types": [tm_b],
+            },
+        ],
+    )
+    resp = http_client.get(
+        f"https://localhost:{port}/collection",
+        params=[("trust_mark_type", tm_a), ("trust_mark_type", tm_b)],
+    )
+    assert resp.status_code == 200, resp.text
+    assert [e["entity_id"] for e in resp.json()["entities"]] == ["https://y.example.com"]
+
+
+def test_collection_pagination_walks_pages(loaddata: Redis, start_server: int, http_client: Client):
+    "from/limit/next paginate the result set with consistent ordering."
+    rdb = loaddata
+    port = start_server
+    ids = [f"https://{c}.example.com" for c in "abcde"]
+    _seed_collection(rdb, [{"entity_id": i, "entity_types": ["federation_entity"]} for i in ids])
+
+    resp = http_client.get(f"https://localhost:{port}/collection", params={"limit": 2})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [e["entity_id"] for e in data["entities"]] == ids[:2]
+    assert "next" in data
+
+    resp = http_client.get(
+        f"https://localhost:{port}/collection",
+        params={"limit": 2, "from": data["next"]},
+    )
+    data = resp.json()
+    assert [e["entity_id"] for e in data["entities"]] == ids[2:4]
+    assert "next" in data
+
+    resp = http_client.get(
+        f"https://localhost:{port}/collection",
+        params={"limit": 2, "from": data["next"]},
+    )
+    data = resp.json()
+    assert [e["entity_id"] for e in data["entities"]] == ids[4:]
+    assert "next" not in data
+
+
+def test_collection_trust_anchor_match_and_mismatch(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "trust_anchor is accepted only when it matches the collected Trust Anchor."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [{"entity_id": "https://a.example.com", "entity_types": ["federation_entity"]}],
+        trust_anchor=_COLLECTION_TA,
+    )
+
+    resp = http_client.get(
+        f"https://localhost:{port}/collection", params={"trust_anchor": _COLLECTION_TA}
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = http_client.get(
+        f"https://localhost:{port}/collection",
+        params={"trust_anchor": "https://other-ta.example.com"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_request"
+
+
+def test_collection_query_filter(loaddata: Redis, start_server: int, http_client: Client):
+    "The query parameter substring-matches against entity records."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [
+            {
+                "entity_id": "https://university.example.com",
+                "entity_types": ["federation_entity"],
+            },
+            {
+                "entity_id": "https://company.example.org",
+                "entity_types": ["federation_entity"],
+            },
+        ],
+    )
+    resp = http_client.get(f"https://localhost:{port}/collection", params={"query": "university"})
+    assert resp.status_code == 200, resp.text
+    assert [e["entity_id"] for e in resp.json()["entities"]] == ["https://university.example.com"]
+
+
+def test_collection_unsupported_parameter(loaddata: Redis, start_server: int, http_client: Client):
+    "An unrecognised parameter is rejected with unsupported_parameter."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [{"entity_id": "https://a.example.com", "entity_types": ["federation_entity"]}],
+    )
+    resp = http_client.get(f"https://localhost:{port}/collection", params={"entity_claims": "x"})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "unsupported_parameter"
+
+
+def test_collection_bad_cursor(loaddata: Redis, start_server: int, http_client: Client):
+    "An unknown cursor returns page_not_found; a malformed cursor invalid_request."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [{"entity_id": "https://a.example.com", "entity_types": ["federation_entity"]}],
+    )
+
+    # Well-formed cursor pointing at an entity the responder does not know.
+    resp = http_client.get(
+        f"https://localhost:{port}/collection",
+        params={"from": _b64url("https://nonexistent.example.com")},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "page_not_found"
+
+    # A cursor that is not valid base64url.
+    resp = http_client.get(
+        f"https://localhost:{port}/collection", params={"from": "!!!not-base64!!!"}
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_request"
