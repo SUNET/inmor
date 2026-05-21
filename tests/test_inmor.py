@@ -1668,6 +1668,10 @@ def test_collection_next_cursor_anchors_on_returned_entity(
     assert returned_ids == ["https://a.example.com"]
     assert "next" in data
     # The `next` cursor must decode to an entity that was actually returned,
-    # not to the dropped id.
-    decoded_next = base64.urlsafe_b64decode(data["next"] + "==").decode()
+    # not to the dropped id. Restore padding dynamically -- a hard-coded
+    # "==" suffix would over-pad cursors whose length is already a multiple
+    # of 4 and raise "Incorrect padding".
+    cursor = data["next"]
+    cursor_padded = cursor + "=" * (-len(cursor) % 4)
+    decoded_next = base64.urlsafe_b64decode(cursor_padded).decode()
     assert decoded_next == "https://a.example.com"

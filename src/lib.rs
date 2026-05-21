@@ -546,8 +546,10 @@ fn decode_cursor(cursor: &str) -> Option<String> {
 
 /// Implementation-defined `query` filter (spec sec 3.3.1-2.6.1): a
 /// case-insensitive substring match over the entity_id and any UI display
-/// names. `needle` must already be lowercased; the caller lowercases the
-/// request `query` string once so the per-entity check stays allocation-free.
+/// names. `needle` must already be lowercased by the caller -- this avoids
+/// reallocating the query string on every entity. The haystacks are still
+/// lowercased per match because Unicode case folding cannot be done in
+/// place without allocating.
 fn query_matches(entity: &EntityCollectionResponse, needle: &str) -> bool {
     if entity.entity_id.to_lowercase().contains(needle) {
         return true;
