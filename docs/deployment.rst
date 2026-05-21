@@ -367,11 +367,15 @@ The ``/collection`` endpoint on the Trust Anchor reads this data.
 **How it works:**
 
 1. Connects to Redis using the URI from ``taconfig.toml``
-2. Fetches the trust anchor's entity configuration
+2. Fetches the trust anchor's entity configuration and extracts its trust mark
+   recognition maps (``trust_mark_issuers`` / ``trust_mark_owners``)
 3. Recursively discovers all subordinates by following ``federation_list_endpoint`` links
 4. For each entity, extracts entity types, UI info (display name, logo, policy URI), and trust marks
-5. Writes all data to **staging Redis keys** (``inmor:collection:staging:*``) during the walk
-6. On completion, atomically swaps staging keys to live keys using a Redis RENAME pipeline
+5. Verifies each entity's trust marks against the trust anchor and indexes the
+   verified ones by trust mark type, so the ``/collection`` ``trust_mark_type``
+   filter matches only verified marks
+6. Writes all data to **staging Redis keys** (``inmor:collection:staging:*``) during the walk
+7. On completion, atomically swaps staging keys to live keys using a Redis RENAME pipeline
 
 The staging-to-live swap ensures the ``/collection`` endpoint never serves partial data
 during a walk.
@@ -391,6 +395,15 @@ during a walk.
    * - ``inmor:collection:by_type:{type}``
      - Set
      - entity_ids of that type
+   * - ``inmor:collection:by_trustmark:{type}``
+     - Set
+     - entity_ids with a verified trust mark of that type
+   * - ``inmor:collection:trustmark_types``
+     - Set
+     - registry of indexed trust mark types (enumerates the ``by_trustmark`` keys)
+   * - ``inmor:collection:trust_anchor``
+     - String
+     - Entity Identifier the collection was walked from
    * - ``inmor:collection:all_sorted``
      - ZSet
      - entity_ids for ordering
