@@ -22,3 +22,6 @@ npm-debug.log*
 *.spec.ts
 __tests__/
 coverage/
+
+# Work-in-progress views not yet wired up in the SDK
+src/views/AuditLogView.vue

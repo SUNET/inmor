@@ -19,7 +19,7 @@ services:
   ta:
     restart: always
     build: .
-    image: docker.sunet.se/inmor:0.3.0
+    image: docker.sunet.se/inmor:0.4.0
     networks:
       - inmor-net
     healthcheck:
@@ -78,7 +78,7 @@ services:
       - ./redis:/data
   admin:
     build: ./admin/
-    image: docker.sunet.se/inmor-admin:0.3.0
+    image: docker.sunet.se/inmor-admin:0.4.0
     networks:
       - inmor-net
     depends_on:
@@ -115,7 +115,7 @@ services:
       target: production
       args:
         VITE_API_URL: ""
-    image: docker.sunet.se/inmor-frontend:0.3.0
+    image: docker.sunet.se/inmor-frontend:0.4.0
     networks:
       - inmor-net
     depends_on:

@@ -21,7 +21,7 @@
 services:
   ta:
     restart: always
-    image: docker.sunet.se/inmor:0.3.0
+    image: docker.sunet.se/inmor:0.4.0
     networks:
       - inmor-net
     healthcheck:
@@ -87,7 +87,7 @@ services:
     # No port exposed — only accessible within the container network
 
   admin:
-    image: docker.sunet.se/inmor-admin:0.3.0
+    image: docker.sunet.se/inmor-admin:0.4.0
     networks:
       - inmor-net
     depends_on:
@@ -116,7 +116,7 @@ services:
   # Uncomment and configure if needed:
   #
   # frontend:
-  #   image: docker.sunet.se/inmor-frontend:0.3.0
+  #   image: docker.sunet.se/inmor-frontend:0.4.0
   #   networks:
   #     - inmor-net
   #   depends_on:
