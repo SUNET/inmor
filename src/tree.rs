@@ -353,6 +353,8 @@ async fn collection_tree_walking(
     // The trust mark type strings are federation-provided and get used
     // verbatim in Redis key names (`...:by_trustmark:{tm_type}`). Drop any
     // value with control characters or an abusive length before indexing it.
+    // Collect into a set so duplicate trust mark types on one entity only
+    // trigger one Redis SADD (and at most one index-write error count bump).
     let verified_tm_types: HashSet<String> = verified_marks
         .iter()
         .filter_map(|m| {
