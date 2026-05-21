@@ -1,0 +1,148 @@
+# Production Docker Compose configuration to build the release containers
+#
+# For development, use: dev/docker-compose.dev.yml
+#   just up   # Uses dev compose automatically
+#
+# This configuration:
+# - Uses baked-in Docker image code (no source mounts)
+# - Release-built Rust binary
+# - Granian WSGI server for Django
+# - Named volumes for persistent data
+# - Only TA port exposed (admin/db/redis internal only)
+# - TLS certificates mounted from host
+#
+# Before deploying, ensure:
+# - TLS certificates are in place (update paths below)
+# - localsettings.py is configured (Django SECRET_KEY, ALLOWED_HOSTS, etc.)
+# - Set MFA_ENCRYPTION_KEY for production
+# - Consider setting Django SECURE_SSL_REDIRECT, SESSION_COOKIE_SECURE,
+#   CSRF_COOKIE_SECURE in localsettings.py
+---
+services:
+  ta:
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: docker.sunet.se/inmor:0.4.0
+    networks:
+      - inmor-net
+    healthcheck:
+      test: ['CMD', 'curl', '--insecure', '--fail', '--silent', 'https://localhost:8080/health']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - ./taconfig.toml:/app/taconfig.toml:ro
+      - ./private.json:/app/private.json:ro
+      - ./publickeys:/app/publickeys:ro
+      - ./historical_keys:/app/historical_keys:ro
+      - ./templates:/app/templates:ro
+      # TLS certificates — update paths for your deployment
+      - /etc/ssl/certs/inmor.pem:/app/tls.pem:ro
+      - /etc/ssl/private/inmor-key.pem:/app/tls-key.pem:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ./inmor -c taconfig.toml
+    environment:
+      - 'RUST_LOG=info'
+    ports:
+      - "8080:8080"
+
+  db:
+    restart: always
+    image: postgres:14-alpine
+    shm_size: 1024mb
+    networks:
+      - inmor-net
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres']
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 80s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # No port exposed — only accessible within the container network
+    environment:
+      # Option 1: Trust auth (simple, no password)
+      # - 'POSTGRES_HOST_AUTH_METHOD=trust'
+      # Option 2: Password auth (recommended for production)
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=changeme
+      - POSTGRES_DB=postgres
+
+  redis:
+    restart: always
+    image: redis:7-alpine
+    networks:
+      - inmor-net
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 80s
+    volumes:
+      - redis_data:/data
+    # No port exposed — only accessible within the container network
+
+  admin:
+    build:
+      context: ./admin/
+      dockerfile: Dockerfile
+    image: docker.sunet.se/inmor-admin:0.4.0
+    networks:
+      - inmor-net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ta:
+        condition: service_healthy
+    command: /app/docker-entrypoint.sh
+    environment:
+      - INSIDE_CONTAINER=true
+      - PRODUCTION=true
+      # MFA encryption key for TOTP secrets — generate with:
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # - MFA_ENCRYPTION_KEY=your-production-key-here
+    volumes:
+      - ./private.json:/app/private.json:ro
+      - ./publickeys:/app/publickeys:ro
+      - ./historical_keys:/app/historical_keys:ro
+      - ./localsettings.py:/app/inmoradmin/localsettings.py:ro
+    # No port exposed — fronted by a reverse proxy in production
+
+  # Frontend: In production, typically served by a reverse proxy (nginx)
+  # that also proxies API requests to the admin service. The `build:`
+  # block stays defined so `just build-prod` produces the image and
+  # tags it for release; uncomment the runtime block below to actually
+  # run it inside this compose project.
+  frontend:
+    build:
+      context: ./admin/frontend/
+      dockerfile: Dockerfile
+      target: production
+      args:
+        VITE_API_URL: ""
+    image: docker.sunet.se/inmor-frontend:0.4.0
+    profiles:
+      - frontend
+    networks:
+      - inmor-net
+    depends_on:
+      - admin
+    ports:
+      - "127.0.0.1:5173:80"
+
+networks:
+  inmor-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

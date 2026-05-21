@@ -1,5 +1,8 @@
 # Dev compose command (resolves paths from repo root)
 dc := "docker compose -f dev/docker-compose.dev.yml --project-directory ."
+# Production compose command -- uses release-built images baked from the
+# root Dockerfile (no host bind-mount of target/debug/inmor).
+dc_prod := "docker compose -f dev/docker-compose.prod.yml --project-directory ."
 
 _default:
   @just --list --unsorted
@@ -65,18 +68,37 @@ reformat:
   cargo fmt
 
 # Building rust binary to be able to be mounted
-# inside other linux containers.
+# inside other linux containers. Keep this Rust pin aligned with the
+# `FROM rust:` line in the root Dockerfile so dev and prod see the same
+# toolchain.
 build-rs:
   docker run --rm -it \
   -v "$(pwd)":/code \
   -w /code \
-  rust:1.88 \
+  rust:1.95 \
   cargo build
 
 build:
   {{dc}} build ta
   {{dc}} build admin
   {{dc}} build frontend
+
+# Build the production release images (release-built TA, granian-served
+# admin, built frontend) and tag them per dev/docker-compose.prod.yml.
+# This is the target to run when cutting a release like 0.4.0.
+build-prod:
+  {{dc_prod}} build ta
+  {{dc_prod}} build admin
+  {{dc_prod}} --profile frontend build frontend
+
+# Start the production stack defined in dev/docker-compose.prod.yml.
+# Assumes `just build-prod` has produced the images.
+up-prod:
+  {{dc_prod}} up -d
+
+# Stop the production stack.
+down-prod:
+  {{dc_prod}} down
 
 rebuild-ta:
   @cargo build

@@ -2,7 +2,11 @@
 FROM node:22-slim AS build
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+# Pin pnpm via corepack so the image build does not silently pick up a
+# newer pnpm whose --frozen-lockfile / build-script policy differs from
+# the one used to generate pnpm-lock.yaml. Bump together with the local
+# pnpm version when refreshing the lockfile.
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
 WORKDIR /app
 
@@ -39,7 +43,11 @@ CMD ["nginx", "-g", "daemon off;"]
 FROM node:22-slim AS development
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+# Pin pnpm via corepack so the image build does not silently pick up a
+# newer pnpm whose --frozen-lockfile / build-script policy differs from
+# the one used to generate pnpm-lock.yaml. Bump together with the local
+# pnpm version when refreshing the lockfile.
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
 WORKDIR /app
 
