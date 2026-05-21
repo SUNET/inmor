@@ -1,7 +1,11 @@
-FROM debian:13 AS build
-RUN apt-get update && apt-get install -y curl build-essential pkg-config libssl-dev cmake && rm -rf /var/lib/apt/lists/*
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH=/root/.cargo/bin:$PATH
+# Pin the Rust toolchain to a specific minor so production builds are
+# reproducible across release branches. Bump together with the Rust used
+# by `just build-rs`. Tracks Debian 13 (trixie) to match the runtime
+# stage below.
+FROM rust:1.95-trixie AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev cmake build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir /app
 RUN --mount=type=bind,source=Cargo.toml,target=/app/Cargo.toml \
