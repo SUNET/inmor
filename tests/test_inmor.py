@@ -1642,3 +1642,32 @@ def test_collection_bad_cursor(loaddata: Redis, start_server: int, http_client: 
     )
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_request"
+
+
+def test_collection_next_cursor_anchors_on_returned_entity(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "The `next` cursor must reference an entity actually returned in the page."
+    # If a candidate id has no record in `inmor:collection:entities` (because
+    # a Redis write was dropped or interrupted), the response should still
+    # produce a `next` cursor anchored on the last record actually returned,
+    # not on the missing id.
+    rdb = loaddata
+    port = start_server
+    ids = [f"https://{c}.example.com" for c in "abcd"]
+    _seed_collection(rdb, [{"entity_id": i, "entity_types": ["federation_entity"]} for i in ids])
+    # Remove the hash record for the 2nd id, keeping it in the sorted set
+    # and indexes so it still gets selected by the paginator.
+    rdb.hdel("inmor:collection:entities", "https://b.example.com")
+
+    resp = http_client.get(f"https://localhost:{port}/collection", params={"limit": 2})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    returned_ids = [e["entity_id"] for e in data["entities"]]
+    # `b` is gone from the hash so only `a` materializes in this window.
+    assert returned_ids == ["https://a.example.com"]
+    assert "next" in data
+    # The `next` cursor must decode to an entity that was actually returned,
+    # not to the dropped id.
+    decoded_next = base64.urlsafe_b64decode(data["next"] + "==").decode()
+    assert decoded_next == "https://a.example.com"

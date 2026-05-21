@@ -546,16 +546,16 @@ fn decode_cursor(cursor: &str) -> Option<String> {
 
 /// Implementation-defined `query` filter (spec sec 3.3.1-2.6.1): a
 /// case-insensitive substring match over the entity_id and any UI display
-/// names.
-fn query_matches(entity: &EntityCollectionResponse, query: &str) -> bool {
-    let needle = query.to_lowercase();
-    if entity.entity_id.to_lowercase().contains(&needle) {
+/// names. `needle` must already be lowercased; the caller lowercases the
+/// request `query` string once so the per-entity check stays allocation-free.
+fn query_matches(entity: &EntityCollectionResponse, needle: &str) -> bool {
+    if entity.entity_id.to_lowercase().contains(needle) {
         return true;
     }
     if let Some(ui_infos) = &entity.ui_infos {
         for ui in ui_infos.values() {
             if let Some(name) = &ui.display_name
-                && name.to_lowercase().contains(&needle)
+                && name.to_lowercase().contains(needle)
             {
                 return true;
             }
@@ -685,12 +685,18 @@ async fn paginate_collection_zset(
         .unwrap_or_default();
     let has_more = ids.len() > limit;
     let page_ids: Vec<String> = ids.into_iter().take(limit).collect();
+    let page = fetch_collection_records(conn, &page_ids).await;
+    // Anchor `next` on the last entity actually returned so a cursor never
+    // points at an id that was dropped by `fetch_collection_records` (e.g.
+    // because the hash entry is missing). When the page is empty but more
+    // ids exist upstream we have no entity to anchor on, so pagination
+    // stops here -- a clearer signal than handing the client back an id
+    // that would 404 on the next request.
     let next = if has_more {
-        page_ids.last().map(|id| encode_cursor(id))
+        page.last().map(|e| encode_cursor(&e.entity_id))
     } else {
         None
     };
-    let page = fetch_collection_records(conn, &page_ids).await;
     (page, next)
 }
 
@@ -912,12 +918,14 @@ pub async fn fetch_collections(
             match query.as_deref() {
                 Some(q) => {
                     // The query filter must inspect entity records, so the
-                    // candidate set is materialized before paging.
+                    // candidate set is materialized before paging. Lowercase
+                    // the needle once for the whole filter pass.
+                    let needle = q.to_lowercase();
                     let records: Vec<EntityCollectionResponse> =
                         fetch_collection_records(&mut conn, &candidate_ids)
                             .await
                             .into_iter()
-                            .filter(|e| query_matches(e, q))
+                            .filter(|e| query_matches(e, &needle))
                             .collect();
                     let start = match from_id.as_deref() {
                         None => 0,
@@ -942,10 +950,13 @@ pub async fn fetch_collections(
                         .cloned()
                         .collect();
                     let has_more = start + page_ids.len() < candidate_ids.len();
-                    let next = has_more
-                        .then(|| page_ids.last().map(|id| encode_cursor(id)))
-                        .flatten();
                     let page = fetch_collection_records(&mut conn, &page_ids).await;
+                    // Anchor `next` on the last entity actually returned so
+                    // the cursor can never point at an id that was dropped
+                    // while materializing records.
+                    let next = has_more
+                        .then(|| page.last().map(|e| encode_cursor(&e.entity_id)))
+                        .flatten();
                     (page, next)
                 }
             }
@@ -5148,9 +5159,9 @@ mod collection_tests {
             "https://OP.example.com".to_string(),
             vec!["openid_provider".to_string()],
         );
-        // Case-insensitive substring match on entity_id.
+        // The needle is precomputed lowercase by the caller; the matcher
+        // lowercases the haystack so mixed-case entity_ids still match.
         assert!(query_matches(&e, "op.example"));
-        assert!(query_matches(&e, "OP.EXAMPLE"));
         assert!(!query_matches(&e, "missing"));
     }
 

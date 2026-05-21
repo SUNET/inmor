@@ -3,11 +3,12 @@
 //! Walks a federation tree starting from a trust anchor, discovering all
 //! subordinate entities and storing their collection data in Redis.
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use josekit::jwk::JwkSet;
 use log::{debug, error, info, warn};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -43,6 +44,12 @@ struct CollectionWalkContext {
     trust_mark_issuers: Map<String, Value>,
     /// `trust_mark_owners` pinned by the Trust Anchor.
     trust_mark_owners: TrustMarkOwners,
+    /// Counts SADD failures on the `by_trustmark:{type}` / `trustmark_types`
+    /// staging keys, which drive the `/collection?trust_mark_type=...`
+    /// filter. A nonzero count means the index would be silently incomplete,
+    /// so `run_collection_walk` aborts the swap and surfaces the failure
+    /// instead of publishing inconsistent data.
+    tm_index_errors: AtomicU32,
 }
 
 /// Fetches authority subordinate statements and stores them in Redis.
@@ -407,17 +414,27 @@ async fn collection_tree_walking(
     // Index verified trust mark types so the trust_mark_type filter can
     // resolve entities by type. `trustmark_types` is a registry of every
     // indexed type, needed because by_trustmark keys are dynamic URLs.
+    // Errors here are critical: a missing index entry silently truncates
+    // `/collection?trust_mark_type=...` responses, so record any failure on
+    // the shared counter so `run_collection_walk` can abort the swap.
     for tm_type in &verified_tm_types {
-        let _: Result<(), _> = redis::Cmd::sadd(
+        if let Err(e) = redis::Cmd::sadd(
             format!("{STAGING_PREFIX}:by_trustmark:{tm_type}"),
             entity_id,
         )
-        .query_async(conn)
-        .await;
-        let _: Result<(), _> =
-            redis::Cmd::sadd(format!("{STAGING_PREFIX}:trustmark_types"), tm_type)
-                .query_async(conn)
-                .await;
+        .query_async::<()>(conn)
+        .await
+        {
+            error!("Failed to index trust mark type {tm_type} for {entity_id}: {e}");
+            ctx.tm_index_errors.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Err(e) = redis::Cmd::sadd(format!("{STAGING_PREFIX}:trustmark_types"), tm_type)
+            .query_async::<()>(conn)
+            .await
+        {
+            error!("Failed to record trust mark type {tm_type} in registry: {e}");
+            ctx.tm_index_errors.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     // Also populate the existing inmor:op/rp/taia sets for backward compat
@@ -551,6 +568,7 @@ async fn build_walk_context(
         ta_keyset,
         trust_mark_issuers,
         trust_mark_owners,
+        tm_index_errors: AtomicU32::new(0),
     })
 }
 
@@ -583,10 +601,13 @@ pub async fn run_collection_walk(
     let _: Result<(), _> = redis::cmd("DEL").arg(&staging_keys).query_async(conn).await;
 
     // Record the Trust Anchor this collection was built from so /collection
-    // can validate the request `trust_anchor` parameter against it.
-    let _: Result<(), _> = redis::Cmd::set(format!("{STAGING_PREFIX}:trust_anchor"), trust_anchor)
-        .query_async(conn)
-        .await;
+    // can validate the request `trust_anchor` parameter against it. This
+    // write is required: without it the live collection would reject every
+    // request that supplies `trust_anchor=...` with `invalid_request`.
+    redis::Cmd::set(format!("{STAGING_PREFIX}:trust_anchor"), trust_anchor)
+        .query_async::<()>(conn)
+        .await
+        .map_err(|e| anyhow!("failed to record staging trust_anchor: {e}"))?;
 
     // Walk the tree
     debug!("Beginning recursive tree walk from {trust_anchor}");
@@ -595,6 +616,16 @@ pub async fn run_collection_walk(
 
     let entity_count = visited.len();
     info!("Walk complete: {entity_count} entities discovered");
+
+    // Abort before the atomic swap if any trust-mark index write failed --
+    // publishing the collection would yield silently incomplete
+    // `trust_mark_type` filter results.
+    let tm_errors = ctx.tm_index_errors.load(Ordering::Relaxed);
+    if tm_errors > 0 {
+        return Err(anyhow!(
+            "{tm_errors} trust mark index write(s) failed; refusing to swap staging into the live collection"
+        ));
+    }
 
     // Atomic swap: delete old live keys, rename staging -> live.
     debug!("Preparing atomic swap of staging -> live keys");
