@@ -574,20 +574,21 @@ async fn collect_collection_ids(
     conn: &mut redis::aio::ConnectionManager,
     entity_types: &[String],
     trust_mark_types: &[String],
-) -> Result<Vec<String>> {
+) -> actix_web::Result<Vec<String>> {
     // entity_type filter: union (OR) of by_type sets.
     let etype_ids: Option<HashSet<String>> = if entity_types.is_empty() {
         None
     } else {
         let mut ids = HashSet::new();
         for etype in entity_types {
-            validate_entity_type(etype)
-                .map_err(|e| anyhow!("invalid entity_type '{}': {}", etype, e))?;
+            validate_entity_type(etype).map_err(|e| {
+                error::ErrorBadRequest(format!("invalid entity_type '{}': {}", etype, e))
+            })?;
             let type_ids: Vec<String> =
                 redis::Cmd::smembers(format!("inmor:collection:by_type:{etype}"))
                     .query_async(conn)
                     .await
-                    .unwrap_or_default();
+                    .map_err(error::ErrorInternalServerError)?;
             ids.extend(type_ids);
         }
         Some(ids)
@@ -603,7 +604,7 @@ async fn collect_collection_ids(
                 redis::Cmd::smembers(format!("inmor:collection:by_trustmark:{tmt}"))
                     .query_async(conn)
                     .await
-                    .unwrap_or_default();
+                    .map_err(error::ErrorInternalServerError)?;
             acc = Some(match acc {
                 None => set,
                 Some(prev) => prev.intersection(&set).cloned().collect(),
@@ -617,7 +618,7 @@ async fn collect_collection_ids(
         (None, None) => redis::Cmd::hkeys("inmor:collection:entities")
             .query_async(conn)
             .await
-            .unwrap_or_default(),
+            .map_err(error::ErrorInternalServerError)?,
         (Some(a), None) => a.into_iter().collect(),
         (None, Some(b)) => b.into_iter().collect(),
         (Some(a), Some(b)) => a.intersection(&b).cloned().collect(),
@@ -668,7 +669,7 @@ async fn paginate_collection_zset(
     conn: &mut redis::aio::ConnectionManager,
     from: Option<&str>,
     limit: usize,
-) -> (Vec<EntityCollectionResponse>, Option<String>) {
+) -> actix_web::Result<(Vec<EntityCollectionResponse>, Option<String>)> {
     // `(value` is an exclusive lower bound; `-` is the start of the set.
     let min = match from {
         None => "-".to_string(),
@@ -684,7 +685,7 @@ async fn paginate_collection_zset(
         .arg(limit + 1)
         .query_async(conn)
         .await
-        .unwrap_or_default();
+        .map_err(error::ErrorInternalServerError)?;
     let has_more = ids.len() > limit;
     let page_ids: Vec<String> = ids.into_iter().take(limit).collect();
     let page = fetch_collection_records(conn, &page_ids).await;
@@ -699,7 +700,7 @@ async fn paginate_collection_zset(
     } else {
         None
     };
-    (page, next)
+    Ok((page, next))
 }
 
 /// TODO: We need to deal with query parameters in future
@@ -868,7 +869,7 @@ pub async fn fetch_collections(
     let collection_ta: Option<String> = redis::Cmd::get("inmor:collection:trust_anchor")
         .query_async(&mut conn)
         .await
-        .ok();
+        .map_err(error::ErrorInternalServerError)?;
     if let Some(req_ta) = &requested_ta
         && collection_ta.as_deref() != Some(req_ta.as_str())
     {
@@ -892,7 +893,7 @@ pub async fn fetch_collections(
             let known: bool = redis::Cmd::hexists("inmor:collection:entities", &id)
                 .query_async(&mut conn)
                 .await
-                .unwrap_or(false);
+                .map_err(error::ErrorInternalServerError)?;
             if !known {
                 return error_response_404(
                     "page_not_found",
@@ -909,14 +910,11 @@ pub async fn fetch_collections(
         if entity_types.is_empty() && trust_mark_types.is_empty() && query.is_none() {
             // No filter active: page straight off the ordered ZSET so the
             // whole id set is never loaded just to serve one page.
-            paginate_collection_zset(&mut conn, from_id.as_deref(), limit).await
+            paginate_collection_zset(&mut conn, from_id.as_deref(), limit).await?
         } else {
             // A filter is active: resolve the candidate id set first.
             let candidate_ids =
-                match collect_collection_ids(&mut conn, &entity_types, &trust_mark_types).await {
-                    Ok(ids) => ids,
-                    Err(e) => return error_response_400("invalid_request", &e.to_string()),
-                };
+                collect_collection_ids(&mut conn, &entity_types, &trust_mark_types).await?;
             match query.as_deref() {
                 Some(q) => {
                     // The query filter must inspect entity records, so the

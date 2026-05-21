@@ -3,7 +3,7 @@
 //! Walks a federation tree starting from a trust anchor, discovering all
 //! subordinate entities and storing their collection data in Redis.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use josekit::jwk::JwkSet;
 use log::{debug, error, info, warn};
 use serde_json::{Map, Value};
@@ -353,7 +353,7 @@ async fn collection_tree_walking(
     // The trust mark type strings are federation-provided and get used
     // verbatim in Redis key names (`...:by_trustmark:{tm_type}`). Drop any
     // value with control characters or an abusive length before indexing it.
-    let verified_tm_types: Vec<String> = verified_marks
+    let verified_tm_types: HashSet<String> = verified_marks
         .iter()
         .filter_map(|m| {
             m.get("trust_mark_type")
@@ -607,7 +607,7 @@ pub async fn run_collection_walk(
     redis::Cmd::set(format!("{STAGING_PREFIX}:trust_anchor"), trust_anchor)
         .query_async::<()>(conn)
         .await
-        .map_err(|e| anyhow!("failed to record staging trust_anchor: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to record staging trust_anchor: {e}"))?;
 
     // Walk the tree
     debug!("Beginning recursive tree walk from {trust_anchor}");
@@ -622,7 +622,7 @@ pub async fn run_collection_walk(
     // `trust_mark_type` filter results.
     let tm_errors = ctx.tm_index_errors.load(Ordering::Relaxed);
     if tm_errors > 0 {
-        return Err(anyhow!(
+        return Err(anyhow::anyhow!(
             "{tm_errors} trust mark index write(s) failed; refusing to swap staging into the live collection"
         ));
     }
