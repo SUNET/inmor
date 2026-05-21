@@ -12,16 +12,16 @@ importers:
         specifier: ^6.0.2
         version: 6.0.2
       '@codemirror/language':
-        specifier: ^6.12.3
+        specifier: ^6.12.1
         version: 6.12.3
       '@codemirror/lint':
-        specifier: ^6.9.6
+        specifier: ^6.9.2
         version: 6.9.6
       '@codemirror/state':
-        specifier: ^6.6.0
+        specifier: ^6.5.4
         version: 6.6.0
       '@codemirror/view':
-        specifier: ^6.43.0
+        specifier: ^6.39.11
         version: 6.43.0
       codemirror:
         specifier: ^6.0.2
@@ -30,23 +30,23 @@ importers:
         specifier: ^0.544.0
         version: 0.544.0(vue@3.5.34(typescript@5.8.3))
       valibot:
-        specifier: ^1.4.0
+        specifier: ^1.2.0
         version: 1.4.0(typescript@5.8.3)
       vue:
-        specifier: ^3.5.34
+        specifier: ^3.5.18
         version: 3.5.34(typescript@5.8.3)
       vue-codemirror:
         specifier: ^6.1.1
         version: 6.1.1(codemirror@6.0.2)(vue@3.5.34(typescript@5.8.3))
       vue-router:
-        specifier: ^4.6.4
+        specifier: ^4.5.1
         version: 4.6.4(vue@3.5.34(typescript@5.8.3))
     devDependencies:
       '@types/node':
-        specifier: ^22.19.19
+        specifier: ^22.15.29
         version: 22.19.19
       '@vitejs/plugin-vue':
-        specifier: ^6.0.7
+        specifier: ^6.0.1
         version: 6.0.7(vite@7.3.3(@types/node@22.19.19))(vue@3.5.34(typescript@5.8.3))
       '@vue/tsconfig':
         specifier: ^0.7.0
@@ -55,10 +55,10 @@ importers:
         specifier: ~5.8.3
         version: 5.8.3
       vite:
-        specifier: ^7.3.3
+        specifier: ^7.3.2
         version: 7.3.3(@types/node@22.19.19)
       vue-tsc:
-        specifier: ^3.3.1
+        specifier: ^3.0.5
         version: 3.3.1(typescript@5.8.3)
 
 packages:
