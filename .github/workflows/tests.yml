@@ -36,17 +36,17 @@ jobs:
           toolchain: stable
 
       - name: Install uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
       - name: actions-setup-redis
-        uses: shogo82148/actions-setup-redis@v1.45.0
+        uses: shogo82148/actions-setup-redis@v1.51.0
         with:
           auto-start: false
           distribution: "valkey"
           redis-version: "7.2"
 
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       - name: Build TA appliation
         run: cargo build
