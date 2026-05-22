@@ -34,6 +34,7 @@ EOT
 # Copy from the build container
 COPY --from=build --chown=app:app /app/target/release/inmor /app/
 COPY --from=build --chown=app:app /app/target/release/inmor-collection /app/
+COPY --from=build --chown=app:app /app/target/release/inmor-keygeneration /app/
 COPY --chown=app:app templates/ /app/templates/
 
 USER app

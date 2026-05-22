@@ -700,6 +700,63 @@ Admin Portal (admin)
    * - ``HISTORICAL_KEYS_DIR``
      - Path to historical keys (default: ``./historical_keys``)
 
+.. _generating-the-signing-key:
+
+Generating the Signing Key
+--------------------------
+
+The Trust Anchor signs every entity statement and trust mark with the private
+key in ``private.json`` and publishes the matching public keys from
+``publickeys/``. The ``inmor-keygeneration`` binary, bundled in the TA image,
+creates such a keypair without needing this source tree — run it once before
+starting the server for the first time::
+
+   docker run --rm -v ./:/data --user "$(id -u):$(id -g)" \
+     docker.sunet.se/inmor:0.4.0 \
+     /app/inmor-keygeneration --type=RS256 --output=/data
+
+This writes two files into the mounted directory:
+
+* ``private.json`` — the signing key, created with file mode ``0600``
+* ``publickeys/{kid}.json`` — the public JWK, named by its key ID
+
+The ``--type`` option selects the key algorithm, following
+`RFC 9864 Section 2 <https://www.rfc-editor.org/rfc/rfc9864.html#section-2>`_:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - ``--type``
+     - Key
+   * - ``RS256``
+     - RSA 2048-bit, RSASSA-PKCS1-v1_5
+   * - ``PS256``
+     - RSA 2048-bit, RSASSA-PSS
+   * - ``ES256`` / ``ES384`` / ``ES512``
+     - EC, curves P-256 / P-384 / P-521
+   * - ``Ed25519`` / ``Ed448``
+     - Edwards curve (OKP)
+
+If ``private.json`` already exists, the command refuses to overwrite it; pass
+``--force`` to replace it.
+
+.. warning::
+
+   Overwriting ``private.json`` invalidates every entity statement and trust
+   mark the Trust Anchor has already signed. Generate a new signing key only
+   for a fresh deployment or a deliberate key rotation.
+
+.. note::
+
+   ``--user "$(id -u):$(id -g)"`` runs the generator as the invoking host user
+   so the generated files are owned by you. Without it the container's ``app``
+   user typically cannot write to a host directory owned by another user, and
+   the command fails with a permission error.
+
+Mount the resulting ``private.json`` and ``publickeys/`` into the ``ta``
+service as shown in `Volume Mounts`_.
+
 Initialization Workflow
 -----------------------
 

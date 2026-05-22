@@ -108,6 +108,10 @@ Each key is stored as a JWK JSON file with the key ID (kid) as the thumbprint.
    Regenerating keys will invalidate all existing entity statements and trust marks.
    Make sure to backup and properly rotate keys in production.
 
+For a production server that only has the Docker image and not this source
+tree, generate the signing key with the bundled ``inmor-keygeneration``
+binary instead. See :ref:`generating-the-signing-key` in the deployment guide.
+
 Directory Structure
 -------------------
 
