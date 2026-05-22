@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -174,27 +174,33 @@ fn jwk_to_json(jwk: &Jwk) -> Result<String> {
     Ok(json)
 }
 
-/// Write `private.json` with mode 0600.
-fn write_private_key(path: &Path, jwk: &Jwk) -> Result<()> {
-    let json = jwk_to_json(jwk)?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    file.write_all(json.as_bytes())?;
-    // `.mode()` only applies on creation; enforce 0600 on overwrite too.
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("failed to set permissions on {}", path.display()))?;
-    Ok(())
+/// The error shown when `private.json` already exists and `--force` was not given.
+fn already_exists_error(path: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{} already exists.\n  Re-run with --force to overwrite (this invalidates all \
+         entity statements and trust marks already signed by the Trust Anchor).",
+        path.display()
+    )
 }
 
-/// Write a public key JWK to `publickeys/{kid}.json` with default permissions.
-fn write_public_key(path: &Path, jwk: &Jwk) -> Result<()> {
-    fs::write(path, jwk_to_json(jwk)?)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+/// Write `contents` to `path` with an explicit file mode.
+///
+/// When `overwrite` is false the file is created atomically (`create_new`), so
+/// the call fails with `AlreadyExists` instead of clobbering a file that
+/// appeared after an earlier existence check — closing the TOCTOU gap. The
+/// mode is also reapplied after writing so it is enforced when overwriting an
+/// existing file (where `OpenOptions::mode` has no effect).
+fn write_file(path: &Path, contents: &str, mode: u32, overwrite: bool) -> io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).mode(mode);
+    if overwrite {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(contents.as_bytes())?;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     Ok(())
 }
 
@@ -203,12 +209,10 @@ fn run() -> Result<()> {
     let alg = cli.key_type.alg();
 
     let private_path = cli.output.join("private.json");
+    // Fast, friendly check for the common case. `write_file` below still uses
+    // `create_new`, so a file appearing after this check cannot be clobbered.
     if private_path.exists() && !cli.force {
-        bail!(
-            "{} already exists.\n  Re-run with --force to overwrite (this invalidates all \
-             entity statements and trust marks already signed by the Trust Anchor).",
-            private_path.display()
-        );
+        return Err(already_exists_error(&private_path));
     }
 
     let (private_pair, mut public_jwk) = generate_keypair(cli.key_type)?;
@@ -229,8 +233,19 @@ fn run() -> Result<()> {
 
     let public_path = publickeys_dir.join(format!("{kid}.json"));
 
-    write_private_key(&private_path, &private_jwk)?;
-    write_public_key(&public_path, &public_jwk)?;
+    // Write the public key first: it is content-addressed by `kid` and safe to
+    // (re)write, so if the private-key write fails the state stays recoverable
+    // (no private.json without its public half).
+    write_file(&public_path, &jwk_to_json(&public_jwk)?, 0o644, true)
+        .with_context(|| format!("failed to write {}", public_path.display()))?;
+
+    if let Err(err) = write_file(&private_path, &jwk_to_json(&private_jwk)?, 0o600, cli.force) {
+        return Err(if err.kind() == io::ErrorKind::AlreadyExists {
+            already_exists_error(&private_path)
+        } else {
+            anyhow::Error::new(err).context(format!("failed to write {}", private_path.display()))
+        });
+    }
 
     println!("Generated {alg} key with KID: {kid}");
     println!("  private key: {}", private_path.display());
@@ -392,5 +407,33 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{key_type:?} verify failed: {e}"));
             assert_eq!(out, payload, "{key_type:?} round-trip payload mismatch");
         }
+    }
+
+    /// `write_file` must not clobber an existing file unless overwrite is set,
+    /// and must enforce the requested mode.
+    #[test]
+    fn write_file_respects_overwrite_and_mode() {
+        let dir = std::env::temp_dir().join(format!("inmor-keygen-write-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("private.json");
+        let _ = fs::remove_file(&path);
+
+        // First write creates the file.
+        write_file(&path, "first", 0o600, false).expect("initial write");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "first");
+
+        // Without overwrite a second write fails atomically and leaves the
+        // original contents intact (no truncation).
+        let err = write_file(&path, "second", 0o600, false).expect_err("must refuse overwrite");
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "first");
+
+        // With overwrite the file is replaced and the mode is reapplied.
+        write_file(&path, "third", 0o600, true).expect("force overwrite");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "third");
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        fs::remove_dir_all(&dir).ok();
     }
 }
