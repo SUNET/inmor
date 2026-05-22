@@ -49,8 +49,8 @@ lint: lint-rust lint-python
 
 # To run inmor tests
 test-ta *ARGS:
-  # Run Rust unit tests first
-  cargo test --lib
+  # Run Rust unit tests first (library and binary targets)
+  cargo test --lib --bins
   # We have integration tests for the inmor rust binary
   uv run pytest -vvv {{ARGS}}
 

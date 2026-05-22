@@ -714,11 +714,11 @@ starting the server for the first time.
 Ownership matters
 ^^^^^^^^^^^^^^^^^
 
-The TA container runs as the image's unprivileged ``app`` user, **uid 999**,
-and ``private.json`` is created with mode ``0600`` (readable only by its
-owner). For the TA to read its signing key, ``private.json`` must be owned by
-uid 999. The public key files are written ``0644``, so their ownership does
-not matter.
+The TA container runs as the image's unprivileged ``app`` user, whose uid and
+gid are pinned to **999** in the ``Dockerfile``. ``private.json`` is created
+with mode ``0600`` (readable only by its owner), so for the TA to read its
+signing key, ``private.json`` must be owned by uid 999. The public key files
+are written ``0644``, so their ownership does not matter.
 
 The simplest way to satisfy this is to generate the keys *as* uid 999, which
 is the image's default user. Create an output directory that uid 999 can write

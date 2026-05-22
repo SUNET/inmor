@@ -183,25 +183,58 @@ fn already_exists_error(path: &Path) -> anyhow::Error {
     )
 }
 
-/// Write `contents` to `path` with an explicit file mode.
+/// Atomically write `contents` to `path` with an exact file mode.
 ///
-/// When `overwrite` is false the file is created atomically (`create_new`), so
-/// the call fails with `AlreadyExists` instead of clobbering a file that
-/// appeared after an earlier existence check — closing the TOCTOU gap. The
-/// mode is also reapplied after writing so it is enforced when overwriting an
-/// existing file (where `OpenOptions::mode` has no effect).
+/// The data is written to a freshly created temporary file in the same
+/// directory, has its mode forced via the file descriptor (`fchmod`, so the
+/// umask cannot widen or narrow it), is fsynced, and is only then moved into
+/// place. Consequences:
+///
+/// * A crash or short write never leaves a truncated key file at `path` — the
+///   incomplete data only ever exists under the temporary name.
+/// * The move targets the path entry itself, never a symlink's target, so it
+///   cannot be tricked into clobbering an arbitrary file.
+/// * When `overwrite` is false the move uses `hard_link`, which fails with
+///   `AlreadyExists` if `path` already exists — an atomic no-clobber guarantee
+///   with no time-of-check/time-of-use gap.
 fn write_file(path: &Path, contents: &str, mode: u32, overwrite: bool) -> io::Result<()> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).mode(mode);
-    if overwrite {
-        options.create(true).truncate(true);
-    } else {
-        options.create_new(true);
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let parent = parent.unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "output path has no file name")
+    })?;
+    let tmp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+
+    // Create the temp file fresh (create_new => never a planted symlink) and
+    // force the exact mode through the descriptor, defeating the umask.
+    let staged = (|| -> io::Result<()> {
+        let mut tmp = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&tmp_path)?;
+        tmp.set_permissions(fs::Permissions::from_mode(mode))?;
+        tmp.write_all(contents.as_bytes())?;
+        tmp.sync_all()
+    })();
+    if let Err(err) = staged {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(err);
     }
-    let mut file = options.open(path)?;
-    file.write_all(contents.as_bytes())?;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-    Ok(())
+
+    // Move the staged file into place. `rename` and `hard_link` both act on
+    // the path entry itself and never follow a symlink at the destination.
+    let moved = if overwrite {
+        fs::rename(&tmp_path, path)
+    } else {
+        fs::hard_link(&tmp_path, path)
+    };
+    let _ = fs::remove_file(&tmp_path);
+    moved
 }
 
 fn run() -> Result<()> {
@@ -428,11 +461,46 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read_to_string(&path).unwrap(), "first");
 
-        // With overwrite the file is replaced and the mode is reapplied.
+        // With overwrite the file is replaced and the exact mode is enforced.
         write_file(&path, "third", 0o600, true).expect("force overwrite");
         assert_eq!(fs::read_to_string(&path).unwrap(), "third");
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+
+        // No temporary files are left behind.
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "stray temp files: {leftovers:?}");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Writing through a path that is a symlink must replace the symlink
+    /// itself, never write through it to clobber the symlink's target.
+    #[test]
+    fn write_file_does_not_follow_symlinks() {
+        let dir = std::env::temp_dir().join(format!("inmor-keygen-symlink-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("temp dir");
+
+        let target = dir.join("sensitive-target");
+        fs::write(&target, "must-not-change").expect("write target");
+        let link = dir.join("private.json");
+        let _ = fs::remove_file(&link);
+        std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+
+        write_file(&link, "new-key", 0o600, true).expect("overwrite via symlink path");
+
+        // The symlink's target file is untouched.
+        assert_eq!(fs::read_to_string(&target).unwrap(), "must-not-change");
+        // The path is now a regular file holding the new content.
+        assert!(
+            fs::symlink_metadata(&link).unwrap().file_type().is_file(),
+            "path should be a regular file, not a symlink"
+        );
+        assert_eq!(fs::read_to_string(&link).unwrap(), "new-key");
 
         fs::remove_dir_all(&dir).ok();
     }
