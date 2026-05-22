@@ -18,9 +18,11 @@ RUN --mount=type=bind,source=Cargo.toml,target=/app/Cargo.toml \
 
 ##### Production image
 FROM debian:13-slim
+# Pin the uid/gid so deployments and docs can rely on a fixed value
+# (operators must own key files such as private.json by this uid).
 RUN <<EOT
-groupadd -r app
-useradd -r -d /app -g app -N app
+groupadd -r -g 999 app
+useradd -r -u 999 -d /app -g app -N app
 EOT
 
 RUN <<EOT
@@ -34,6 +36,7 @@ EOT
 # Copy from the build container
 COPY --from=build --chown=app:app /app/target/release/inmor /app/
 COPY --from=build --chown=app:app /app/target/release/inmor-collection /app/
+COPY --from=build --chown=app:app /app/target/release/inmor-keygeneration /app/
 COPY --chown=app:app templates/ /app/templates/
 
 USER app

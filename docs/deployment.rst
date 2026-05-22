@@ -700,6 +700,83 @@ Admin Portal (admin)
    * - ``HISTORICAL_KEYS_DIR``
      - Path to historical keys (default: ``./historical_keys``)
 
+.. _generating-the-signing-key:
+
+Generating the Signing Key
+--------------------------
+
+The Trust Anchor signs every entity statement and trust mark with the private
+key in ``private.json`` and publishes the matching public keys from
+``publickeys/``. The ``inmor-keygeneration`` binary, bundled in the TA image,
+creates such a keypair without needing this source tree — run it once before
+starting the server for the first time.
+
+Ownership matters
+^^^^^^^^^^^^^^^^^
+
+The TA container runs as the image's unprivileged ``app`` user, whose uid and
+gid are pinned to **999** in the ``Dockerfile``. ``private.json`` is created
+with mode ``0600`` (readable only by its owner), so for the TA to read its
+signing key, ``private.json`` must be owned by uid 999. The public key files
+are written ``0644``, so their ownership does not matter.
+
+The simplest way to satisfy this is to generate the keys *as* uid 999, which
+is the image's default user. Create an output directory that uid 999 can write
+to, then run the generator::
+
+   mkdir -p keys
+   sudo chown 999:999 keys
+
+   docker run --rm -v ./keys:/data docker.sunet.se/inmor:0.4.0 \
+     /app/inmor-keygeneration --type=RS256 --output=/data
+
+This writes two files into the ``keys`` directory:
+
+* ``private.json`` — the signing key, mode ``0600``, owned by uid 999
+* ``publickeys/{kid}.json`` — the public JWK, mode ``0644``, named by its key ID
+
+Mount them into the ``ta`` service read-only (see `Volume Mounts`_)::
+
+   volumes:
+     - ./keys/private.json:/app/private.json:ro
+     - ./keys/publickeys:/app/publickeys:ro
+
+The ``--type`` option selects the key algorithm, following
+`RFC 9864 Section 2 <https://www.rfc-editor.org/rfc/rfc9864.html#section-2>`_:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - ``--type``
+     - Key
+   * - ``RS256``
+     - RSA 2048-bit, RSASSA-PKCS1-v1_5
+   * - ``PS256``
+     - RSA 2048-bit, RSASSA-PSS
+   * - ``ES256`` / ``ES384`` / ``ES512``
+     - EC, curves P-256 / P-384 / P-521
+   * - ``Ed25519`` / ``Ed448``
+     - Edwards curve (OKP)
+
+If ``private.json`` already exists, the command refuses to overwrite it; pass
+``--force`` to replace it.
+
+.. warning::
+
+   Overwriting ``private.json`` invalidates every entity statement and trust
+   mark the Trust Anchor has already signed. Generate a new signing key only
+   for a fresh deployment or a deliberate key rotation.
+
+.. note::
+
+   If you cannot ``chown`` a directory to uid 999 (for example on a host where
+   you lack root), generate the files as your own host user by adding
+   ``--user "$(id -u):$(id -g)"`` to the ``docker run`` command. The key files
+   are then owned by your host uid, so you must also add a matching ``user:``
+   entry to the ``ta`` service in the compose file so the TA container runs
+   under the same uid and can read ``private.json``.
+
 Initialization Workflow
 -----------------------
 
