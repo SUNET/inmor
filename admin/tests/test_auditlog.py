@@ -405,3 +405,45 @@ class TestAuditLogQueryEndpoint:
         client = Client()
         response = client.get("/api/v1/auditlog")
         assert response.status_code == 401
+
+    @pytest.mark.django_db
+    def test_get_audit_log_entry_includes_snapshots(self, user):
+        """Single-entry endpoint must return snapshot_before/snapshot_after."""
+        from apikeys.models import APIKey
+
+        _, plaintext = APIKey.create_key(name="audit-detail-test", user=user)
+        client = Client()
+
+        create_resp = client.post(
+            "/api/v1/trustmarktypes",
+            data=json.dumps({"tmtype": "https://test.example.com/detail_tmt"}),
+            content_type="application/json",
+            HTTP_X_API_KEY=plaintext,
+        )
+        assert create_resp.status_code == 201
+
+        entry = AuditLogEntry.objects.filter(resource_type="TrustMarkType").latest("timestamp")
+
+        response = client.get(
+            f"/api/v1/auditlog/{entry.pk}",
+            HTTP_X_API_KEY=plaintext,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert "snapshot_before" in body
+        assert "snapshot_after" in body
+        assert body["snapshot_after"]["tmtype"] == "https://test.example.com/detail_tmt"
+
+    @pytest.mark.django_db
+    def test_get_audit_log_entry_not_found(self, user):
+        """Single-entry endpoint returns 404 for unknown IDs."""
+        from apikeys.models import APIKey
+
+        _, plaintext = APIKey.create_key(name="audit-404-test", user=user)
+        client = Client()
+
+        response = client.get(
+            "/api/v1/auditlog/999999999",
+            HTTP_X_API_KEY=plaintext,
+        )
+        assert response.status_code == 404
