@@ -1004,9 +1004,14 @@ def list_audit_log(
     return qs
 
 
+class AuditLogDetailOutSchema(AuditLogEntryOutSchema):
+    snapshot_before: dict[str, Any] | None
+    snapshot_after: dict[str, Any] | None
+
+
 @router.get(
     "/auditlog/{int:entry_id}",
-    response={200: AuditLogEntryOutSchema, 404: Message},
+    response={200: AuditLogDetailOutSchema, 404: Message},
     tags=["AuditLog"],
 )
 def get_audit_log_entry(request: HttpRequest, entry_id: int):
@@ -1017,11 +1022,6 @@ def get_audit_log_entry(request: HttpRequest, entry_id: int):
         return AuditLogEntry.objects.select_related("user").get(id=entry_id)
     except AuditLogEntry.DoesNotExist:
         return 404, {"message": "Audit log entry not found.", "id": entry_id}
-
-
-class AuditLogDetailOutSchema(AuditLogEntryOutSchema):
-    snapshot_before: dict[str, Any] | None
-    snapshot_after: dict[str, Any] | None
 
 
 # Add routers to API
