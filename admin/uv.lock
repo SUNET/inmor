@@ -2,6 +2,10 @@ version = 1
 revision = 3
 requires-python = ">=3.13"
 
+[options]
+exclude-newer = "2026-05-25T19:37:52.678997989Z"
+exclude-newer-span = "P3D"
+
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -517,7 +521,7 @@ wheels = [
 
 [[package]]
 name = "inmoradmin"
-version = "0.4.0"
+version = "0.4.1"
 source = { virtual = "." }
 dependencies = [
     { name = "black" },

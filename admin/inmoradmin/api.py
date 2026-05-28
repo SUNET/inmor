@@ -11,11 +11,16 @@ from common.signing import create_signed_jwt
 from django.conf import settings
 from django.http import HttpRequest
 from django_redis import get_redis_connection
-from entities.lib import (apply_server_policy, create_server_statement,
-                          create_subordinate_statement,
-                          fetch_entity_configuration, fetch_jwks_from_uri,
-                          fetch_payload, merge_our_policy_ontop_subpolicy,
-                          update_redis_with_subordinate)
+from entities.lib import (
+    apply_server_policy,
+    create_server_statement,
+    create_subordinate_statement,
+    fetch_entity_configuration,
+    fetch_jwks_from_uri,
+    fetch_payload,
+    merge_our_policy_ontop_subpolicy,
+    update_redis_with_subordinate,
+)
 from entities.models import Subordinate
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
