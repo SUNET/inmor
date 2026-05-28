@@ -1,4 +1,21 @@
 
+<a id='changelog-0.4.1'></a>
+# 0.4.1 — 2026-05-28
+
+## Added
+
+- `inmor-keygeneration` CLI binary that generates a Trust Anchor signing
+  keypair (`private.json` + `publickeys/{kid}.json`). Bundled in the TA
+  image so an operator can bootstrap keys in production without the
+  source tree #242.
+
+## Fixed
+
+- `GET /api/v1/auditlog/{id}` now returns the full
+  `snapshot_before`/`snapshot_after` pair. The detail response was
+  wired to the summary schema and silently omitted the snapshots its
+  docstring promised.
+
 <a id='changelog-0.4.0'></a>
 # 0.4.0 — 2026-05-21
 

@@ -2,6 +2,10 @@ version = 1
 revision = 3
 requires-python = ">=3.13"
 
+[options]
+exclude-newer = "2026-05-25T19:39:32.949136416Z"
+exclude-newer-span = "P3D"
+
 [[package]]
 name = "anyio"
 version = "4.10.0"
@@ -432,7 +436,7 @@ wheels = [
 
 [[package]]
 name = "pyinmor"
-version = "0.3.0"
+version = "0.4.1"
 source = { virtual = "." }
 dependencies = [
     { name = "httpx" },

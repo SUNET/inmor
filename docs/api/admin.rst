@@ -22,6 +22,21 @@ The API accepts two authentication methods:
 Both methods grant the same access. Session auth is used by the Vue frontend;
 API keys are intended for scripts and integrations.
 
+Authentication metadata
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Every authenticated request records how the caller authenticated. The metadata
+is attached to ``request.auth_result`` and persisted by the audit log:
+
+* ``auth_method`` -- ``"session"`` or ``"api_key"`` (extensible to other
+  backends).
+* ``tenant`` -- tenant identifier carried by the API key (default: ``"default"``).
+  Session-based requests always use the ``"default"`` tenant.
+* ``api_key_name`` -- name of the API key used (``None`` for session auth).
+
+CSRF is enforced for session-based ``POST``/``PUT``/``PATCH``/``DELETE``
+requests. API-key requests bypass CSRF because they do not rely on cookies.
+
 Auth Endpoints
 ^^^^^^^^^^^^^^
 
@@ -916,6 +931,175 @@ stores it in Redis for the ``/historical_keys`` endpoint.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/server/historical_keys
+
+Audit Log
+---------
+
+State-changing API operations are recorded in an immutable audit log. Read
+operations (``GET``) are not logged. See :doc:`../guides/audit-logging` for
+how event types are derived and how the log is used operationally; this
+section documents the wire format.
+
+List Audit Log Entries
+^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   GET /api/v1/auditlog
+
+Returns a paginated list of audit log entries, newest first.
+
+**Query Parameters:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 10 10 60
+
+   * - Parameter
+     - Type
+     - Required
+     - Description
+   * - ``limit``
+     - integer
+     - No
+     - Maximum number of results (default: 100)
+   * - ``offset``
+     - integer
+     - No
+     - Offset for pagination (default: 0)
+   * - ``resource_type``
+     - string
+     - No
+     - Filter by resource (``Subordinate``, ``TrustMark``, ``TrustMarkType``)
+   * - ``action``
+     - string
+     - No
+     - Filter by action (``CREATE`` or ``UPDATE``)
+   * - ``event_type``
+     - string
+     - No
+     - Filter by spec-defined event type (see below)
+
+**Response (200 OK):**
+
+.. code-block:: json
+
+   {
+     "count": 1,
+     "items": [
+       {
+         "id": 42,
+         "timestamp": "2026-05-27T11:30:00Z",
+         "user_id": 1,
+         "username": "admin",
+         "auth_method": "api_key",
+         "tenant": "default",
+         "ip_address": "10.0.0.5",
+         "action": "UPDATE",
+         "resource_type": "Subordinate",
+         "resource_id": 7,
+         "resource_repr": "https://example-rp.com",
+         "endpoint": "/api/v1/subordinates/7",
+         "http_method": "POST",
+         "diff": {
+           "active": {"old": true, "new": false}
+         },
+         "response_code": 200,
+         "success": true,
+         "event_type": "revocation"
+       }
+     ]
+   }
+
+The list response omits ``snapshot_before`` and ``snapshot_after`` to keep
+payloads small; use the single-entry endpoint to retrieve full snapshots.
+
+Get Audit Log Entry
+^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   GET /api/v1/auditlog/{entry_id}
+
+Returns one audit log entry including the full before/after snapshots used
+to compute the ``diff``.
+
+**Response (200 OK):**
+
+.. code-block:: json
+
+   {
+     "id": 42,
+     "timestamp": "2026-05-27T11:30:00Z",
+     "user_id": 1,
+     "username": "admin",
+     "auth_method": "api_key",
+     "tenant": "default",
+     "ip_address": "10.0.0.5",
+     "action": "UPDATE",
+     "resource_type": "Subordinate",
+     "resource_id": 7,
+     "resource_repr": "https://example-rp.com",
+     "endpoint": "/api/v1/subordinates/7",
+     "http_method": "POST",
+     "diff": {
+       "active": {"old": true, "new": false}
+     },
+     "response_code": 200,
+     "success": true,
+     "event_type": "revocation",
+     "snapshot_before": {"...": "full model state before update"},
+     "snapshot_after": {"...": "full model state after update"}
+   }
+
+**Response (404 Not Found):** No entry with the given ID.
+
+Event Types
+^^^^^^^^^^^
+
+``event_type`` is derived automatically. Subordinate values align with the
+`OpenID Federation Subordinate Events 1.0 specification
+<https://openid.net/specs/openid-federation-subordinate-events-1_0.html>`_:
+
+* **Subordinate** -- ``registration``, ``revocation``,
+  ``metadata_policy_update``, ``metadata_update``, ``jwks_update``. When a
+  single update touches multiple fields, the highest-priority event wins
+  in the order listed.
+* **TrustMarkType** -- ``trustmarktype_created``,
+  ``trustmarktype_updated``, ``trustmarktype_deactivated``.
+* **TrustMark** -- ``trustmark_issued``, ``trustmark_renewed``,
+  ``trustmark_revoked``, ``trustmark_updated``.
+
+**Logged Operations:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Endpoint
+     - Action
+   * - ``POST /api/v1/trustmarktypes``
+     - CREATE
+   * - ``PUT /api/v1/trustmarktypes/{id}``
+     - UPDATE
+   * - ``POST /api/v1/trustmarks``
+     - CREATE
+   * - ``POST /api/v1/trustmarks/{id}/renew``
+     - UPDATE (renew)
+   * - ``PUT /api/v1/trustmarks/{id}``
+     - UPDATE
+   * - ``POST /api/v1/subordinates``
+     - CREATE (``registration``)
+   * - ``POST /api/v1/subordinates/{id}``
+     - UPDATE
+
+**Example:**
+
+.. code-block:: bash
+
+   # Last 10 revocations
+   curl -H "X-API-Key: YOUR_KEY" \
+        "http://localhost:8000/api/v1/auditlog?event_type=revocation&limit=10"
 
 Error Responses
 ---------------
