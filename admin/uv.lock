@@ -3,8 +3,7 @@ revision = 3
 requires-python = ">=3.13"
 
 [options]
-exclude-newer = "2026-05-25T19:37:52.678997989Z"
-exclude-newer-span = "P3D"
+exclude-newer = "2026-05-25T00:00:00Z"
 
 [[package]]
 name = "annotated-types"
