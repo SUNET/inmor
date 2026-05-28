@@ -5,37 +5,30 @@ from typing import Annotated, Any
 
 import httpx
 import pytz
+from auditlog.diff import model_to_dict
+from auditlog.helpers import log_create, log_update
+from common.signing import create_signed_jwt
 from django.conf import settings
 from django.http import HttpRequest
 from django_redis import get_redis_connection
+from entities.lib import (apply_server_policy, create_server_statement,
+                          create_subordinate_statement,
+                          fetch_entity_configuration, fetch_jwks_from_uri,
+                          fetch_payload, merge_our_policy_ontop_subpolicy,
+                          update_redis_with_subordinate)
+from entities.models import Subordinate
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import BaseModel, BeforeValidator, Field
 from redis.client import Redis
-
-from common.signing import create_signed_jwt
-from entities.lib import (
-    apply_server_policy,
-    create_server_statement,
-    create_subordinate_statement,
-    fetch_entity_configuration,
-    fetch_jwks_from_uri,
-    fetch_payload,
-    merge_our_policy_ontop_subpolicy,
-    update_redis_with_subordinate,
-)
-from entities.models import Subordinate
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
-
-from auditlog.diff import model_to_dict
-from auditlog.helpers import log_create, log_update
 
 from .auth import auth_router, combined_auth
 
 api = NinjaAPI(
     title="Inmor Admin API",
-    version="0.2.0",
+    version="0.3.0",
     description="Admin API for managing Trust Anchor entities, subordinates, and trust marks.",
 )
 
