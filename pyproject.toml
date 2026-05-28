@@ -22,6 +22,14 @@ dependencies = [
 [project.urls]
 Home = "https://github.com/SUNET/inmor"
 
+[tool.uv]
+# Supply-chain cooling window: never resolve distributions published after
+# this date. A fixed UTC timestamp (not a rolling span, and not a bare
+# date which uv resolves against the local timezone) keeps `uv sync
+# --locked` builds reproducible across hosts and the UTC build container.
+# Bump deliberately when updating dependencies.
+exclude-newer = "2026-05-25T00:00:00Z"
+
 [tool.pyright]
 stubPath = "typings"
 reportAny = false
