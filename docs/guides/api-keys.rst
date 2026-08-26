@@ -1,5 +1,5 @@
 API Key Authentication
-=====================
+======================
 
 Inmor supports API key authentication for programmatic access to the Admin
 API (``/api/v1/``). This allows external tools and scripts to interact with
@@ -12,8 +12,8 @@ the API without session cookies.
 Overview
 --------
 
-API keys provide an alternative to session-based authentication. They are
-useful for:
+API keys are required for direct and programmatic API access. They are useful
+for:
 
 * Automated scripts and CI/CD pipelines
 * External monitoring tools
@@ -104,8 +104,8 @@ Pass the key in the ``X-API-Key`` HTTP header:
    curl -H "X-API-Key: YOUR_KEY_HERE" \
         https://your-server/api/v1/trustmarktypes
 
-All ``/api/v1/`` endpoints accept either a session cookie or an API key.
-Both authentication methods grant the same access.
+Direct requests to protected ``/api/v1/`` endpoints must include an API key.
+Do not copy or reuse an Admin UI browser session in scripts or integrations.
 
 Examples
 ^^^^^^^^
@@ -180,12 +180,13 @@ How It Works
 The authentication flow:
 
 1. Client sends request with ``X-API-Key: <key>`` header
-2. ``APIKeyAuthentication`` (in ``inmoradmin/auth.py``) extracts the header
+2. ``APIKeyAuthBackend`` (in ``inmoradmin/auth.py``) extracts the header
 3. The key is hashed with SHA-256 and looked up in the database
 4. If found, active, and not expired, the request is authenticated as the
    key's associated user
 5. The ``last_used_at`` timestamp is updated
 
-The API router in ``inmoradmin/api.py`` accepts both session and API key
-authentication via ``combined_auth``, so existing session-based workflows
-(including the Vue frontend) continue to work unchanged.
+The API router in ``inmoradmin/api.py`` uses ``combined_auth`` to support API
+keys for direct callers and sessions already established by django-allauth for
+the browser-based Admin UI. The API does not accept usernames and passwords or
+create login sessions itself.

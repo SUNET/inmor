@@ -37,7 +37,7 @@ api = NinjaAPI(
     description="Admin API for managing Trust Anchor entities, subordinates, and trust marks.",
 )
 
-# Protected router - requires authentication (session or API key)
+# Protected router: API keys for direct callers, allauth sessions for the Admin UI.
 router = Router(auth=combined_auth)
 
 DEFAULTS: dict[str, dict[str, Any]] = settings.TA_DEFAULTS
