@@ -11,6 +11,21 @@ from jwcrypto import jwt
 from jwcrypto.common import json_decode
 
 data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+api_base_url = "http://localhost:8000"
+
+
+def api_request(method: str, url: str, json_data: dict[Any, Any] | None = None):
+    """Send an authenticated request to the Admin API."""
+    api_key = os.environ.get("INMOR_API_KEY")
+    if not api_key:
+        raise RuntimeError("Set the INMOR_API_KEY environment variable")
+
+    return httpx.request(
+        method,
+        f"{api_base_url}{url}",
+        json=json_data,
+        headers={"X-API-Key": api_key},
+    )
 
 
 def s_y(line: str | int):
@@ -30,28 +45,25 @@ def get_payload(token_str: str):
 
 def get_url(url: str):
     "Get an URL"
-    resp = httpx.get(f"http://localhost:8000{url}")
+    resp = api_request("GET", url)
     return resp.status_code, resp.json()
 
 
 def get_url_json(url: str, j: dict[Any, Any]):
     "Get request with JSON data"
-    headers = {"Content-Type": "application/json"}
-    resp = httpx.request("GET", f"http://localhost:8000{url}", json=j, headers=headers)
+    resp = api_request("GET", url, j)
     return resp.status_code, resp.json()
 
 
 def post_url_json(url: str, j: dict[Any, Any]):
     "POST request with JSON data"
-    headers = {"Content-Type": "application/json"}
-    resp = httpx.request("POST", f"http://localhost:8000{url}", json=j, headers=headers)
+    resp = api_request("POST", url, j)
     return resp.status_code, resp.json()
 
 
 def put_url_json(url: str, j: dict[Any, Any]):
     "PUT request with JSON data"
-    headers = {"Content-Type": "application/json"}
-    resp = httpx.request("PUT", f"http://localhost:8000{url}", json=j, headers=headers)
+    resp = api_request("PUT", url, j)
     return resp.status_code, resp.json()
 
 
@@ -318,5 +330,7 @@ class REPL(Cmd):
 
 
 if __name__ == "__main__":
+    if not os.environ.get("INMOR_API_KEY"):
+        raise SystemExit("Set the INMOR_API_KEY environment variable before starting the demo")
     app = REPL()
     _ = app.cmdloop()
