@@ -16,9 +16,9 @@ The system consists of two components:
 
 .. danger::
 
-   **Production Security:** The Admin API must be protected with authentication
-   (at minimum HTTP Basic Auth) before exposing to any network. See
-   :ref:`securing-admin-api` for details.
+   **Production Security:** Direct Admin API clients must authenticate with an
+   API key. Always use HTTPS and restrict network access before exposing the
+   Admin API. See :ref:`securing-admin-api` for details.
 
 Quick Start
 -----------
@@ -34,9 +34,14 @@ The fastest way to get Inmor running is with Docker Compose::
    just build-rs
    just up
 
+   # Set a key created as described in the API key guide
+   export INMOR_API_KEY="YOUR_KEY_HERE"
+
    # Initialize the Trust Anchor
-   curl -X POST http://localhost:8000/api/v1/server/entity
-   curl -X POST http://localhost:8000/api/v1/server/historical_keys
+   curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/entity
+   curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/historical_keys
 
 The repository includes development signing keys, so no key generation is needed
 for getting started. For production, you should generate your own keys.

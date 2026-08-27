@@ -63,14 +63,18 @@ def wait_and_click(page: Page, selector: str, wait_time: float = 0.5):
 
 
 def login(page: Page):
-    """Login to the admin UI."""
+    """Login through the django-allauth browser flow."""
     print("Logging in...")
     page.goto("http://localhost:5173/login")
     time.sleep(2)
 
-    # Fill login form
-    username_input = page.locator('input[placeholder="Enter your username"]')
-    password_input = page.locator('input[placeholder="Enter your password"]')
+    # The frontend does not collect credentials. Follow its Sign In link to
+    # django-allauth, which runs every configured authentication stage.
+    page.get_by_role("button", name="Sign In").click()
+    page.wait_for_url("http://localhost:5173/accounts/login/**", timeout=10000)
+
+    username_input = page.locator("#id_login")
+    password_input = page.locator("#id_password")
 
     username_input.click()
     username_input.type("kushal", delay=80)
@@ -80,8 +84,9 @@ def login(page: Page):
     password_input.type("redHat1234", delay=80)
     time.sleep(0.5)
 
-    # Click login button
-    page.click('button[type="submit"]')
+    # Submit the allauth form. Users with MFA enabled continue through the
+    # configured MFA challenge before allauth redirects to the Admin UI.
+    page.get_by_role("button", name="Sign In").click()
     time.sleep(2)
 
     # Wait for redirect to home

@@ -14,9 +14,8 @@ This guide covers deploying Inmor using Docker Compose for production environmen
    * Add and remove subordinate entities
    * Modify the Trust Anchor's entity configuration
 
-   **In production, you MUST secure the Admin API behind authentication.**
-   At minimum, use HTTP Basic Authentication at the reverse proxy level.
-   Consider additional measures such as:
+   **In production, direct Admin API callers MUST use API keys.** Always use
+   HTTPS and consider additional controls at the reverse proxy, such as:
 
    * IP allowlisting (restrict to management network)
    * VPN-only access
@@ -26,6 +25,11 @@ This guide covers deploying Inmor using Docker Compose for production environmen
    **Never expose the Admin API directly to the internet without authentication.**
 
    See :doc:`reverse-proxy` for configuration examples.
+
+Admin API command examples in this guide assume ``INMOR_API_KEY`` contains a
+key created as described in :doc:`guides/api-keys`::
+
+   export INMOR_API_KEY="YOUR_KEY_HERE"
 
 Architecture
 ------------
@@ -315,10 +319,12 @@ Redis stores the federation runtime data:
 Redis data is ephemeral and can be rebuilt from the database::
 
    # Rebuild entity configuration
-   curl -X POST http://localhost:8000/api/v1/server/entity
+   curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/entity
 
    # Rebuild historical keys
-   curl -X POST http://localhost:8000/api/v1/server/historical_keys
+   curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/historical_keys
 
    # Reload trust marks from database
    docker compose exec admin python manage.py reload_issued_tms
@@ -784,19 +790,22 @@ After deployment, initialize the Trust Anchor:
 
 1. **Create entity configuration**::
 
-      curl -X POST http://localhost:8000/api/v1/server/entity
+      curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+        http://localhost:8000/api/v1/server/entity
 
    This creates the TA's self-signed entity statement and stores it in Redis.
 
 2. **Create historical keys JWT** (if you have rotated keys)::
 
-      curl -X POST http://localhost:8000/api/v1/server/historical_keys
+      curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+        http://localhost:8000/api/v1/server/historical_keys
 
    This creates a signed JWT containing all expired keys from ``historical_keys/``.
 
 3. **Create trust mark types**::
 
       curl -X POST http://localhost:8000/api/v1/trustmarktypes \
+        -H "X-API-Key: $INMOR_API_KEY" \
         -H "Content-Type: application/json" \
         -d '{
           "tmtype": "https://your-domain.example.com/trustmark/member",

@@ -5,6 +5,12 @@ Subordinates are entities that register with the Trust Anchor to participate
 in the federation. The Trust Anchor issues signed subordinate statements
 that establish trust chains.
 
+Direct Admin API examples in this guide assume an API key is available::
+
+   export INMOR_API_KEY="YOUR_KEY_HERE"
+
+See :doc:`api-keys` for key creation and management.
+
 Understanding Subordinates
 --------------------------
 
@@ -90,6 +96,7 @@ Fetch the entity's configuration and register it:
 
    # Step 3: Register with the TA
    curl -X POST http://localhost:8000/api/v1/subordinates \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
@@ -161,6 +168,7 @@ enforces for all statements:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-op.com",
@@ -191,6 +199,7 @@ Add custom claims to the subordinate statement:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
@@ -212,6 +221,7 @@ Set a custom validity period (cannot exceed system default):
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
@@ -229,7 +239,8 @@ List All Subordinates
 
 .. code-block:: bash
 
-   curl http://localhost:8000/api/v1/subordinates
+   curl -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/subordinates
 
 **Response:**
 
@@ -259,7 +270,8 @@ Get Subordinate by ID
 
 .. code-block:: bash
 
-   curl http://localhost:8000/api/v1/subordinates/1
+   curl -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/subordinates/1
 
 Via Trust Anchor (Public)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -289,6 +301,7 @@ and ``jwks`` fields are required for every update:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1 \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
@@ -318,6 +331,7 @@ Disable a subordinate without removing it:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1 \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
@@ -509,7 +523,8 @@ Renew a Single Subordinate (API)
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/api/v1/subordinates/1/renew
+   curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/subordinates/1/renew
 
 The endpoint:
 
@@ -560,6 +575,7 @@ Enable auto-renewal to keep subordinate statements fresh:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1 \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        ...,
@@ -597,6 +613,7 @@ Complete workflow for onboarding a new subordinate:
    .. code-block:: bash
 
       curl -X POST http://localhost:8000/api/v1/subordinates/fetch-config \
+        -H "X-API-Key: $INMOR_API_KEY" \
         -H "Content-Type: application/json" \
         -d '{"url": "https://new-entity.example.com"}'
 
@@ -616,6 +633,7 @@ Complete workflow for onboarding a new subordinate:
    .. code-block:: bash
 
       curl -X POST http://localhost:8000/api/v1/subordinates \
+        -H "X-API-Key: $INMOR_API_KEY" \
         -H "Content-Type: application/json" \
         -d '{
           "entityid": "https://new-entity.example.com",
@@ -629,6 +647,7 @@ Complete workflow for onboarding a new subordinate:
    .. code-block:: bash
 
       curl -X POST http://localhost:8000/api/v1/trustmarks \
+        -H "X-API-Key: $INMOR_API_KEY" \
         -H "Content-Type: application/json" \
         -d '{
           "tmt": 1,
@@ -678,7 +697,8 @@ Check entity type filtering:
 .. code-block:: bash
 
    # Verify entity type in metadata
-   curl http://localhost:8000/api/v1/subordinates/1
+   curl -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/subordinates/1
 
    # Try different entity_type filters
    curl "https://federation.example.com/list?entity_type=openid_relying_party"

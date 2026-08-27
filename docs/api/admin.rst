@@ -62,7 +62,8 @@ for direct API clients to exchange a username and password for a session.
 
 .. code-block:: bash
 
-   curl -H "X-API-Key: YOUR_KEY_HERE" \
+   export INMOR_API_KEY="YOUR_KEY_HERE"
+   curl -H "X-API-Key: $INMOR_API_KEY" \
         http://localhost:8000/api/v1/trustmarktypes
 
 Trust Mark Types
@@ -142,6 +143,7 @@ Creates a new trust mark type.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarktypes \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmtype": "https://example.com/trustmarks/member",
@@ -367,6 +369,7 @@ Issues a new trust mark to an entity.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarks \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmt": 1,
@@ -633,6 +636,7 @@ The API will:
 
    # Then register with the TA
    curl -X POST http://localhost:8000/api/v1/subordinates \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
@@ -772,7 +776,7 @@ authority hints.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1/renew \
-     -H "Cookie: sessionid=..."
+     -H "X-API-Key: $INMOR_API_KEY"
 
 Fetch Entity Configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -848,6 +852,7 @@ validation failure, or no OpenID Federation configuration found.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/fetch-config \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"url": "https://example-rp.com"}'
 
@@ -887,7 +892,9 @@ The entity statement includes:
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/api/v1/server/entity
+   curl -X POST \
+     -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/entity
 
 Create Historical Keys JWT
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -914,7 +921,9 @@ stores it in Redis for the ``/historical_keys`` endpoint.
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/api/v1/server/historical_keys
+   curl -X POST \
+     -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/historical_keys
 
 Audit Log
 ---------

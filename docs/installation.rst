@@ -51,13 +51,18 @@ Quick Installation
 
       just up
 
-5. Initialize the Trust Anchor::
+5. Set ``INMOR_API_KEY`` to a key created as described in
+   :doc:`guides/api-keys`, then initialize the Trust Anchor::
+
+      export INMOR_API_KEY="YOUR_KEY_HERE"
 
       # Create the entity configuration
-      curl -X POST http://localhost:8000/api/v1/server/entity
+      curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+        http://localhost:8000/api/v1/server/entity
 
       # Create historical keys JWT (if you have any)
-      curl -X POST http://localhost:8000/api/v1/server/historical_keys
+      curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+        http://localhost:8000/api/v1/server/historical_keys
 
 The Trust Anchor is now running at ``http://localhost:8080`` and the Admin API at ``http://localhost:8000``.
 
@@ -152,7 +157,8 @@ Verifying Installation
 
 3. Test the Admin API::
 
-      curl http://localhost:8000/api/v1/trustmarktypes
+      curl -H "X-API-Key: $INMOR_API_KEY" \
+        http://localhost:8000/api/v1/trustmarktypes
 
    This should return an empty list or existing trust mark types.
 
