@@ -22,6 +22,8 @@ for:
 Each API key is:
 
 * Tied to a specific Django user account
+* Usable only while both the key and its user account are active
+* Created only for active user accounts
 * Stored as a SHA-256 hash (the plaintext is shown only once at creation)
 * Optionally time-limited with an expiry date
 * Revocable at any time
@@ -152,9 +154,9 @@ Revoking Keys
 
 To revoke a single key:
 
-1. Click on the key in the admin list
-2. Uncheck **Is active**
-3. Click **Save**
+1. Select the key using its checkbox
+2. Choose **Revoke selected API keys** from the action dropdown
+3. Click **Go**
 
 To revoke multiple keys at once:
 
@@ -170,6 +172,9 @@ Security Best Practices
 * **Set expiry dates** -- avoid permanent keys when possible
 * **Use descriptive names** -- makes it easy to identify and audit keys
 * **Revoke unused keys** -- regularly review and clean up old keys
+* **Disable departed users** -- disabling an account immediately and
+  permanently deactivates all API keys owned by that account. Re-enabling the
+  account does not reactivate those keys; create new keys instead
 * **One key per client** -- don't share keys between different services
 * **Store keys securely** -- treat them like passwords; use environment
   variables or a secrets manager
@@ -182,9 +187,13 @@ The authentication flow:
 1. Client sends request with ``X-API-Key: <key>`` header
 2. ``APIKeyAuthBackend`` (in ``inmoradmin/auth.py``) extracts the header
 3. The key is hashed with SHA-256 and looked up in the database
-4. If found, active, and not expired, the request is authenticated as the
-   key's associated user
+4. If the key and its associated user account are active, and the key is not
+   expired, the request is authenticated as that user
 5. The ``last_used_at`` timestamp is updated
+
+Disabling a user permanently deactivates all of that user's existing API keys.
+New keys cannot be created for an inactive user. Re-enabling the user never
+reactivates old keys; create a new key instead.
 
 The API router in ``inmoradmin/api.py`` uses ``combined_auth`` to support API
 keys for direct callers and sessions already established by django-allauth for

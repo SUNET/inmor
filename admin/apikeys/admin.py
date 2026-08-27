@@ -1,15 +1,35 @@
 """Django admin configuration for API Keys."""
 
+from django import forms
 from django.contrib import admin, messages
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 from django.utils.html import format_html
 
 from .models import APIKey
 
 
+class APIKeyAdminForm(forms.ModelForm):
+    """Validate API key ownership against current account state."""
+
+    class Meta:
+        model = APIKey
+        fields = "__all__"
+
+    def clean_user(self) -> User:
+        """Lock and reject an owner whose account is currently inactive."""
+        user = self.cleaned_data["user"]
+        current_user = User.objects.select_for_update().get(pk=user.pk)
+        if not current_user.is_active:
+            raise ValidationError("Cannot create an API key for an inactive user.")
+        return current_user
+
+
 class APIKeyAdmin(admin.ModelAdmin):
     """Admin interface for API Key management."""
 
+    form = APIKeyAdminForm
     list_display = [
         "name",
         "prefix_display",
@@ -75,9 +95,9 @@ class APIKeyAdmin(admin.ModelAdmin):
         )
 
     def get_readonly_fields(self, request: HttpRequest, obj=None):
-        """Make more fields readonly when editing existing key."""
+        """Prevent owner changes and reactivation of existing API keys."""
         if obj:  # Editing existing object
-            return self.readonly_fields + ["user"]
+            return self.readonly_fields + ["user", "is_active"]
         return self.readonly_fields
 
     def has_change_permission(self, request: HttpRequest, obj=None) -> bool:

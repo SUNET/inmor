@@ -4,7 +4,8 @@ import hashlib
 import secrets
 
 from django.contrib.auth.models import User
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 from django.utils import timezone
 
 
@@ -85,8 +86,8 @@ class APIKey(models.Model):
 
     @property
     def is_valid(self) -> bool:
-        """Check if the API key is currently valid."""
-        if not self.is_active:
+        """Check whether the key and its owning account are active and unexpired."""
+        if not self.is_active or not self.user.is_active:
             return False
         if self.expires_at and timezone.now() > self.expires_at:
             return False
@@ -112,16 +113,24 @@ class APIKey(models.Model):
         Returns:
             tuple: (APIKey instance, plaintext key)
             Note: The plaintext key is only available at creation time!
+
+        Raises:
+            ValidationError: If the owning user is currently inactive.
         """
-        full_key, prefix, key_hash = generate_api_key()
-        api_key = cls.objects.create(
-            name=name,
-            prefix=prefix,
-            key_hash=key_hash,
-            user=user,
-            expires_at=expires_at,
-            tenant=tenant,
-        )
+        with transaction.atomic():
+            current_user = User.objects.select_for_update().get(pk=user.pk)
+            if not current_user.is_active:
+                raise ValidationError("Cannot create an API key for an inactive user.")
+
+            full_key, prefix, key_hash = generate_api_key()
+            api_key = cls.objects.create(
+                name=name,
+                prefix=prefix,
+                key_hash=key_hash,
+                user=current_user,
+                expires_at=expires_at,
+                tenant=tenant,
+            )
         return api_key, full_key
 
     @classmethod

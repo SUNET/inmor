@@ -4,7 +4,10 @@ import json
 from datetime import timedelta
 
 import pytest
-from django.test import Client
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.test import Client, RequestFactory
 from django.utils import timezone
 
 from apikeys.models import APIKey, generate_api_key, hash_api_key
@@ -84,6 +87,135 @@ class TestAPIKeyModel:
         assert api_key.is_valid is False
 
     @pytest.mark.django_db
+    def test_key_owned_by_inactive_user_is_invalid(self, user):
+        """Test the runtime validity check includes the owning account state."""
+        user.is_active = False
+        api_key = APIKey(
+            name="Inactive User Key",
+            prefix="inactive",
+            key_hash="unused",
+            user=user,
+        )
+
+        assert api_key.is_active is True
+        assert api_key.is_valid is False
+
+    @pytest.mark.django_db
+    def test_bulk_user_status_changes_cannot_restore_keys(self, user):
+        """Test bulk deactivation and reactivation cannot restore an API key."""
+        api_key, plaintext = APIKey.create_key(name="Bulk Revoked Key", user=user)
+
+        User.objects.filter(pk=user.pk).update(is_active=False)
+        api_key.refresh_from_db()
+        assert api_key.is_active is False
+
+        User.objects.filter(pk=user.pk).update(is_active=True)
+        assert APIKey.authenticate(plaintext) is None
+
+    @pytest.mark.django_db
+    def test_direct_insert_rejects_inactive_owner(self, user):
+        """Test direct ORM inserts cannot create a key for an inactive owner."""
+        _, prefix, key_hash = generate_api_key()
+        User.objects.filter(pk=user.pk).update(is_active=False)
+
+        with pytest.raises(IntegrityError, match="require an active user"):
+            with transaction.atomic():
+                APIKey.objects.create(
+                    name="Rejected Inactive Owner Key",
+                    prefix=prefix,
+                    key_hash=key_hash,
+                    user=user,
+                )
+
+        assert not APIKey.objects.filter(name="Rejected Inactive Owner Key").exists()
+
+    @pytest.mark.django_db
+    def test_bulk_reassignment_rejects_inactive_owner(self, user):
+        """Test bulk updates cannot reassign an API key to an inactive owner."""
+        api_key, _ = APIKey.create_key(name="Owner Reassignment Key", user=user)
+        inactive_user = User.objects.create_user(username="inactive-reassignment", is_active=False)
+
+        with pytest.raises(IntegrityError, match="require an active user"):
+            with transaction.atomic():
+                APIKey.objects.filter(pk=api_key.pk).update(user=inactive_user)
+
+        api_key.refresh_from_db()
+        assert api_key.user == user
+
+    @pytest.mark.django_db
+    def test_deactivating_user_revokes_all_owned_keys(self, user):
+        """Test deactivating a user permanently revokes all of their API keys."""
+        first_key, _ = APIKey.create_key(name="First Key", user=user)
+        second_key, _ = APIKey.create_key(name="Second Key", user=user)
+        other_user = User.objects.create_user(username="other-key-owner")
+        other_key, _ = APIKey.create_key(name="Other User Key", user=other_user)
+
+        user.is_active = False
+        user.save()
+
+        first_key.refresh_from_db()
+        second_key.refresh_from_db()
+        other_key.refresh_from_db()
+        assert first_key.is_active is False
+        assert second_key.is_active is False
+        assert other_key.is_active is True
+
+    @pytest.mark.django_db
+    def test_reactivating_user_does_not_reactivate_keys(self, user):
+        """Test reactivating an account does not restore its revoked API keys."""
+        api_key, plaintext = APIKey.create_key(name="Revoked User Key", user=user)
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+
+        api_key.refresh_from_db()
+        assert api_key.is_active is False
+        assert APIKey.authenticate(plaintext) is None
+
+    @pytest.mark.django_db
+    def test_key_creation_rejects_inactive_user(self, user):
+        """Test key creation rejects a stale instance of an inactive owner."""
+        stale_user = User.objects.get(pk=user.pk)
+        User.objects.filter(pk=user.pk).update(is_active=False)
+        assert stale_user.is_active is True
+
+        with pytest.raises(ValidationError, match="inactive user"):
+            APIKey.create_key(name="Dormant Key", user=stale_user)
+
+        assert not APIKey.objects.filter(name="Dormant Key").exists()
+
+    @pytest.mark.django_db
+    def test_revoked_key_cannot_be_reactivated_with_save(self, user):
+        """Test saving a revoked key as active is rejected permanently."""
+        api_key, plaintext = APIKey.create_key(name="Save Revocation Key", user=user)
+        api_key.is_active = False
+        api_key.save(update_fields=["is_active"])
+
+        api_key.is_active = True
+        with pytest.raises(IntegrityError, match="cannot be reactivated"):
+            with transaction.atomic():
+                api_key.save(update_fields=["is_active"])
+
+        api_key.refresh_from_db()
+        assert api_key.is_active is False
+        assert APIKey.authenticate(plaintext) is None
+
+    @pytest.mark.django_db
+    def test_revoked_key_cannot_be_reactivated_with_bulk_update(self, user):
+        """Test bulk updates cannot reactivate a revoked API key."""
+        api_key, plaintext = APIKey.create_key(name="Bulk Revocation Key", user=user)
+        APIKey.objects.filter(pk=api_key.pk).update(is_active=False)
+
+        with pytest.raises(IntegrityError, match="cannot be reactivated"):
+            with transaction.atomic():
+                APIKey.objects.filter(pk=api_key.pk).update(is_active=True)
+
+        api_key.refresh_from_db()
+        assert api_key.is_active is False
+        assert APIKey.authenticate(plaintext) is None
+
+    @pytest.mark.django_db
     def test_authenticate_valid_key(self, user):
         """Test authentication with a valid API key."""
         api_key, plaintext = APIKey.create_key(
@@ -128,6 +260,21 @@ class TestAPIKeyModel:
 
         result = APIKey.authenticate(plaintext)
         assert result is None
+
+    @pytest.mark.django_db
+    def test_authenticate_inactive_users_key(self, user):
+        """Test authentication rejects a key when its owner is inactive."""
+        api_key, plaintext = APIKey.create_key(
+            name="Inactive User Auth Key",
+            user=user,
+        )
+        User.objects.filter(pk=user.pk).update(is_active=False)
+
+        result = APIKey.authenticate(plaintext)
+
+        assert result is None
+        api_key.refresh_from_db()
+        assert api_key.last_used_at is None
 
     @pytest.mark.django_db
     def test_last_used_updated(self, user):
@@ -188,6 +335,27 @@ class TestAPIKeyAuthentication:
         assert response.status_code == 200
 
     @pytest.mark.django_db
+    def test_api_access_denied_when_key_owner_is_inactive(self, user):
+        """Test API access is denied when the key owner is inactive."""
+        api_key, plaintext = APIKey.create_key(
+            name="Inactive User API Key",
+            user=user,
+        )
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        api_key.refresh_from_db()
+        assert api_key.is_active is False
+
+        client = Client()
+        response = client.get(
+            "/api/v1/trustmarktypes",
+            HTTP_X_API_KEY=plaintext,
+        )
+
+        assert response.status_code == 401
+
+    @pytest.mark.django_db
     def test_api_access_with_invalid_key(self, db):
         """Test API access with an invalid API key."""
         client = Client()
@@ -230,6 +398,45 @@ class TestAPIKeyAuthentication:
         """Test that session authentication still works."""
         response = auth_client.get("/api/v1/trustmarktypes")
         assert response.status_code == 200
+
+
+class TestAPIKeyAdmin:
+    """Tests for irreversible revocation in the Django admin."""
+
+    @pytest.mark.django_db
+    def test_existing_key_active_state_is_readonly(self, user):
+        """Test the admin cannot expose a control that restores an existing key."""
+        from django.contrib import admin
+
+        from apikeys.admin import APIKeyAdmin
+
+        api_key, _ = APIKey.create_key(name="Admin Readonly Key", user=user)
+        model_admin = APIKeyAdmin(APIKey, admin.site)
+        request = RequestFactory().get("/admin/apikeys/apikey/")
+
+        readonly_fields = model_admin.get_readonly_fields(request=request, obj=api_key)
+
+        assert "is_active" in readonly_fields
+
+    @pytest.mark.django_db
+    def test_admin_rejects_key_for_inactive_user(self, auth_client):
+        """Test the admin add form rejects an inactive key owner."""
+        inactive_user = User.objects.create_user(username="inactive-key-owner", is_active=False)
+
+        response = auth_client.post(
+            "/admin/apikeys/apikey/add/",
+            data={
+                "name": "Rejected Admin Key",
+                "user": inactive_user.pk,
+                "tenant": "default",
+                "is_active": "on",
+                "_save": "Save",
+            },
+        )
+
+        assert response.status_code == 200
+        assert b"Cannot create an API key for an inactive user." in response.content
+        assert not APIKey.objects.filter(name="Rejected Admin Key").exists()
 
 
 class TestAPIKeyManagementCommand:
@@ -290,6 +497,29 @@ class TestAPIKeyManagementCommand:
             call_command("apikey", "create", "--username", "nobody", stdout=StringIO())
 
     @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        ("command", "arguments"),
+        [
+            ("apikey", ["create", "--username", "testuser"]),
+            ("create_api_key", ["--username", "testuser"]),
+        ],
+    )
+    def test_create_commands_reject_inactive_user(self, user, command, arguments):
+        """Test both creation commands reject inactive key owners without output."""
+        from io import StringIO
+
+        from django.core.management import call_command, CommandError
+
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        out = StringIO()
+
+        with pytest.raises(CommandError, match="inactive user"):
+            call_command(command, *arguments, stdout=out)
+
+        assert out.getvalue() == ""
+
+    @pytest.mark.django_db
     def test_apikey_list(self, user):
         """Test listing API keys for a user."""
         from io import StringIO
@@ -313,7 +543,6 @@ class TestAPIKeyManagementCommand:
         """Test listing all API keys across users."""
         from io import StringIO
 
-        from django.contrib.auth.models import User
         from django.core.management import call_command
 
         user2 = User.objects.create_user(username="otheruser", password="pass123")
