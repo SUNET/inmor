@@ -54,7 +54,7 @@ def test_federation_get_pins_validated_public_address(monkeypatch, settings):
     assert len(captured) == 1  # redirects stay disabled
     assert str(captured[0].url) == "https://8.8.8.8/path?value=1"
     assert captured[0].headers["Host"] == "federation.example"
-    assert captured[0].extensions["sni_hostname"] == "federation.example"
+    assert captured[0].extensions["sni_hostname"] == b"federation.example"
 
 
 @pytest.mark.parametrize(

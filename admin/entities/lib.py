@@ -103,7 +103,7 @@ def _federation_get(url: str, timeout: float = 10.0) -> httpx.Response:
             pinned_url,
             headers={"Host": host_header},
             timeout=timeout,
-            extensions={"sni_hostname": ascii_hostname},
+            extensions={"sni_hostname": ascii_hostname.encode("ascii")},
         )
         try:
             return _HTTP_CLIENT.send(request)

@@ -3523,17 +3523,18 @@ fn validate_entity_type(etype: &str) -> Result<(), &'static str> {
     }
 }
 
-/// Validates a URL for federation use: HTTPS scheme, no private IPs.
-/// When `allow_http` is true (development mode), all checks are relaxed.
-/// SSRF gate + scheme allowlist for outbound federation URLs.
+/// Validates URL-level federation policy before a request is built.
+/// Development mode relaxes only the HTTPS and private-address restrictions;
+/// credentials, fragments, malformed URLs, and missing hosts remain blocked.
+/// DNS names are validated and pinned by `FederationDnsResolver` at the
+/// connection boundary, avoiding a second preflight lookup.
 ///
 /// Failures are classified as `FetchError`:
-/// * URL parse / scheme block / no host / private-IP block are *permanent*
+/// * URL parse / scheme block / no host / literal private-IP block are *permanent*
 ///   — no amount of retrying changes the answer, and propagating them as
 ///   transient would let callers burn retries on a policy denial.
-/// * DNS resolution failure (incl. empty resolution) is *transient* — a
-///   resolver hiccup is exactly the kind of thing §10.5 says to retry.
-async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> {
+/// Resolver failures are classified at the transport boundary.
+fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> {
     let parsed = url::Url::parse(url_str).map_err(|e| {
         anyhow::Error::new(FetchError::permanent(format!(
             "Invalid URL '{url_str}': {e}"
@@ -3546,46 +3547,6 @@ async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> 
         )))
     })?;
 
-    // In development mode, skip DNS/IP validation
-    if allow_http {
-        return Ok(());
-    }
-
-    let host = parsed
-        .host_str()
-        .expect("destination validation requires a host");
-
-    // 3. Resolve DNS and check all IPs
-    let port = parsed.port_or_known_default().unwrap_or(443);
-    let addr = format!("{}:{}", host, port);
-    let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&addr)
-        .await
-        .map_err(|e| {
-            // DNS failures (incl. SERVFAIL, timeout, no nameservers) are
-            // transient per §10.5.
-            anyhow::Error::new(FetchError::transient(
-                None,
-                format!("DNS resolution failed for '{host}': {e}"),
-            ))
-        })?
-        .collect();
-
-    if resolved.is_empty() {
-        return Err(anyhow::Error::new(FetchError::transient(
-            None,
-            format!("DNS resolution returned no addresses for '{host}'"),
-        )));
-    }
-
-    for sock_addr in &resolved {
-        if is_private_ip(&sock_addr.ip()) {
-            return Err(anyhow::Error::new(FetchError::permanent(format!(
-                "Blocked request to private/internal IP {} (resolved from '{host}')",
-                sock_addr.ip()
-            ))));
-        }
-    }
-
     Ok(())
 }
 
@@ -3593,7 +3554,7 @@ async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> 
 /// shared HTTP client (timeouts/redirect limit/pool), and `MAX_RESPONSE_BYTES` cap as
 /// `get_query`. Used to call external trust mark issuers' `/trust_mark_status` endpoint.
 pub async fn post_form_query(url: &str, form: &[(&str, &str)]) -> Result<String> {
-    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
+    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed))?;
     let response = HTTP_CLIENT
         .post(url)
         .form(form)
@@ -3700,10 +3661,10 @@ pub async fn get_query(url: &str) -> Result<String> {
 /// One attempt of the get_query pipeline: SSRF gate -> HTTP request ->
 /// body drain. Returns a typed `FetchError` (wrapped in `anyhow::Error`)
 /// so the retry loop can decide permanent-vs-transient. Body-read failures
-/// and DNS hiccups inside the SSRF gate both surface as transient and
-/// participate in the retry loop.
+/// and DNS hiccups from the connection-time resolver both surface as
+/// transient and participate in the retry loop.
 async fn try_one_fetch(url: &str) -> Result<String> {
-    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
+    validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed))?;
     let response = HTTP_CLIENT
         .get(url)
         .send()
@@ -5151,9 +5112,9 @@ mod ssrf_tests {
         assert!(error.to_string().contains("private/internal"));
     }
 
-    #[tokio::test]
-    async fn test_validate_rejects_http() {
-        let result = validate_federation_url("http://example.com/foo", false).await;
+    #[test]
+    fn test_validate_rejects_http() {
+        let result = validate_federation_url("http://example.com/foo", false);
         assert!(result.is_err());
         assert!(
             result
@@ -5163,17 +5124,17 @@ mod ssrf_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_validate_allows_http_when_configured() {
+    #[test]
+    fn test_validate_allows_http_when_configured() {
         // With allow_http=true, HTTP scheme should not be rejected
-        let result = validate_federation_url("http://example.com/foo", true).await;
-        // Should succeed (allow_http skips all checks after scheme)
+        let result = validate_federation_url("http://example.com/foo", true);
+        // Should succeed (development mode permits HTTP destinations)
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_validate_rejects_non_http_schemes() {
-        let result = validate_federation_url("ftp://example.com/foo", false).await;
+    #[test]
+    fn test_validate_rejects_non_http_schemes() {
+        let result = validate_federation_url("ftp://example.com/foo", false);
         assert!(result.is_err());
         assert!(
             result
@@ -5182,28 +5143,27 @@ mod ssrf_tests {
                 .contains("only HTTPS allowed")
         );
 
-        let result = validate_federation_url("file:///etc/passwd", false).await;
+        let result = validate_federation_url("file:///etc/passwd", false);
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_validate_rejects_private_ips() {
-        // localhost resolves to 127.0.0.1
-        let result = validate_federation_url("https://127.0.0.1/foo", false).await;
+    #[test]
+    fn test_validate_rejects_private_ips() {
+        let result = validate_federation_url("https://127.0.0.1/foo", false);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("private/internal"));
     }
 
-    #[tokio::test]
-    async fn test_validate_allows_private_ips_in_dev_mode() {
+    #[test]
+    fn test_validate_allows_private_ips_in_dev_mode() {
         // With allow_http=true (dev mode), private IPs should be allowed
-        let result = validate_federation_url("https://127.0.0.1/foo", true).await;
+        let result = validate_federation_url("https://127.0.0.1/foo", true);
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_validate_rejects_invalid_url() {
-        let result = validate_federation_url("not-a-url", false).await;
+    #[test]
+    fn test_validate_rejects_invalid_url() {
+        let result = validate_federation_url("not-a-url", false);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
