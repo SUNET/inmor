@@ -78,9 +78,10 @@ class APIKeyAdmin(admin.ModelAdmin):
 
     def is_valid_display(self, obj: APIKey) -> str:
         """Display validity status with color."""
-        if obj.is_valid:
-            return format_html('<span style="color: green;">Valid</span>')
-        return format_html('<span style="color: red;">Invalid</span>')
+        is_valid = obj.is_valid
+        color = "green" if is_valid else "red"
+        status = "Valid" if is_valid else "Invalid"
+        return format_html('<span style="color: {};">{}</span>', color, status)
 
     is_valid_display.short_description = "Status"  # type: ignore[attr-defined]
 

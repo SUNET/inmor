@@ -1,4 +1,39 @@
 
+<a id='changelog-unreleased'></a>
+# Unreleased
+
+## Breaking changes
+
+- The Admin now runs on Django 6.1 and continues to require Python 3.13.
+- All bundled Docker Compose configurations now use PostgreSQL 15 instead of
+  PostgreSQL 14. Existing database volumes must be backed up and converted with
+  `pg_upgrade` before this version is started; see
+  `docs/postgresql-upgrade.rst` for the named-volume and development
+  bind-mount procedures.
+
+## Changed
+
+- Refreshed and relocked all Admin Python dependencies using a fixed
+  2026-08-24 UTC `exclude-newer` cutoff, providing a three-day package cooling
+  period at update time.
+- Kept PySAML2 at 7.5.0 until its newer pyOpenSSL constraint is compatible with
+  the current Cryptography release.
+- Python setup and test recipes now use the checked-in uv lock file. Ruff keeps
+  its historical default rule set explicit, while new pre-1.0 ty diagnostics
+  remain visible as warnings.
+- CI now tests with Python 3.13 and PostgreSQL 15 and uses the dynamically
+  published PostgreSQL service port.
+- Updated the Admin's generated settings, URL, ASGI, and WSGI documentation
+  references for Django 6.1.
+
+## Fixed
+
+- The API-key validity column in Django Admin now supplies interpolation
+  arguments to `format_html()`, as required by Django 6, instead of raising a
+  `TypeError` while rendering the list page.
+- Corrected the Trust Anchor build step label and PostgreSQL service-port
+  expression in the GitHub Actions workflow.
+
 <a id='changelog-0.4.1'></a>
 # 0.4.1 — 2026-05-28
 

@@ -50,7 +50,9 @@ services:
 
   db:
     restart: always
-    image: postgres:14-alpine
+    # Existing PostgreSQL 14 volumes must be converted first. See
+    # docs/postgresql-upgrade.rst before starting this PostgreSQL 15 service.
+    image: postgres:15-alpine
     shm_size: 1024mb
     networks:
       - inmor-net

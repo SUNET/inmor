@@ -1,4 +1,4 @@
-django
+django>=6,<7
 django-types
 black
 ruff
@@ -7,7 +7,9 @@ django-extensions
 django-debug-toolbar
 pytz
 psycopg2-binary
-pysaml2
+# PySAML2 7.5.1+ caps pyOpenSSL below 24.3, which is incompatible
+# with current Cryptography releases. Remove once upstream relaxes it.
+pysaml2==7.5.0
 djangosaml2
 django-redis
 jwcrypto
