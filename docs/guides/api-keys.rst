@@ -23,6 +23,7 @@ Each API key is:
 
 * Tied to a specific Django user account
 * Usable only while both the key and its user account are active
+* Created only for active user accounts
 * Stored as a SHA-256 hash (the plaintext is shown only once at creation)
 * Optionally time-limited with an expiry date
 * Revocable at any time
@@ -153,9 +154,9 @@ Revoking Keys
 
 To revoke a single key:
 
-1. Click on the key in the admin list
-2. Uncheck **Is active**
-3. Click **Save**
+1. Select the key using its checkbox
+2. Choose **Revoke selected API keys** from the action dropdown
+3. Click **Go**
 
 To revoke multiple keys at once:
 
@@ -191,8 +192,8 @@ The authentication flow:
 5. The ``last_used_at`` timestamp is updated
 
 Disabling a user permanently deactivates all of that user's existing API keys.
-Keys created for an already-inactive user are also inactive. Re-enabling the
-user never reactivates these keys.
+New keys cannot be created for an inactive user. Re-enabling the user never
+reactivates old keys; create a new key instead.
 
 The API router in ``inmoradmin/api.py`` uses ``combined_auth`` to support API
 keys for direct callers and sessions already established by django-allauth for

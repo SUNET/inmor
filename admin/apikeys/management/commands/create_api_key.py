@@ -6,6 +6,7 @@ Usage:
 """
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
 from apikeys.models import APIKey
@@ -38,7 +39,10 @@ class Command(BaseCommand):
         except User.DoesNotExist:
             raise CommandError(f"User '{username}' does not exist")
 
-        _, plaintext_key = APIKey.create_key(name=key_name, user=user)
+        try:
+            _, plaintext_key = APIKey.create_key(name=key_name, user=user)
+        except ValidationError as error:
+            raise CommandError("; ".join(error.messages)) from error
 
         # Print only the key so it can be captured by scripts
         self.stdout.write(plaintext_key)
