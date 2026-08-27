@@ -43,12 +43,12 @@ def test_federation_get_pins_validated_public_address(monkeypatch, settings):
     )
     captured = []
 
-    def send(request):
+    def send(_client, request):
         """Capture the pinned request and return a redirect without following it."""
         captured.append(request)
         return httpx.Response(302, headers={"Location": "http://127.0.0.1/"}, request=request)
 
-    monkeypatch.setattr(lib._HTTP_CLIENT, "send", send)
+    monkeypatch.setattr(httpx.Client, "send", send)
 
     response = lib._federation_get("https://federation.example/path?value=1")
 
@@ -150,6 +150,88 @@ def test_federation_get_allows_public_ipv6(monkeypatch, settings, address):
     assert addresses == [address]
 
 
+def test_federation_get_does_not_replay_cookies_between_origins(monkeypatch, settings):
+    """Keep cookies isolated when separate origins resolve to the same IP."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443))
+        ],
+    )
+    captured = []
+    clients = []
+    real_client = httpx.Client
+
+    def handler(request):
+        """Set a cookie on the first origin and capture both pinned requests."""
+        captured.append(request)
+        headers = {"Set-Cookie": "session=secret; Path=/"} if len(captured) == 1 else {}
+        return httpx.Response(200, headers=headers)
+
+    def client_with_test_transport(*args, **kwargs):
+        """Inject the test transport while retaining the production factory."""
+        kwargs["transport"] = httpx.MockTransport(handler)
+        client = real_client(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(lib.httpx, "Client", client_with_test_transport)
+
+    lib._federation_get("https://first.example/path")
+    lib._federation_get("https://second.example/path")
+
+    assert captured[0].headers["Host"] == "first.example"
+    assert captured[1].headers["Host"] == "second.example"
+    assert "Cookie" not in captured[1].headers
+    assert len(clients) == 2
+    assert clients[0] is not clients[1]
+    assert all(client.is_closed for client in clients)
+
+
+def test_federation_get_retries_validated_addresses(monkeypatch, settings):
+    """Retry validated addresses without changing the original Host or SNI."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("1.1.1.1", 443)),
+        ],
+    )
+    captured = []
+
+    def handler(request):
+        """Fail the first address and return a response from the second."""
+        captured.append(request)
+        if len(captured) == 1:
+            raise httpx.ConnectError("first address failed", request=request)
+        return httpx.Response(200, text="ok")
+
+    def new_client(timeout):
+        """Create a fetch-scoped client using the deterministic test transport."""
+        return httpx.Client(
+            transport=httpx.MockTransport(handler),
+            follow_redirects=False,
+            trust_env=False,
+            timeout=timeout,
+        )
+
+    monkeypatch.setattr(lib, "_new_federation_client", new_client)
+
+    response = lib._federation_get("https://federation.example/path")
+
+    assert response.text == "ok"
+    assert [str(request.url) for request in captured] == [
+        "https://8.8.8.8/path",
+        "https://1.1.1.1/path",
+    ]
+    assert all(request.headers["Host"] == "federation.example" for request in captured)
+    assert all(request.extensions["sni_hostname"] == "federation.example" for request in captured)
+
+
 def test_federation_get_preserves_explicit_development_mode(monkeypatch, settings):
     """Allow explicit local HTTP destinations only in development mode."""
     settings.FEDERATION_FETCH_ALLOW_HTTP = True
@@ -162,12 +244,12 @@ def test_federation_get_preserves_explicit_development_mode(monkeypatch, setting
     )
     captured = []
 
-    def send(request):
+    def send(_client, request):
         """Capture the development request and return a successful response."""
         captured.append(request)
         return httpx.Response(200, text="ok", request=request)
 
-    monkeypatch.setattr(lib._HTTP_CLIENT, "send", send)
+    monkeypatch.setattr(httpx.Client, "send", send)
 
     response = lib._federation_get("http://ta:8080/fetch")
 

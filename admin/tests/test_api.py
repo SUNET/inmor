@@ -44,8 +44,8 @@ def test_fetch_config_blocks_private_destination(
         ],
     )
     monkeypatch.setattr(
-        "entities.lib._HTTP_CLIENT.send",
-        lambda request: pytest.fail("blocked destination reached the transport"),
+        "entities.lib.httpx.Client.send",
+        lambda _client, request: pytest.fail("blocked destination reached the transport"),
     )
 
     response = auth_client.post(

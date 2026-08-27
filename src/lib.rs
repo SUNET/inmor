@@ -3430,7 +3430,7 @@ fn nat64_embedded_ipv4(address: &std::net::Ipv6Addr) -> Option<std::net::Ipv4Add
 /// `Policy::limited(5)` therefore means rejecting only once the count exceeds
 /// five, not when it reaches five.
 fn redirect_limit_exceeded(previous_count: usize) -> bool {
-    previous_count >= MAX_FEDERATION_REDIRECTS
+    previous_count > MAX_FEDERATION_REDIRECTS
 }
 
 /// Synchronous URL checks used for both initial URLs and every redirect.

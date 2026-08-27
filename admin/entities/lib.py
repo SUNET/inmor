@@ -22,14 +22,6 @@ INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
 
 logger = logging.getLogger(__name__)
 
-# Pinned URLs use the resolved IP as HTTPX's pool key. Do not retain those
-# connections across requests for different TLS hostnames that share an IP.
-_HTTP_CLIENT = httpx.Client(
-    follow_redirects=False,
-    trust_env=False,
-    timeout=10.0,
-    limits=httpx.Limits(max_keepalive_connections=0),
-)
 _WELL_KNOWN_PATH = "/.well-known/openid-federation"
 _PUBLIC_IPV6_NETWORK = ip_network("2000::/3")
 _PUBLIC_NAT64_NETWORK = ip_network("64:ff9b::/96")
@@ -37,6 +29,16 @@ _PUBLIC_NAT64_NETWORK = ip_network("64:ff9b::/96")
 
 class SubordinateRequest(BaseModel):
     entity: str
+
+
+def _new_federation_client(timeout: float) -> httpx.Client:
+    """Create a fetch-scoped client so cookies and pools cannot cross origins."""
+    return httpx.Client(
+        follow_redirects=False,
+        trust_env=False,
+        timeout=timeout,
+        limits=httpx.Limits(max_keepalive_connections=0),
+    )
 
 
 def _is_public_federation_address(address: IPv4Address | IPv6Address) -> bool:
@@ -110,22 +112,23 @@ def _federation_get(url: str, timeout: float = 10.0) -> httpx.Response:
         host_header = f"{host_header}:{port}"
 
     last_error: httpx.TransportError | None = None
-    for address in addresses:
-        pinned_host = f"[{address}]" if ":" in address else address
-        pinned_url = urlunsplit(
-            (parsed.scheme, f"{pinned_host}:{port}", parsed.path or "/", parsed.query, "")
-        )
-        request = _HTTP_CLIENT.build_request(
-            "GET",
-            pinned_url,
-            headers={"Host": host_header},
-            timeout=timeout,
-            extensions={"sni_hostname": ascii_hostname},
-        )
-        try:
-            return _HTTP_CLIENT.send(request)
-        except httpx.TransportError as error:
-            last_error = error
+    with _new_federation_client(timeout) as client:
+        for address in addresses:
+            pinned_host = f"[{address}]" if ":" in address else address
+            pinned_url = urlunsplit(
+                (parsed.scheme, f"{pinned_host}:{port}", parsed.path or "/", parsed.query, "")
+            )
+            request = client.build_request(
+                "GET",
+                pinned_url,
+                headers={"Host": host_header},
+                timeout=timeout,
+                extensions={"sni_hostname": ascii_hostname},
+            )
+            try:
+                return client.send(request)
+            except httpx.TransportError as error:
+                last_error = error
 
     assert last_error is not None
     raise last_error
