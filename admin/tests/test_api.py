@@ -288,6 +288,30 @@ def test_trustmark_create_with_additional_claims(auth_client: Client, loadredis)
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("protected_claim", ("iss", "sub", "iat", "exp", "trust_mark_type"))
+def test_trustmark_create_rejects_protected_additional_claim(auth_client, protected_claim):
+    """Reject Trust Mark claim collisions before creating a database record."""
+    from trustmarks.models import TrustMark
+
+    domain = f"https://blocked-{protected_claim}.example"
+    response = auth_client.post(
+        "/api/v1/trustmarks",
+        data=json.dumps(
+            {
+                "tmt": 2,
+                "domain": domain,
+                "additional_claims": {protected_claim: "attacker-controlled"},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 422
+    assert protected_claim in response.content.decode()
+    assert not TrustMark.objects.filter(domain=domain).exists()
+
+
+@pytest.mark.django_db
 def test_trustmark_update_additional_claims(auth_client: Client, loadredis):
     """Test updating a trustmark's additional_claims and verify changes in JWT payload."""
     domain = "https://fakerp2.labb.sunet.se"
@@ -335,6 +359,25 @@ def test_trustmark_update_additional_claims(auth_client: Client, loadredis):
     payload = get_payload(jwt_token)
     # Verify the claim is removed from the JWT payload
     assert payload.get("ref") is None
+
+
+@pytest.mark.django_db
+def test_trustmark_update_rejects_protected_claim_without_changes(auth_client):
+    """Leave an existing Trust Mark unchanged when an update collides with `exp`."""
+    from trustmarks.models import TrustMark
+
+    trust_mark = TrustMark.objects.get(id=1)
+    original = (trust_mark.additional_claims, trust_mark.mark, trust_mark.expire_at)
+
+    response = auth_client.put(
+        f"/api/v1/trustmarks/{trust_mark.id}",
+        data=json.dumps({"additional_claims": {"exp": 4102444800}}),
+        content_type="application/json",
+    )
+
+    trust_mark.refresh_from_db()
+    assert response.status_code == 422
+    assert (trust_mark.additional_claims, trust_mark.mark, trust_mark.expire_at) == original
 
 
 @pytest.mark.django_db
@@ -561,6 +604,35 @@ def test_add_subordinate_with_key(auth_client: Client, loadredis, clean_subordin
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "protected_claim",
+    ("iss", "sub", "iat", "exp", "jwks", "metadata", "metadata_policy"),
+)
+def test_subordinate_create_rejects_protected_additional_claim(auth_client, protected_claim):
+    """Reject subordinate claim collisions before fetching or persisting the entity."""
+    from entities.models import Subordinate
+
+    entity_id = f"https://blocked-{protected_claim}.example"
+    response = auth_client.post(
+        "/api/v1/subordinates",
+        data=json.dumps(
+            {
+                "entityid": entity_id,
+                "metadata": {},
+                "forced_metadata": {},
+                "jwks": {},
+                "additional_claims": {protected_claim: "attacker-controlled"},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 422
+    assert protected_claim in response.content.decode()
+    assert not Subordinate.objects.filter(entityid=entity_id).exists()
+
+
+@pytest.mark.django_db
 def test_add_subordinate_with_key_twice(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
     "Tests adding subordinate"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
@@ -729,6 +801,33 @@ def test_update_subordinate_autorenew(auth_client: Client, loadredis, clean_subo
     assert response.status_code == 200
     updated = response.json()
     assert updated.get("autorenew") is False
+
+
+@pytest.mark.django_db
+def test_subordinate_update_rejects_protected_claim_without_changes(auth_client):
+    """Leave an existing subordinate unchanged when an update collides with `sub`."""
+    from entities.models import Subordinate
+
+    subordinate = Subordinate.objects.order_by("id").first()
+    assert subordinate is not None
+    original = (subordinate.additional_claims, subordinate.statement)
+
+    response = auth_client.post(
+        f"/api/v1/subordinates/{subordinate.id}",
+        data=json.dumps(
+            {
+                "metadata": {},
+                "forced_metadata": {},
+                "jwks": {},
+                "additional_claims": {"sub": "https://attacker.example"},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    subordinate.refresh_from_db()
+    assert response.status_code == 422
+    assert (subordinate.additional_claims, subordinate.statement) == original
 
 
 @pytest.mark.django_db

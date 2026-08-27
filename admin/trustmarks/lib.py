@@ -8,6 +8,7 @@ from jwcrypto import jwt
 from jwcrypto.common import json_decode
 from pydantic import BaseModel
 
+from common.claims import validate_trust_mark_additional_claims
 from common.signing import create_signed_jwt
 
 
@@ -38,15 +39,16 @@ def add_trustmark(
     """
     # Based on https://openid.net/specs/openid-federation-1_0.html#name-trust-marks
 
-    # This is the data we care for now
-    sub_data = {"iss": settings.TRUSTMARK_PROVIDER}
+    additional_claims = validate_trust_mark_additional_claims(additional_claims)
+
+    # Merge extensions first, then set claims that are authoritative for this issuer.
+    sub_data = dict(additional_claims or {})
+    sub_data["iss"] = settings.TRUSTMARK_PROVIDER
     sub_data["sub"] = entity
     now = datetime.now()
     exp = now + timedelta(hours=expiry)
     sub_data["iat"] = now.timestamp()
     sub_data["exp"] = exp.timestamp()
-    if additional_claims:
-        sub_data.update(additional_claims)
     sub_data["trust_mark_type"] = trustmarktype
 
     key = settings.SIGNING_PRIVATE_KEY

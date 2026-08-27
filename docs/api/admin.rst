@@ -341,7 +341,8 @@ Issues a new trust mark to an entity.
    * - ``additional_claims``
      - object
      - No
-     - Extra claims to include in the JWT
+     - Extra claims to include in the JWT; cannot contain ``iss``, ``sub``, ``iat``, ``exp``, or
+       ``trust_mark_type``
 
 **Response (201 Created):**
 
@@ -488,7 +489,8 @@ Update Trust Mark
    * - ``additional_claims``
      - object
      - No
-     - Extra claims to include in the JWT (triggers re-signing)
+     - Extra claims to include in the JWT (triggers re-signing); issuer-controlled claims are
+       rejected
 
 Setting ``active`` to ``false`` revokes the trust mark. The entity will
 no longer appear in trust mark lists, and status checks will return "revoked".
@@ -592,7 +594,8 @@ Registers a new subordinate entity.
    * - ``additional_claims``
      - object
      - No
-     - Extra claims for the subordinate statement
+     - Extra claims for the subordinate statement; cannot contain ``iss``, ``sub``, ``iat``,
+       ``exp``, ``jwks``, ``metadata``, or ``metadata_policy``
 
 **Validation:**
 
@@ -748,7 +751,7 @@ the entity configuration before creating a new signed statement.
    * - ``additional_claims``
      - object
      - No
-     - Extra claims for the subordinate statement
+     - Extra claims for the subordinate statement; issuer-controlled claims are rejected
 
 Renew Subordinate
 ^^^^^^^^^^^^^^^^^^
