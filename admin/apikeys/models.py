@@ -85,8 +85,8 @@ class APIKey(models.Model):
 
     @property
     def is_valid(self) -> bool:
-        """Check if the API key is currently valid."""
-        if not self.is_active:
+        """Check whether the key and its owning account are active and unexpired."""
+        if not self.is_active or not self.user.is_active:
             return False
         if self.expires_at and timezone.now() > self.expires_at:
             return False
@@ -120,6 +120,7 @@ class APIKey(models.Model):
             key_hash=key_hash,
             user=user,
             expires_at=expires_at,
+            is_active=user.is_active,
             tenant=tenant,
         )
         return api_key, full_key
