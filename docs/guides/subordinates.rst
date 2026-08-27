@@ -213,6 +213,10 @@ Add custom claims to the subordinate statement:
        }
      }'
 
+The issuer-controlled claims ``iss``, ``sub``, ``iat``, ``exp``, ``jwks``, ``metadata``, and
+``metadata_policy`` are not allowed in ``additional_claims``. Use ``forced_metadata`` for
+TA-controlled metadata.
+
 Custom Validity Period
 ^^^^^^^^^^^^^^^^^^^^^^
 

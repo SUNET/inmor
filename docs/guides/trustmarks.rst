@@ -136,7 +136,9 @@ Add custom claims to the trust mark JWT:
        }
      }'
 
-The ``additional_claims`` appear directly in the trust mark JWT payload:
+The ``additional_claims`` appear directly in the trust mark JWT payload. The issuer-controlled
+claims ``iss``, ``sub``, ``iat``, ``exp``, and ``trust_mark_type`` are not allowed in
+``additional_claims``:
 
 .. code-block:: json
 

@@ -17,6 +17,10 @@ This document describes how the inmor admin module implements the [OpenID Federa
 | `ref` | OPTIONAL | ✅ Via `additional_claims` |
 | `delegation` | OPTIONAL | ✅ Via `additional_claims` |
 
+`additional_claims` accepts extension claims such as `logo_uri`, `ref`, and `delegation`. It
+rejects `iss`, `sub`, `iat`, `exp`, and `trust_mark_type`, which are controlled by the Trust Mark
+issuer.
+
 ### Trust Mark JWT Type Header
 
 Per Section 7:
@@ -79,6 +83,10 @@ token_data = create_signed_jwt(sub_data, key, "entity-statement+jwt")
 | `constraints` | OPTIONAL | ✅ Via `additional_claims` |
 | `metadata_policy_crit` | OPTIONAL | ✅ Via `additional_claims` |
 | `source_endpoint` | OPTIONAL | ✅ Via `additional_claims` |
+
+`additional_claims` accepts extension claims such as `constraints`, `metadata_policy_crit`, and
+`source_endpoint`. It rejects the issuer-controlled `iss`, `sub`, `iat`, `exp`, `jwks`, `metadata`,
+and `metadata_policy` claims.
 
 ### Subordinate Storage
 

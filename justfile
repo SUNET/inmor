@@ -34,10 +34,9 @@ lint-python: venv
   # The Python code is not packaged, so imports are currently
   # relative to the admin/ directory.
   # We don't check api_demo directory.
-  . .venv/bin/activate && \
-  ty check .  --exclude api_demo && \
-  ruff format --check && \
-  ruff check .
+  uv run ty check . --exclude api_demo
+  uv run ruff format --check
+  uv run ruff check .
 
 # To check for TypeScript errors in frontend
 [working-directory: 'admin/frontend']

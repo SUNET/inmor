@@ -24,10 +24,15 @@ from entities.lib import (
 from entities.models import Subordinate
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 from redis.client import Redis
 from trustmarks.lib import add_trustmark, get_expiry
 from trustmarks.models import TrustMark, TrustMarkType
+
+from common.claims import (
+    validate_subordinate_additional_claims,
+    validate_trust_mark_additional_claims,
+)
 
 from .auth import auth_router, combined_auth
 
@@ -102,7 +107,10 @@ class TrustMarkSchema(Schema):
     valid_for: int | None = None
     renewal_time: int | None = None
     active: bool | None = None
-    additional_claims: dict[str, Any] | None = None
+    additional_claims: Annotated[
+        dict[str, Any] | None,
+        AfterValidator(validate_trust_mark_additional_claims),
+    ] = None
 
 
 class TrustMarkOutSchema(Schema):
@@ -137,7 +145,9 @@ class TrustMarkUpdateSchema(Schema):
     ] = None
     active: Annotated[bool | None, Field(description="If the TrustMarkType is active.")] = None
     additional_claims: Annotated[
-        dict[str, Any] | None, Field(description="Current additional claims for the TrustMark.")
+        dict[str, Any] | None,
+        AfterValidator(validate_trust_mark_additional_claims),
+        Field(description="Current additional claims for the TrustMark."),
     ] = None
 
 
@@ -183,6 +193,7 @@ class EntityTypeSchema(Schema):
     active: bool | None = True
     additional_claims: Annotated[
         dict[str, Any] | None,
+        AfterValidator(validate_subordinate_additional_claims),
         Field(description="Additional claims for an Entity which shows in subordinate statement."),
     ] = None
 
@@ -197,6 +208,7 @@ class EntityTypeUpdateSchema(Schema):
     active: bool | None = True
     additional_claims: Annotated[
         dict[str, Any] | None,
+        AfterValidator(validate_subordinate_additional_claims),
         Field(description="Additional claims for an Entity which shows in subordinate statement."),
     ] = None
 

@@ -16,6 +16,7 @@ from oidfpolicy import apply_policy, merge_policies
 from pydantic import BaseModel
 from redis import Redis
 
+from common.claims import validate_subordinate_additional_claims
 from common.signing import create_signed_jwt
 
 INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
@@ -323,17 +324,16 @@ def create_subordinate_statement(
     forced_metadata: dict[str, Any] | None,
     additional_claims: dict[str, Any] | None = None,
 ) -> str:
-    """Creates a signed Subordinate Statement"""
-    # This is the data we care for now
-    sub_data = {"iss": settings.TA_DOMAIN}
+    """Create a signed subordinate statement with authoritative core claims."""
+    additional_claims = validate_subordinate_additional_claims(additional_claims)
+
+    # Merge extensions first, then set claims that are authoritative for this issuer.
+    sub_data = dict(additional_claims or {})
+    sub_data["iss"] = settings.TA_DOMAIN
     sub_data["sub"] = entityid
     # Add any forced metadata if available
     if forced_metadata is not None:
         sub_data["metadata"] = forced_metadata
-
-    # Any non-mandatory additional claims will be added in the subordinate statement.
-    if additional_claims:
-        sub_data.update(additional_claims)
 
     # This is the metadata policy of TA defined in the settings.py
     if settings.POLICY_DOCUMENT.get("metadata_policy", {}):
