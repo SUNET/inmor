@@ -3,7 +3,7 @@ import logging
 import os
 import socket
 from datetime import datetime, timedelta
-from ipaddress import ip_address
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from typing import Any, cast
 from urllib.parse import SplitResult, urlparse, urlsplit, urlunsplit
 
@@ -31,10 +31,27 @@ _HTTP_CLIENT = httpx.Client(
     limits=httpx.Limits(max_keepalive_connections=0),
 )
 _WELL_KNOWN_PATH = "/.well-known/openid-federation"
+_PUBLIC_IPV6_NETWORK = ip_network("2000::/3")
+_PUBLIC_NAT64_NETWORK = ip_network("64:ff9b::/96")
 
 
 class SubordinateRequest(BaseModel):
     entity: str
+
+
+def _is_public_federation_address(address: IPv4Address | IPv6Address) -> bool:
+    """Return whether an address is safe for a production federation fetch."""
+    if isinstance(address, IPv4Address):
+        return address.is_global and not address.is_multicast and not address.is_reserved
+    if address in _PUBLIC_NAT64_NETWORK:
+        embedded = IPv4Address(address.packed[-4:])
+        return embedded.is_global and not embedded.is_multicast and not embedded.is_reserved
+    return (
+        address in _PUBLIC_IPV6_NETWORK
+        and address.is_global
+        and not address.is_multicast
+        and not address.is_reserved
+    )
 
 
 def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
@@ -69,7 +86,7 @@ def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
             resolved_ip = ip_address(normalized)
         except ValueError as error:
             raise ValueError(f"DNS returned an invalid address for {parsed.hostname}") from error
-        if not allow_http and (not resolved_ip.is_global or resolved_ip.is_multicast):
+        if not allow_http and not _is_public_federation_address(resolved_ip):
             raise ValueError(f"Federation URL resolves to private/internal address {resolved_ip}")
         canonical = str(resolved_ip)
         if canonical not in addresses:
@@ -103,7 +120,7 @@ def _federation_get(url: str, timeout: float = 10.0) -> httpx.Response:
             pinned_url,
             headers={"Host": host_header},
             timeout=timeout,
-            extensions={"sni_hostname": ascii_hostname.encode("ascii")},
+            extensions={"sni_hostname": ascii_hostname},
         )
         try:
             return _HTTP_CLIENT.send(request)

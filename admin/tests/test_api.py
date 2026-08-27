@@ -28,6 +28,7 @@ data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 def test_fetch_config_blocks_private_destination(
     auth_client: Client, monkeypatch, settings, url, expected_message
 ):
+    """Reject private fetch targets before the API reaches the transport."""
     settings.FEDERATION_FETCH_ALLOW_HTTP = False
     monkeypatch.setattr(
         socket,

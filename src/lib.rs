@@ -3355,6 +3355,10 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 || a >= 224 // multicast, reserved, broadcast
         }
         IpAddr::V6(v6) => {
+            let public_nat64_destination =
+                nat64_embedded_ipv4(v6).is_some_and(|v4| !is_private_ip(&IpAddr::V4(v4)));
+            let global_unicast = public_nat64_destination
+                || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x2000, 0, 0, 0, 0, 0, 0, 0), 3);
             let ietf_protocol_assignment =
                 ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23);
             let globally_routable_ietf_exception = *v6
@@ -3376,7 +3380,8 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                     std::net::Ipv6Addr::new(0x2001, 0x30, 0, 0, 0, 0, 0, 0),
                     28,
                 );
-            v6.is_loopback()       // ::1
+            !global_unicast
+            || v6.is_loopback()       // ::1
             || v6.is_unspecified() // ::
             || v6.to_ipv4().is_some_and(|v4| is_private_ip(&IpAddr::V4(v4)))
             || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x64, 0xff9b, 1, 0, 0, 0, 0, 0), 48)
@@ -3395,6 +3400,7 @@ fn is_private_ip(ip: &IpAddr) -> bool {
     }
 }
 
+/// Returns whether an IPv6 address belongs to the supplied network prefix.
 fn ipv6_has_prefix(
     address: &std::net::Ipv6Addr,
     network: std::net::Ipv6Addr,
@@ -3402,6 +3408,22 @@ fn ipv6_has_prefix(
 ) -> bool {
     let mask = u128::MAX << (128 - prefix_len);
     u128::from(*address) & mask == u128::from(network) & mask
+}
+
+/// Extracts the IPv4 destination encoded by the globally reachable NAT64
+/// well-known prefix. The local-use `64:ff9b:1::/48` prefix is excluded.
+fn nat64_embedded_ipv4(address: &std::net::Ipv6Addr) -> Option<std::net::Ipv4Addr> {
+    if !ipv6_has_prefix(
+        address,
+        std::net::Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 0, 0, 0),
+        96,
+    ) {
+        return None;
+    }
+    let octets = address.octets();
+    Some(std::net::Ipv4Addr::new(
+        octets[12], octets[13], octets[14], octets[15],
+    ))
 }
 
 /// Reqwest includes the initial request in `Attempt::previous()`. Matching
@@ -3455,6 +3477,7 @@ fn validate_federation_destination(
 struct FederationDnsResolver;
 
 impl reqwest::dns::Resolve for FederationDnsResolver {
+    /// Resolves a host and rejects every non-public address before connection.
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let host = name.as_str().to_owned();
         Box::pin(async move {
@@ -5064,18 +5087,24 @@ mod ssrf_tests {
         assert!(is_private_ip(&"2002::1".parse().unwrap()));
         assert!(is_private_ip(&"3fff::1".parse().unwrap()));
         assert!(is_private_ip(&"5f00::1".parse().unwrap()));
+        assert!(is_private_ip(&"4000::1".parse().unwrap()));
+        assert!(is_private_ip(&"fec0::1".parse().unwrap()));
+        assert!(is_private_ip(&"64:ff9b::7f00:1".parse().unwrap()));
         // Public IPv6
         assert!(!is_private_ip(&"2001:3::1".parse().unwrap()));
         assert!(!is_private_ip(&"2607:f8b0:4004:800::200e".parse().unwrap()));
+        assert!(!is_private_ip(&"64:ff9b::5db8:d822".parse().unwrap()));
     }
 
     #[test]
+    /// Confirms the custom redirect policy preserves reqwest's five-hop limit.
     fn test_redirect_limit_matches_reqwest_limited_five() {
         assert!(!redirect_limit_exceeded(5));
         assert!(redirect_limit_exceeded(6));
     }
 
     #[test]
+    /// Rejects redirect destinations that can bypass the federation SSRF policy.
     fn test_redirect_destination_rejects_ssrf_bypasses() {
         for target in [
             "http://example.com/next",
@@ -5093,6 +5122,7 @@ mod ssrf_tests {
     }
 
     #[test]
+    /// Retains the explicit private-address exception used by development.
     fn test_redirect_destination_preserves_development_mode() {
         for target in ["http://127.0.0.1/next", "https://[::1]/next"] {
             let parsed = url::Url::parse(target).unwrap();
@@ -5101,6 +5131,7 @@ mod ssrf_tests {
     }
 
     #[tokio::test]
+    /// Rejects internal DNS answers at reqwest's connection boundary.
     async fn test_connection_resolver_rejects_internal_dns() {
         use reqwest::dns::Resolve;
 
