@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import socket
 from typing import Any
 
 import pytest
@@ -14,6 +15,47 @@ from entities.lib import self_validate
 
 
 data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("url", "expected_message"),
+    [
+        ("https://internal.example#ignored", "query or fragment"),
+        ("https://internal.example", "private/internal"),
+    ],
+)
+def test_fetch_config_blocks_private_destination(
+    auth_client: Client, monkeypatch, settings, url, expected_message
+):
+    """Reject private fetch targets before the API reaches the transport."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                ("127.0.0.1", 443),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "entities.lib.httpx.Client.send",
+        lambda _client, request: pytest.fail("blocked destination reached the transport"),
+    )
+
+    response = auth_client.post(
+        "/api/v1/subordinates/fetch-config",
+        data=json.dumps({"url": url}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert expected_message in response.json()["message"]
 
 
 def get_payload(token_str: str):

@@ -1,7 +1,9 @@
 import json
 import os
+import socket
 from typing import Any
 
+import httpx
 import pytest
 from django.test import TestCase
 from jwcrypto import jwt
@@ -27,6 +29,262 @@ def test_fetch_entity_configuration_with_keys():
     keys = metadata["openid_relying_party"]["jwks"]
     metadata.pop("openid_relying_party")
     _ = lib.fetch_entity_configuration("https://fakerp0.labb.sunet.se", keys)
+
+
+def test_federation_get_pins_validated_public_address(monkeypatch, settings):
+    """Connect to the validated address while retaining the HTTP and TLS host."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443))
+        ],
+    )
+    captured = []
+
+    def send(_client, request):
+        """Capture the pinned request and return a redirect without following it."""
+        captured.append(request)
+        return httpx.Response(302, headers={"Location": "http://127.0.0.1/"}, request=request)
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+
+    response = lib._federation_get("https://federation.example/path?value=1")
+
+    assert response.status_code == 302
+    assert len(captured) == 1  # redirects stay disabled
+    assert str(captured[0].url) == "https://8.8.8.8/path?value=1"
+    assert captured[0].headers["Host"] == "federation.example"
+    assert captured[0].extensions["sni_hostname"] == "federation.example"
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["127.0.0.1", "169.254.169.254", "10.0.0.1", "::ffff:127.0.0.1", "ff02::1"],
+)
+def test_federation_get_rejects_internal_addresses(monkeypatch, settings, address):
+    """Reject non-public IPv4, IPv6, and mapped DNS answers."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 443))
+        ],
+    )
+
+    with pytest.raises(ValueError, match="private/internal"):
+        lib._federation_get("https://federation.example/path")
+
+
+def test_federation_get_rejects_any_internal_dns_answer(monkeypatch, settings):
+    """Reject a DNS response if any returned address is internal."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443)),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="private/internal"):
+        lib._federation_get("https://federation.example/path")
+
+
+@pytest.mark.parametrize("address", ["4000::1", "fec0::1"])
+def test_federation_get_rejects_reserved_ipv6(monkeypatch, settings, address):
+    """Reject reserved and deprecated IPv6 space that Python marks global."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 443))
+        ],
+    )
+
+    with pytest.raises(ValueError, match="private/internal"):
+        lib._resolve_federation_destination("https://federation.example/path")
+
+
+@pytest.mark.parametrize("address", ["64:ff9b::7f00:1", "64:ff9b:1::1"])
+def test_federation_get_rejects_unsafe_nat64(monkeypatch, settings, address):
+    """Reject NAT64 addresses targeting private IPv4 or local-use space."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 443))
+        ],
+    )
+
+    with pytest.raises(ValueError, match="private/internal"):
+        lib._resolve_federation_destination("https://federation.example/path")
+
+
+@pytest.mark.parametrize("address", ["2607:f8b0:4004:800::200e", "64:ff9b::5db8:d822"])
+def test_federation_get_allows_public_ipv6(monkeypatch, settings, address):
+    """Retain ordinary public IPv6 and public-destination NAT64 addresses."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                socket.AF_INET6,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                (address, 443),
+            )
+        ],
+    )
+
+    _, addresses = lib._resolve_federation_destination("https://federation.example/path")
+
+    assert addresses == [address]
+
+
+def test_federation_get_does_not_replay_cookies_between_origins(monkeypatch, settings):
+    """Keep cookies isolated when separate origins resolve to the same IP."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443))
+        ],
+    )
+    captured = []
+    clients = []
+    real_client = httpx.Client
+
+    def handler(request):
+        """Set a cookie on the first origin and capture both pinned requests."""
+        captured.append(request)
+        headers = {"Set-Cookie": "session=secret; Path=/"} if len(captured) == 1 else {}
+        return httpx.Response(200, headers=headers)
+
+    def client_with_test_transport(*args, **kwargs):
+        """Inject the test transport while retaining the production factory."""
+        kwargs["transport"] = httpx.MockTransport(handler)
+        client = real_client(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(lib.httpx, "Client", client_with_test_transport)
+
+    lib._federation_get("https://first.example/path")
+    lib._federation_get("https://second.example/path")
+
+    assert captured[0].headers["Host"] == "first.example"
+    assert captured[1].headers["Host"] == "second.example"
+    assert "Cookie" not in captured[1].headers
+    assert len(clients) == 2
+    assert clients[0] is not clients[1]
+    assert all(client.is_closed for client in clients)
+
+
+def test_federation_get_retries_validated_addresses(monkeypatch, settings):
+    """Retry validated addresses without changing the original Host or SNI."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("1.1.1.1", 443)),
+        ],
+    )
+    captured = []
+
+    def handler(request):
+        """Fail the first address and return a response from the second."""
+        captured.append(request)
+        if len(captured) == 1:
+            raise httpx.ConnectError("first address failed", request=request)
+        return httpx.Response(200, text="ok")
+
+    def new_client(timeout):
+        """Create a fetch-scoped client using the deterministic test transport."""
+        return httpx.Client(
+            transport=httpx.MockTransport(handler),
+            follow_redirects=False,
+            trust_env=False,
+            timeout=timeout,
+        )
+
+    monkeypatch.setattr(lib, "_new_federation_client", new_client)
+
+    response = lib._federation_get("https://federation.example/path")
+
+    assert response.text == "ok"
+    assert [str(request.url) for request in captured] == [
+        "https://8.8.8.8/path",
+        "https://1.1.1.1/path",
+    ]
+    assert all(request.headers["Host"] == "federation.example" for request in captured)
+    assert all(request.extensions["sni_hostname"] == "federation.example" for request in captured)
+
+
+def test_federation_get_preserves_explicit_development_mode(monkeypatch, settings):
+    """Allow explicit local HTTP destinations only in development mode."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = True
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 8080))
+        ],
+    )
+    captured = []
+
+    def send(_client, request):
+        """Capture the development request and return a successful response."""
+        captured.append(request)
+        return httpx.Response(200, text="ok", request=request)
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+
+    response = lib._federation_get("http://ta:8080/fetch")
+
+    assert response.text == "ok"
+    assert str(captured[0].url) == "http://127.0.0.1:8080/fetch"
+    assert captured[0].headers["Host"] == "ta:8080"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com/path",
+        "https://user@example.com/path",
+        "https://example.com/path#fragment",
+    ],
+)
+def test_federation_get_rejects_unsafe_urls(monkeypatch, settings, url):
+    """Reject unsafe schemes, credentials, and fragments before DNS lookup."""
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: pytest.fail("DNS used"))
+
+    with pytest.raises(ValueError):
+        lib._federation_get(url)
+
+
+def test_entity_configuration_url_rejects_query_and_fragment():
+    """Append the well-known path without query or fragment truncation."""
+    for entity_id in ["https://example.com?target=other", "https://example.com/#ignored"]:
+        with pytest.raises(ValueError, match="query or fragment"):
+            lib._entity_configuration_url(entity_id)
+
+    assert (
+        lib._entity_configuration_url("https://example.com/tenant/")
+        == "https://example.com/tenant/.well-known/openid-federation"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,11 @@
 import json
 import logging
 import os
+import socket
 from datetime import datetime, timedelta
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from typing import Any, cast
-from urllib.parse import urlparse
+from urllib.parse import SplitResult, urlparse, urlsplit, urlunsplit
 
 import httpx
 from django.conf import settings
@@ -20,9 +22,125 @@ INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
 
 logger = logging.getLogger(__name__)
 
+_WELL_KNOWN_PATH = "/.well-known/openid-federation"
+_PUBLIC_IPV6_NETWORK = ip_network("2000::/3")
+_PUBLIC_NAT64_NETWORK = ip_network("64:ff9b::/96")
+
 
 class SubordinateRequest(BaseModel):
     entity: str
+
+
+def _new_federation_client(timeout: float) -> httpx.Client:
+    """Create a fetch-scoped client so cookies and pools cannot cross origins."""
+    return httpx.Client(
+        follow_redirects=False,
+        trust_env=False,
+        timeout=timeout,
+        limits=httpx.Limits(max_keepalive_connections=0),
+    )
+
+
+def _is_public_federation_address(address: IPv4Address | IPv6Address) -> bool:
+    """Return whether an address is safe for a production federation fetch."""
+    if isinstance(address, IPv4Address):
+        return address.is_global and not address.is_multicast and not address.is_reserved
+    if address in _PUBLIC_NAT64_NETWORK:
+        embedded = IPv4Address(address.packed[-4:])
+        return embedded.is_global and not embedded.is_multicast and not embedded.is_reserved
+    return (
+        address in _PUBLIC_IPV6_NETWORK
+        and address.is_global
+        and not address.is_multicast
+        and not address.is_reserved
+    )
+
+
+def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
+    """Validate a federation URL and return the exact addresses to connect to."""
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError(f"Invalid federation URL: {error}") from error
+
+    allow_http = settings.FEDERATION_FETCH_ALLOW_HTTP
+    if parsed.scheme != "https" and not (allow_http and parsed.scheme == "http"):
+        raise ValueError("Federation fetches require HTTPS")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Federation URLs must not contain credentials")
+    if parsed.fragment:
+        raise ValueError("Federation URLs must not contain fragments")
+    if not parsed.hostname:
+        raise ValueError("Federation URL has no host")
+
+    port = port or (443 if parsed.scheme == "https" else 80)
+    try:
+        answers = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except OSError as error:
+        raise ValueError(f"DNS resolution failed for {parsed.hostname}: {error}") from error
+
+    addresses: list[str] = []
+    for answer in answers:
+        address = answer[4][0]
+        normalized = address.split("%", 1)[0]
+        try:
+            resolved_ip = ip_address(normalized)
+        except ValueError as error:
+            raise ValueError(f"DNS returned an invalid address for {parsed.hostname}") from error
+        if not allow_http and not _is_public_federation_address(resolved_ip):
+            raise ValueError(f"Federation URL resolves to private/internal address {resolved_ip}")
+        canonical = str(resolved_ip)
+        if canonical not in addresses:
+            addresses.append(canonical)
+
+    if not addresses:
+        raise ValueError(f"DNS resolution returned no addresses for {parsed.hostname}")
+    return parsed, addresses
+
+
+def _federation_get(url: str, timeout: float = 10.0) -> httpx.Response:
+    """GET a federation URL without redirects or a DNS validation/use race."""
+    parsed, addresses = _resolve_federation_destination(url)
+    hostname = parsed.hostname
+    assert hostname is not None
+    ascii_hostname = hostname.encode("idna").decode("ascii")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    default_port = 443 if parsed.scheme == "https" else 80
+    host_header = f"[{ascii_hostname}]" if ":" in ascii_hostname else ascii_hostname
+    if parsed.port is not None and port != default_port:
+        host_header = f"{host_header}:{port}"
+
+    last_error: httpx.TransportError | None = None
+    with _new_federation_client(timeout) as client:
+        for address in addresses:
+            pinned_host = f"[{address}]" if ":" in address else address
+            pinned_url = urlunsplit(
+                (parsed.scheme, f"{pinned_host}:{port}", parsed.path or "/", parsed.query, "")
+            )
+            request = client.build_request(
+                "GET",
+                pinned_url,
+                headers={"Host": host_header},
+                timeout=timeout,
+                extensions={"sni_hostname": ascii_hostname},
+            )
+            try:
+                return client.send(request)
+            except httpx.TransportError as error:
+                last_error = error
+
+    assert last_error is not None
+    raise last_error
+
+
+def _entity_configuration_url(entity_id: str) -> str:
+    """Append the well-known path without allowing query/fragment truncation."""
+    parsed = urlsplit(entity_id)
+    if parsed.query or parsed.fragment:
+        raise ValueError("Entity IDs must not contain a query or fragment")
+    path = f"{parsed.path.rstrip('/')}{_WELL_KNOWN_PATH}"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def fetch_entity_configuration(
@@ -41,7 +159,7 @@ def fetch_entity_configuration(
         keyset = jwk.JWKSet.from_json(keys_str)
     else:
         raise ValueError("Missing JWKS")
-    resp = httpx.get(f"{entityid}/.well-known/openid-federation")
+    resp = _federation_get(_entity_configuration_url(entityid))
     text = resp.text
     jwt_net: JWT = jwt.JWT(jwt=text, key=keyset)
     return jwt_net, keyset, text
@@ -283,7 +401,7 @@ def update_redis_with_subordinate(
 
 def fetch_jwks_from_uri(uri: str) -> JWKSet:
     """Fetch a JWKS from a remote jwks_uri endpoint."""
-    resp = httpx.get(uri, timeout=10)
+    resp = _federation_get(uri)
     resp.raise_for_status()
     return JWKSet.from_json(resp.text)
 
@@ -316,7 +434,7 @@ def self_validate(token: jwt.JWT) -> dict[str, Any]:
 
 def fetch_payload(entity_id: str):
     """Fetches entity and validates and returns payload and JWT token as string"""
-    resp = httpx.get(f"{entity_id}/.well-known/openid-federation")
+    resp = _federation_get(_entity_configuration_url(entity_id))
     if resp.status_code != 200:
         raise Exception(f"Fetching payload returns {resp.status_code} for {entity_id}")
     text = resp.text
@@ -367,7 +485,7 @@ def fetch_subordinate_statements(authority_hints: list[str], entity_id: str, r: 
             # We have a fetch endpoint
             url = f"{fetch_endpoint}/?sub={entity_id}"
             logger.info(f"Fetching subordinate statement: {url}")
-            resp = httpx.get(url)
+            resp = _federation_get(url)
             if resp.status_code != 200:
                 logger.warning(
                     f"Fetching subordinate statement returns {resp.status_code} for {entity_id}"
@@ -419,7 +537,7 @@ def tree_walking(entity_id: str, r: Redis, visited: set[str] | None = None):
         if not list_endpoint:
             logger.warning(f"{entity_id} does not have a list endpoint")
             return visited
-        resp = httpx.get(list_endpoint)
+        resp = _federation_get(list_endpoint)
         subordinates = json.loads(resp.text)
         for subordinate in subordinates:
             if subordinate in visited:
