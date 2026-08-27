@@ -11,16 +11,14 @@ API Documentation UI: ``http://localhost:8000/api/v1/docs``
 Authentication
 --------------
 
-All ``/api/v1/`` endpoints (except auth endpoints) require authentication.
-The API accepts two authentication methods:
+Direct and programmatic access to protected ``/api/v1/`` endpoints requires an
+API key in the ``X-API-Key`` header (see :doc:`../guides/api-keys`). There is no
+password-login API.
 
-* **Session authentication** -- Login via ``/api/v1/auth/login`` and use the
-  session cookie for subsequent requests
-* **API key authentication** -- Pass an ``X-API-Key`` header (see
-  :doc:`../guides/api-keys`)
-
-Both methods grant the same access. Session auth is used by the Vue frontend;
-API keys are intended for scripts and integrations.
+The browser-based Admin UI uses a Django session established by
+django-allauth at ``/accounts/login/``. This ensures that all configured login
+stages, including MFA, complete before a session is created. Browser session
+cookies are not an authentication mechanism for direct API clients.
 
 Authentication metadata
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -34,11 +32,14 @@ is attached to ``request.auth_result`` and persisted by the audit log:
   Session-based requests always use the ``"default"`` tenant.
 * ``api_key_name`` -- name of the API key used (``None`` for session auth).
 
-CSRF is enforced for session-based ``POST``/``PUT``/``PATCH``/``DELETE``
-requests. API-key requests bypass CSRF because they do not rely on cookies.
+CSRF is enforced for Admin UI requests authenticated by a browser session.
+API-key requests do not use cookies and therefore do not require CSRF tokens.
 
-Auth Endpoints
-^^^^^^^^^^^^^^
+Browser Session Support Endpoints
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+These endpoints support the browser-based Admin UI. They do not provide a way
+for direct API clients to exchange a username and password for a session.
 
 .. list-table::
    :header-rows: 1
@@ -51,34 +52,18 @@ Auth Endpoints
      - ``/api/v1/auth/csrf``
      - Get CSRF token (sets cookie)
    * - POST
-     - ``/api/v1/auth/login``
-     - Login with ``{"username": "...", "password": "..."}``
-   * - POST
      - ``/api/v1/auth/logout``
      - Logout and clear session
    * - GET
      - ``/api/v1/auth/me``
      - Get current authenticated user info
 
-**Login Example:**
-
-.. code-block:: bash
-
-   # Get CSRF token
-   curl -c cookies.txt http://localhost:8000/api/v1/auth/csrf
-
-   # Login
-   curl -b cookies.txt -c cookies.txt \
-     -H "Content-Type: application/json" \
-     -H "X-CSRFToken: <token-from-cookie>" \
-     -X POST http://localhost:8000/api/v1/auth/login \
-     -d '{"username": "admin", "password": "password"}'
-
 **API Key Example:**
 
 .. code-block:: bash
 
-   curl -H "X-API-Key: YOUR_KEY_HERE" \
+   export INMOR_API_KEY="YOUR_KEY_HERE"
+   curl -H "X-API-Key: $INMOR_API_KEY" \
         http://localhost:8000/api/v1/trustmarktypes
 
 Trust Mark Types
@@ -158,6 +143,7 @@ Creates a new trust mark type.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarktypes \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmtype": "https://example.com/trustmarks/member",
@@ -383,6 +369,7 @@ Issues a new trust mark to an entity.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarks \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmt": 1,
@@ -649,6 +636,7 @@ The API will:
 
    # Then register with the TA
    curl -X POST http://localhost:8000/api/v1/subordinates \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "entityid": "https://example-rp.com",
@@ -788,7 +776,7 @@ authority hints.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1/renew \
-     -H "Cookie: sessionid=..."
+     -H "X-API-Key: $INMOR_API_KEY"
 
 Fetch Entity Configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -864,6 +852,7 @@ validation failure, or no OpenID Federation configuration found.
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/fetch-config \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"url": "https://example-rp.com"}'
 
@@ -903,7 +892,9 @@ The entity statement includes:
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/api/v1/server/entity
+   curl -X POST \
+     -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/entity
 
 Create Historical Keys JWT
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -930,7 +921,9 @@ stores it in Redis for the ``/historical_keys`` endpoint.
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/api/v1/server/historical_keys
+   curl -X POST \
+     -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/historical_keys
 
 Audit Log
 ---------

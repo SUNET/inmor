@@ -142,8 +142,8 @@ built assets on port 3000.
 Authentication
 --------------
 
-The Admin UI uses session-based authentication with optional Multi-Factor
-Authentication (MFA) support.
+The Admin UI uses a django-allauth browser session with optional Multi-Factor
+Authentication (MFA) support. Direct API clients must use API keys.
 
 .. figure:: /_static/screenshots/mfa-01-login.png
    :alt: Login Page
@@ -154,18 +154,23 @@ Authentication (MFA) support.
 Authentication Flow
 ^^^^^^^^^^^^^^^^^^^
 
-1. **CSRF Token**: On page load, the frontend fetches a CSRF token from
-   ``/api/auth/csrf``
+1. **Authentication Check**: The frontend checks ``/api/v1/auth/me``. An
+   unauthenticated user is redirected to
+   ``/accounts/login/?next=<admin-ui-url>``
 
-2. **Login**: Users authenticate via ``/api/auth/login`` with username/password
+2. **Login**: django-allauth validates the user's primary credentials
 
-3. **MFA Challenge**: If MFA is enabled, user must provide second factor
-   (TOTP code or security key)
+3. **MFA Challenge**: If MFA is enabled, django-allauth requires the configured
+   second factor (TOTP code or security key)
 
-4. **Session**: A session cookie is set for subsequent API requests
+4. **Session**: Only after the complete allauth flow succeeds is a session
+   cookie available to the Admin UI
 
-5. **Auth Check**: The router guard checks ``/api/auth/me`` before each
-   navigation to verify authentication
+5. **Admin API Requests**: The browser sends that session cookie and a CSRF
+   token obtained from ``/api/v1/auth/csrf`` where required
+
+There is no password-login endpoint under ``/api/v1/``. Scripts, integrations,
+and other direct API clients must authenticate with ``X-API-Key``.
 
 For detailed MFA configuration, see :doc:`mfa`.
 

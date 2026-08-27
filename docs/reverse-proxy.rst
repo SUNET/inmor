@@ -49,10 +49,12 @@ Securing the Admin API
    * Add rogue subordinates to the federation
    * Modify or destroy the Trust Anchor configuration
 
-   **At minimum, protect the Admin API with HTTP Basic Authentication.**
+   Direct API callers must send an Inmor API key in ``X-API-Key``. Reverse
+   proxy controls such as HTTP Basic Authentication, IP allowlisting, VPN, or
+   mTLS can provide an additional layer, but do not replace the API key.
 
-Basic Authentication Setup
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+Optional Additional Basic Authentication
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 **nginx**
 
@@ -142,7 +144,7 @@ Create ``/etc/nginx/sites-available/inmor.conf``:
        ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
        ssl_prefer_server_ciphers off;
 
-       # REQUIRED: Basic authentication
+       # Optional: additional Basic authentication at the proxy
        auth_basic "Admin API";
        auth_basic_user_file /etc/nginx/.htpasswd;
 
@@ -200,7 +202,7 @@ If you prefer a single domain with path-based routing:
            proxy_set_header X-Forwarded-Proto $scheme;
        }
 
-       # Admin API (protected with basic auth)
+       # Admin API (Inmor API-key auth, plus optional proxy Basic Auth)
        location /api/ {
            auth_basic "Admin API";
            auth_basic_user_file /etc/nginx/.htpasswd;
@@ -293,7 +295,7 @@ Create ``/etc/apache2/sites-available/inmor.conf`` (Debian/Ubuntu) or
 
        RequestHeader set X-Forwarded-Proto "https"
 
-       # REQUIRED: Basic authentication
+       # Optional: additional Basic authentication at the proxy
        <Location />
            AuthType Basic
            AuthName "Admin API"
@@ -344,7 +346,7 @@ Single Domain Setup (Apache)
        ProxyPassMatch ^/(fetch|list|resolve|trust_mark|trust_mark_list|trust_mark_status|historical_keys|collection)$ http://127.0.0.1:8080/$1
        ProxyPassReverse / http://127.0.0.1:8080/
 
-       # Admin API (protected with basic auth)
+       # Admin API (Inmor API-key auth, plus optional proxy Basic Auth)
        <Location /api/>
            AuthType Basic
            AuthName "Admin API"
@@ -397,7 +399,7 @@ Create ``/etc/caddy/Caddyfile``:
 
    # Admin Portal - Management API (protected)
    admin.federation.example.com {
-       # REQUIRED: Basic authentication
+       # Optional: additional Basic authentication at the proxy
        basicauth {
            admin $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
        }
@@ -455,7 +457,7 @@ Single Domain Setup (Caddy)
            reverse_proxy localhost:8080
        }
 
-       # Admin API (protected with basic auth)
+       # Admin API (Inmor API-key auth, plus optional proxy Basic Auth)
        handle /api/* {
            basicauth {
                admin $2a$14$...
@@ -537,8 +539,8 @@ Security Best Practices
 
 1. **Always Protect Admin API**
 
-   Never expose the Admin API without authentication. Use Basic Auth at minimum,
-   consider IP allowlisting or VPN for additional security.
+   Require Inmor API keys for direct API calls. Always use HTTPS, and consider
+   proxy Basic Auth, IP allowlisting, VPN, or mTLS as additional controls.
 
 2. **Use Strong TLS Configuration**
 
@@ -607,6 +609,9 @@ Testing the Setup
 
       curl "https://federation.example.com/resolve?sub=https://example-rp.com&trust_anchor=https://federation.example.com"
 
-3. Test Admin API with authentication::
+3. Test the Admin API with an Inmor API key. If you enabled the optional proxy
+   Basic Authentication shown above, supply both credentials::
 
-      curl -u admin:password https://admin.federation.example.com/api/v1/trustmarktypes
+      curl -u admin:password \
+        -H "X-API-Key: $INMOR_API_KEY" \
+        https://admin.federation.example.com/api/v1/trustmarktypes

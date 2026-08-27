@@ -5,6 +5,12 @@ Trust marks are signed assertions about entities in the federation.
 They indicate that an entity meets certain criteria or belongs to a
 specific category defined by the trust mark type.
 
+Direct Admin API examples in this guide assume an API key is available::
+
+   export INMOR_API_KEY="YOUR_KEY_HERE"
+
+See :doc:`api-keys` for key creation and management.
+
 Understanding Trust Marks
 -------------------------
 
@@ -27,6 +33,7 @@ Before issuing trust marks, define the trust mark types your federation supports
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarktypes \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmtype": "https://federation.example.com/trustmarks/member",
@@ -85,6 +92,7 @@ Issue a trust mark to an entity:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarks \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmt": 1,
@@ -116,6 +124,7 @@ Add custom claims to the trust mark JWT:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarks \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmt": 1,
@@ -150,6 +159,7 @@ Issue a trust mark with shorter validity than the type default:
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarks \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "tmt": 1,
@@ -169,7 +179,8 @@ List All Trust Marks
 
 .. code-block:: bash
 
-   curl http://localhost:8000/api/v1/trustmarks
+   curl -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/trustmarks
 
 List Trust Marks for an Entity
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -177,6 +188,7 @@ List Trust Marks for an Entity
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/trustmarks/list \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"domain": "https://example-rp.com"}'
 
@@ -187,7 +199,8 @@ Manually renew a trust mark:
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/api/v1/trustmarks/1/renew
+   curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/trustmarks/1/renew
 
 This generates a new JWT with updated ``iat`` and ``exp`` claims while
 preserving all other trust mark properties.
@@ -217,6 +230,7 @@ Revoke a trust mark by setting it to inactive:
 .. code-block:: bash
 
    curl -X PUT http://localhost:8000/api/v1/trustmarks/1 \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"active": false}'
 
@@ -235,6 +249,7 @@ Update the additional claims in a trust mark:
 .. code-block:: bash
 
    curl -X PUT http://localhost:8000/api/v1/trustmarks/1 \
+     -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{
        "additional_claims": {
@@ -444,6 +459,7 @@ Complete workflow for managing trust marks:
    .. code-block:: bash
 
       curl -X POST http://localhost:8000/api/v1/trustmarktypes \
+        -H "X-API-Key: $INMOR_API_KEY" \
         -H "Content-Type: application/json" \
         -d '{
           "tmtype": "https://federation.example.com/trustmarks/verified-rp",
@@ -460,6 +476,7 @@ Complete workflow for managing trust marks:
    .. code-block:: bash
 
       curl -X POST http://localhost:8000/api/v1/trustmarks \
+        -H "X-API-Key: $INMOR_API_KEY" \
         -H "Content-Type: application/json" \
         -d '{
           "tmt": 1,

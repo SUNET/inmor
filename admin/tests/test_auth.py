@@ -99,6 +99,17 @@ class TestAPIAuthEndpoints:
     """Tests for API authentication endpoints."""
 
     @pytest.mark.django_db
+    def test_password_login_endpoint_not_exposed(self, db):
+        """Passwords cannot be exchanged for a session through the API."""
+        client = Client()
+        response = client.post(
+            "/api/v1/auth/login",
+            data='{"username":"testuser","password":"testpass123"}',
+            content_type="application/json",
+        )
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
     def test_csrf_endpoint(self, db):
         """Test CSRF token endpoint."""
         client = Client()

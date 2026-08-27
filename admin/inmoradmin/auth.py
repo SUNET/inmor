@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import logout
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import CsrfViewMiddleware
@@ -151,11 +151,6 @@ class CombinedAuthentication(APIKeyBase):
 combined_auth = [CombinedAuthentication()]
 
 
-class LoginSchema(Schema):
-    username: str
-    password: str
-
-
 class UserSchema(Schema):
     id: int
     username: str
@@ -168,24 +163,9 @@ class MessageSchema(Schema):
     message: str
 
 
-# Auth router for login/logout endpoints (no auth required for these)
+# Browser-session support endpoints. Login is handled exclusively by
+# django-allauth so that its complete authentication flow, including MFA, runs.
 auth_router = Router(tags=["Authentication"])
-
-
-@auth_router.post("/login", response={200: UserSchema, 401: MessageSchema})
-def api_login(request: HttpRequest, data: LoginSchema):
-    """Authenticate user and create session."""
-    user = authenticate(request, username=data.username, password=data.password)
-    if user is not None and isinstance(user, User):
-        login(request, user)
-        return 200, {
-            "id": user.pk,
-            "username": user.username,
-            "email": user.email or "",
-            "is_staff": user.is_staff,
-            "is_superuser": user.is_superuser,
-        }
-    return 401, {"message": "Invalid credentials"}
 
 
 @auth_router.post("/logout", response={200: MessageSchema})
