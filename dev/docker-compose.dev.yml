@@ -91,6 +91,7 @@ services:
     command: /app/docker-entrypoint.sh
     environment:
       - INSIDE_CONTAINER=true
+      - FEDERATION_FETCH_ALLOW_HTTP=true
       # MFA encryption key for TOTP secrets - generate a new key for production with:
       # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       # - MFA_ENCRYPTION_KEY=your-production-key-here

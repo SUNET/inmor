@@ -6,7 +6,7 @@ use log::{debug, warn};
 use sha2::{Digest, Sha256};
 use std::fmt::Display;
 use std::net::IpAddr;
-use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, atomic::AtomicBool};
 
 use actix_web::{HttpRequest, HttpResponse, Responder, error, get, post, web};
 use actix_web_lab::extract::Query;
@@ -54,7 +54,21 @@ lazy_static! {
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
         .pool_max_idle_per_host(10)
-        .redirect(reqwest::redirect::Policy::limited(5))
+        // Environment proxies resolve and connect outside our SSRF boundary.
+        .no_proxy()
+        // The resolver validates and returns the exact addresses reqwest uses,
+        // eliminating the validation-to-connection DNS rebinding window.
+        .dns_resolver(Arc::new(FederationDnsResolver))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if redirect_limit_exceeded(attempt.previous().len()) {
+                return attempt.error("too many redirects");
+            }
+            let allow_http = ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed);
+            match validate_federation_destination(attempt.url(), allow_http) {
+                Ok(()) => attempt.follow(),
+                Err(message) => attempt.error(message),
+            }
+        }))
         .build()
         .expect("Failed to build HTTP client");
 }
@@ -108,6 +122,9 @@ pub fn ensure_signing_key_loaded() {
 
 /// Maximum response body size for outbound federation requests (2 MB).
 const MAX_RESPONSE_BYTES: usize = 2_097_152;
+
+/// Maximum redirects followed by the shared federation client.
+const MAX_FEDERATION_REDIRECTS: usize = 5;
 
 /// Maximum number of retries inside `get_query` before classifying the
 /// failure as a final transient error.
@@ -3316,23 +3333,157 @@ pub async fn get_entity_configruation_as_jwt(entity_id: &str) -> Result<String> 
     return get_query(&url).await;
 }
 
-/// Returns true if the IP address is in a private, loopback, or link-local range.
+/// Returns true if the IP address must not be contacted by a production
+/// federation fetch. Besides private ranges, this covers special-use,
+/// documentation, multicast, and IPv4-mapped IPv6 addresses.
 fn is_private_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            v4.is_loopback()       // 127.0.0.0/8
-            || v4.is_private()     // 10/8, 172.16/12, 192.168/16
-            || v4.is_link_local()  // 169.254/16
-            || v4.is_unspecified() // 0.0.0.0
-            || v4.is_broadcast() // 255.255.255.255
+            let [a, b, c, _] = v4.octets();
+            a == 0                         // current network / unspecified
+                || a == 10                 // private
+                || a == 127                // loopback
+                || (a == 100 && (64..=127).contains(&b)) // shared address space
+                || (a == 169 && b == 254)  // link-local
+                || (a == 172 && (16..=31).contains(&b)) // private
+                || (a == 192 && b == 0 && (c == 0 || c == 2)) // protocol + documentation
+                || (a == 192 && b == 88 && c == 99) // deprecated 6to4 relay
+                || (a == 192 && b == 168)  // private
+                || (a == 198 && (b == 18 || b == 19)) // benchmarking
+                || (a == 198 && b == 51 && c == 100) // documentation
+                || (a == 203 && b == 0 && c == 113) // documentation
+                || a >= 224 // multicast, reserved, broadcast
         }
         IpAddr::V6(v6) => {
+            let ietf_protocol_assignment =
+                ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23);
+            let globally_routable_ietf_exception = *v6
+                == std::net::Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 1)
+                || *v6 == std::net::Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 2)
+                || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x2001, 3, 0, 0, 0, 0, 0, 0), 32)
+                || ipv6_has_prefix(
+                    v6,
+                    std::net::Ipv6Addr::new(0x2001, 4, 0x112, 0, 0, 0, 0, 0),
+                    48,
+                )
+                || ipv6_has_prefix(
+                    v6,
+                    std::net::Ipv6Addr::new(0x2001, 0x20, 0, 0, 0, 0, 0, 0),
+                    28,
+                )
+                || ipv6_has_prefix(
+                    v6,
+                    std::net::Ipv6Addr::new(0x2001, 0x30, 0, 0, 0, 0, 0, 0),
+                    28,
+                );
             v6.is_loopback()       // ::1
             || v6.is_unspecified() // ::
+            || v6.to_ipv4().is_some_and(|v4| is_private_ip(&IpAddr::V4(v4)))
+            || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x64, 0xff9b, 1, 0, 0, 0, 0, 0), 48)
+            || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x100, 0, 0, 0, 0, 0, 0, 0), 64)
+            || (ietf_protocol_assignment && !globally_routable_ietf_exception)
+            || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), 32)
+            || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16)
+            || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20)
+            || ipv6_has_prefix(v6, std::net::Ipv6Addr::new(0x5f00, 0, 0, 0, 0, 0, 0, 0), 16)
             // unique local (fc00::/7) and link-local (fe80::/10)
             || (v6.segments()[0] & 0xfe00) == 0xfc00
             || (v6.segments()[0] & 0xffc0) == 0xfe80
+            || (v6.segments()[0] & 0xff00) == 0xff00 // multicast
+            || (v6.segments()[0] == 0x2001 && v6.segments()[1] == 0x0db8) // documentation
         }
+    }
+}
+
+fn ipv6_has_prefix(
+    address: &std::net::Ipv6Addr,
+    network: std::net::Ipv6Addr,
+    prefix_len: u32,
+) -> bool {
+    let mask = u128::MAX << (128 - prefix_len);
+    u128::from(*address) & mask == u128::from(network) & mask
+}
+
+/// Reqwest includes the initial request in `Attempt::previous()`. Matching
+/// `Policy::limited(5)` therefore means rejecting only once the count exceeds
+/// five, not when it reaches five.
+fn redirect_limit_exceeded(previous_count: usize) -> bool {
+    previous_count > MAX_FEDERATION_REDIRECTS
+}
+
+/// Synchronous URL checks used for both initial URLs and every redirect.
+/// DNS names are checked by `FederationDnsResolver` at connection time.
+fn validate_federation_destination(
+    parsed: &url::Url,
+    allow_http: bool,
+) -> std::result::Result<(), String> {
+    match parsed.scheme() {
+        "https" => {}
+        "http" if allow_http => {}
+        scheme => return Err(format!("Blocked scheme '{scheme}' - only HTTPS allowed")),
+    }
+
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Federation URLs must not contain credentials".to_string());
+    }
+    if parsed.fragment().is_some() {
+        return Err("Federation URLs must not contain fragments".to_string());
+    }
+
+    let host = parsed
+        .host()
+        .ok_or_else(|| "Federation URL has no host".to_string())?;
+    if !allow_http {
+        let literal = match host {
+            url::Host::Ipv4(ip) => Some(IpAddr::V4(ip)),
+            url::Host::Ipv6(ip) => Some(IpAddr::V6(ip)),
+            url::Host::Domain(_) => None,
+        };
+        if literal.as_ref().is_some_and(is_private_ip) {
+            return Err(format!(
+                "Blocked request to private/internal IP {}",
+                literal.expect("literal address is present")
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Resolver installed directly on reqwest so validated addresses are the
+/// addresses used by the connection, including after redirects.
+#[derive(Debug)]
+struct FederationDnsResolver;
+
+impl reqwest::dns::Resolve for FederationDnsResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(|error| {
+                    Box::new(std::io::Error::other(format!(
+                        "DNS resolution failed for '{host}': {error}"
+                    ))) as Box<dyn StdError + Send + Sync>
+                })?
+                .collect();
+            if resolved.is_empty() {
+                return Err(Box::new(std::io::Error::other(format!(
+                    "DNS resolution returned no addresses for '{host}'"
+                ))) as Box<dyn StdError + Send + Sync>);
+            }
+            if !ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)
+                && let Some(blocked) = resolved.iter().find(|addr| is_private_ip(&addr.ip()))
+            {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Blocked request to private/internal IP {} (resolved from '{host}')",
+                        blocked.ip()
+                    ),
+                )) as Box<dyn StdError + Send + Sync>);
+            }
+            Ok(Box::new(resolved.into_iter()) as reqwest::dns::Addrs)
+        })
     }
 }
 
@@ -3389,28 +3540,20 @@ async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> 
         )))
     })?;
 
-    // 1. Scheme check
-    match parsed.scheme() {
-        "https" => {}
-        "http" if allow_http => {}
-        scheme => {
-            return Err(anyhow::Error::new(FetchError::permanent(format!(
-                "Blocked scheme '{scheme}' in URL '{url_str}' — only HTTPS allowed"
-            ))));
-        }
-    }
+    validate_federation_destination(&parsed, allow_http).map_err(|message| {
+        anyhow::Error::new(FetchError::permanent(format!(
+            "{message} in URL '{url_str}'"
+        )))
+    })?;
 
     // In development mode, skip DNS/IP validation
     if allow_http {
         return Ok(());
     }
 
-    // 2. Must have a host
-    let host = parsed.host_str().ok_or_else(|| {
-        anyhow::Error::new(FetchError::permanent(format!(
-            "URL '{url_str}' has no host"
-        )))
-    })?;
+    let host = parsed
+        .host_str()
+        .expect("destination validation requires a host");
 
     // 3. Resolve DNS and check all IPs
     let port = parsed.port_or_known_default().unwrap_or(443);
@@ -3451,7 +3594,12 @@ async fn validate_federation_url(url_str: &str, allow_http: bool) -> Result<()> 
 /// `get_query`. Used to call external trust mark issuers' `/trust_mark_status` endpoint.
 pub async fn post_form_query(url: &str, form: &[(&str, &str)]) -> Result<String> {
     validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
-    let response = HTTP_CLIENT.post(url).form(form).send().await?;
+    let response = HTTP_CLIENT
+        .post(url)
+        .form(form)
+        .send()
+        .await
+        .map_err(|error| classify_transport_error(url, error))?;
     if !response.status().is_success() {
         bail!("POST to '{}' returned status {}", url, response.status());
     }
@@ -3556,12 +3704,11 @@ pub async fn get_query(url: &str) -> Result<String> {
 /// participate in the retry loop.
 async fn try_one_fetch(url: &str) -> Result<String> {
     validate_federation_url(url, ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed)).await?;
-    let response = HTTP_CLIENT.get(url).send().await.map_err(|e| {
-        anyhow::Error::new(FetchError::transient(
-            None,
-            format!("transport error fetching '{url}': {e}"),
-        ))
-    })?;
+    let response = HTTP_CLIENT
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| classify_transport_error(url, error))?;
     let status = response.status();
     if status.is_success() {
         return read_response_body(url, response).await;
@@ -3581,6 +3728,29 @@ async fn try_one_fetch(url: &str) -> Result<String> {
     Err(anyhow::Error::new(FetchError::permanent(format!(
         "HTTP {status} from '{url}'"
     ))))
+}
+
+/// Preserve retry classification while ensuring a redirect-policy or resolver
+/// SSRF denial is never treated as a transient upstream failure.
+fn classify_transport_error(url: &str, error: reqwest::Error) -> anyhow::Error {
+    let message = format!("transport error fetching '{url}': {error}");
+    let mut source: Option<&(dyn StdError + 'static)> = Some(&error);
+    let mut policy_denial = error.is_redirect();
+    while let Some(current) = source {
+        if current
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io_error| io_error.kind() == std::io::ErrorKind::PermissionDenied)
+        {
+            policy_denial = true;
+            break;
+        }
+        source = current.source();
+    }
+    if policy_denial {
+        anyhow::Error::new(FetchError::permanent(message))
+    } else {
+        anyhow::Error::new(FetchError::transient(None, message))
+    }
 }
 
 /// Drain a successful response into a UTF-8 string, enforcing the body cap.
@@ -4904,6 +5074,9 @@ mod ssrf_tests {
         assert!(is_private_ip(&"0.0.0.0".parse().unwrap()));
         // Broadcast
         assert!(is_private_ip(&"255.255.255.255".parse().unwrap()));
+        assert!(is_private_ip(&"100.64.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"198.51.100.1".parse().unwrap()));
+        assert!(is_private_ip(&"224.0.0.1".parse().unwrap()));
         // Public IPs should pass
         assert!(!is_private_ip(&"8.8.8.8".parse().unwrap()));
         assert!(!is_private_ip(&"1.1.1.1".parse().unwrap()));
@@ -4921,9 +5094,61 @@ mod ssrf_tests {
         assert!(is_private_ip(&"fd00::1".parse().unwrap()));
         // Link-local (fe80::/10)
         assert!(is_private_ip(&"fe80::1".parse().unwrap()));
+        assert!(is_private_ip(&"::ffff:127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"ff02::1".parse().unwrap()));
+        assert!(is_private_ip(&"2001:db8::1".parse().unwrap()));
+        assert!(is_private_ip(&"64:ff9b:1::1".parse().unwrap()));
+        assert!(is_private_ip(&"100::1".parse().unwrap()));
+        assert!(is_private_ip(&"2001:2::1".parse().unwrap()));
+        assert!(is_private_ip(&"2002::1".parse().unwrap()));
+        assert!(is_private_ip(&"3fff::1".parse().unwrap()));
+        assert!(is_private_ip(&"5f00::1".parse().unwrap()));
         // Public IPv6
-        assert!(!is_private_ip(&"2001:db8::1".parse().unwrap()));
+        assert!(!is_private_ip(&"2001:3::1".parse().unwrap()));
         assert!(!is_private_ip(&"2607:f8b0:4004:800::200e".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_redirect_limit_matches_reqwest_limited_five() {
+        assert!(!redirect_limit_exceeded(5));
+        assert!(redirect_limit_exceeded(6));
+    }
+
+    #[test]
+    fn test_redirect_destination_rejects_ssrf_bypasses() {
+        for target in [
+            "http://example.com/next",
+            "https://127.0.0.1/internal",
+            "https://[::ffff:127.0.0.1]/internal",
+            "https://user@example.com/next",
+            "https://example.com/next#fragment",
+        ] {
+            let parsed = url::Url::parse(target).unwrap();
+            assert!(
+                validate_federation_destination(&parsed, false).is_err(),
+                "redirect target should be blocked: {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_redirect_destination_preserves_development_mode() {
+        for target in ["http://127.0.0.1/next", "https://[::1]/next"] {
+            let parsed = url::Url::parse(target).unwrap();
+            assert!(validate_federation_destination(&parsed, true).is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connection_resolver_rejects_internal_dns() {
+        use reqwest::dns::Resolve;
+
+        let name = "localhost".parse().unwrap();
+        let error = match FederationDnsResolver.resolve(name).await {
+            Ok(_) => panic!("localhost should not pass the production resolver"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("private/internal"));
     }
 
     #[tokio::test]

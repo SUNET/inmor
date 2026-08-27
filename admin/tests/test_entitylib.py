@@ -1,7 +1,9 @@
 import json
 import os
+import socket
 from typing import Any
 
+import httpx
 import pytest
 from django.test import TestCase
 from jwcrypto import jwt
@@ -27,6 +29,117 @@ def test_fetch_entity_configuration_with_keys():
     keys = metadata["openid_relying_party"]["jwks"]
     metadata.pop("openid_relying_party")
     _ = lib.fetch_entity_configuration("https://fakerp0.labb.sunet.se", keys)
+
+
+def test_federation_get_pins_validated_public_address(monkeypatch, settings):
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443))
+        ],
+    )
+    captured = []
+
+    def send(request):
+        captured.append(request)
+        return httpx.Response(302, headers={"Location": "http://127.0.0.1/"}, request=request)
+
+    monkeypatch.setattr(lib._HTTP_CLIENT, "send", send)
+
+    response = lib._federation_get("https://federation.example/path?value=1")
+
+    assert response.status_code == 302
+    assert len(captured) == 1  # redirects stay disabled
+    assert str(captured[0].url) == "https://8.8.8.8/path?value=1"
+    assert captured[0].headers["Host"] == "federation.example"
+    assert captured[0].extensions["sni_hostname"] == "federation.example"
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["127.0.0.1", "169.254.169.254", "10.0.0.1", "::ffff:127.0.0.1", "ff02::1"],
+)
+def test_federation_get_rejects_internal_addresses(monkeypatch, settings, address):
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 443))
+        ],
+    )
+
+    with pytest.raises(ValueError, match="private/internal"):
+        lib._federation_get("https://federation.example/path")
+
+
+def test_federation_get_rejects_any_internal_dns_answer(monkeypatch, settings):
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443)),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="private/internal"):
+        lib._federation_get("https://federation.example/path")
+
+
+def test_federation_get_preserves_explicit_development_mode(monkeypatch, settings):
+    settings.FEDERATION_FETCH_ALLOW_HTTP = True
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 8080))
+        ],
+    )
+    captured = []
+
+    def send(request):
+        captured.append(request)
+        return httpx.Response(200, text="ok", request=request)
+
+    monkeypatch.setattr(lib._HTTP_CLIENT, "send", send)
+
+    response = lib._federation_get("http://ta:8080/fetch")
+
+    assert response.text == "ok"
+    assert str(captured[0].url) == "http://127.0.0.1:8080/fetch"
+    assert captured[0].headers["Host"] == "ta:8080"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com/path",
+        "https://user@example.com/path",
+        "https://example.com/path#fragment",
+    ],
+)
+def test_federation_get_rejects_unsafe_urls(monkeypatch, settings, url):
+    settings.FEDERATION_FETCH_ALLOW_HTTP = False
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: pytest.fail("DNS used"))
+
+    with pytest.raises(ValueError):
+        lib._federation_get(url)
+
+
+def test_entity_configuration_url_rejects_query_and_fragment():
+    for entity_id in ["https://example.com?target=other", "https://example.com/#ignored"]:
+        with pytest.raises(ValueError, match="query or fragment"):
+            lib._entity_configuration_url(entity_id)
+
+    assert (
+        lib._entity_configuration_url("https://example.com/tenant/")
+        == "https://example.com/tenant/.well-known/openid-federation"
+    )
 
 
 # ---------------------------------------------------------------------------

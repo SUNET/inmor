@@ -34,6 +34,14 @@ DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
 ALLOWED_HOSTS: list[str] = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,admin").split(",")
 
+# Production federation fetches require public HTTPS destinations. Development
+# Compose explicitly opts into HTTP/private services used by its local examples.
+FEDERATION_FETCH_ALLOW_HTTP = os.environ.get("FEDERATION_FETCH_ALLOW_HTTP", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 
 # Application definition
 

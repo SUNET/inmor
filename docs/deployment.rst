@@ -697,6 +697,8 @@ Admin Portal (admin)
      - Description
    * - ``INSIDE_CONTAINER``
      - Set to ``true`` when running in Docker
+   * - ``FEDERATION_FETCH_ALLOW_HTTP``
+     - Allow Admin federation fetches to use HTTP and private addresses. Development only; defaults to ``false``.
    * - ``DB_HOST``
      - PostgreSQL host (default: ``db``)
    * - ``DB_PORT``
