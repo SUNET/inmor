@@ -39,7 +39,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: actions-setup-redis
-        uses: shogo82148/actions-setup-redis@v1.56.1
+        uses: shogo82148/actions-setup-redis@v1.57.0
         with:
           auto-start: false
           distribution: "valkey"
