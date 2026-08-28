@@ -26,23 +26,34 @@ and image details.
 Before changing versions
 ------------------------
 
-Run these commands while the PostgreSQL 14 service is still running::
-
-   # Record the source version. This must print 14.x.
-   docker compose exec -T db postgres --version
-
-   # Back up every database, role, and other global object.
-   docker compose exec -T db pg_dumpall -U postgres > postgres-14-backup.sql
-   test -s postgres-14-backup.sql
-
 The examples use the root ``docker-compose.yml``. If the deployment uses a
 ``-f`` or ``--project-directory`` option, include the same options on every
 ``docker compose`` command below. The development shortcuts are ``just down``
 and ``just up``; the production-build shortcuts are ``just down-prod`` and
 ``just up-prod``.
 
-Keep ``postgres-14-backup.sql`` somewhere outside the PostgreSQL volume. Stop
-all Inmor services so nothing can write to the database during the upgrade::
+First stop the Admin service, which is Inmor's PostgreSQL writer, while leaving
+the PostgreSQL 14 service running. Stop any site-specific services that write
+directly to the database at the same time. Only after writers are quiesced,
+create the final logical backup::
+
+   docker compose stop admin
+
+   # Record the source version. This must print 14.x.
+   docker compose exec -T db postgres --version
+
+   # Back up every database, role, and other global object to a temporary file.
+   docker compose exec -T db pg_dumpall -U postgres \
+     > postgres-14-backup.sql.tmp
+   test -s postgres-14-backup.sql.tmp
+   grep -Fq -- '-- PostgreSQL database cluster dump complete' \
+     postgres-14-backup.sql.tmp
+   mv postgres-14-backup.sql.tmp postgres-14-backup.sql
+
+Do not continue unless every command succeeds and the validated final backup
+exists outside the PostgreSQL volume. Because all writers were stopped before
+``pg_dumpall``, the fallback includes every committed application write. Now
+stop the database and remaining services::
 
    docker compose down
 
@@ -55,7 +66,7 @@ database in a named volume. Find its full Docker name::
    docker volume ls --filter label=com.docker.compose.volume=postgres_data
 
 The name is usually ``inmor_postgres_data``. Substitute the actual name shown
-above for ``<postgres-volume>`` in both commands below. Confirm that the volume
+above for ``<postgres-volume>`` in the commands below. Confirm that the volume
 contains a PostgreSQL 14 cluster::
 
    docker run --rm \
@@ -63,6 +74,13 @@ contains a PostgreSQL 14 cluster::
      busybox:1.37 cat /data/PG_VERSION
 
 The command must print ``14``. Run the one-shot upgrade::
+
+   # Take a cold physical backup after PostgreSQL has stopped.
+   docker run --rm \
+     --volume <postgres-volume>:/data:ro \
+     busybox:1.37 tar -C /data -czf - . \
+     > postgres-14-data.tar.gz
+   test -s postgres-14-data.tar.gz
 
    docker run --rm \
      --volume <postgres-volume>:/var/lib/postgresql/data \
@@ -83,15 +101,19 @@ Development bind-mount deployments
 ----------------------------------
 
 ``dev/docker-compose.dev.yml`` stores PostgreSQL in ``./db``. From the
-repository root, confirm the old major version, preserve a filesystem copy, and
-run the one-shot upgrade::
+repository root, confirm the old major version, preserve a cold physical
+archive, and run the one-shot upgrade::
 
    docker run --rm \
      --volume "$PWD/db:/data:ro" \
      busybox:1.37 cat /data/PG_VERSION
 
    # PG_VERSION must print 14 before continuing.
-   sudo cp -a db db.postgresql-14.backup
+   docker run --rm \
+     --volume "$PWD/db:/data:ro" \
+     busybox:1.37 tar -C /data -czf - . \
+     > postgres-14-data.tar.gz
+   test -s postgres-14-data.tar.gz
 
    docker run --rm \
      --volume "$PWD/db:/var/lib/postgresql/data" \
@@ -121,9 +143,12 @@ After ``PG_VERSION`` reports ``15``, install and start the new Inmor version::
      -c "SHOW server_version;"
    docker compose exec -T admin python manage.py migrate
 
-Check the database and Admin logs before removing the backup. If the upgrade
-fails, keep the new services stopped, restore the original data directory or
-volume from backup, and restart the previous Inmor version with PostgreSQL 14.
+Check the database and Admin logs before removing either backup. If the upgrade
+fails, keep the new services stopped, restore ``postgres-14-data.tar.gz`` into
+an empty data directory or volume, and restart the previous Inmor version with
+PostgreSQL 14. The logical ``postgres-14-backup.sql`` is an additional fallback
+for restoring into a newly initialized PostgreSQL 14 cluster. After link mode
+has started PostgreSQL 15, never attempt to restart the linked old cluster.
 
 For the underlying requirements, options, and recovery behavior, see the
 `PostgreSQL 15 pg_upgrade documentation
