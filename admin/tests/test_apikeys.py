@@ -403,6 +403,25 @@ class TestAPIKeyAuthentication:
 class TestAPIKeyAdmin:
     """Tests for irreversible revocation in the Django admin."""
 
+    @pytest.mark.parametrize(
+        ("is_active", "expected_html"),
+        [
+            (True, '<span style="color: green;">Valid</span>'),
+            (False, '<span style="color: red;">Invalid</span>'),
+        ],
+    )
+    def test_validity_status_renders_with_django_6(self, is_active, expected_html):
+        """Test the status column uses format_html interpolation required by Django 6."""
+        from django.contrib import admin
+
+        from apikeys.admin import APIKeyAdmin
+
+        user = User(username="status-owner", is_active=True)
+        api_key = APIKey(user=user, is_active=is_active)
+        model_admin = APIKeyAdmin(APIKey, admin.site)
+
+        assert str(model_admin.is_valid_display(api_key)) == expected_html
+
     @pytest.mark.django_db
     def test_existing_key_active_state_is_readonly(self, user):
         """Test the admin cannot expose a control that restores an existing key."""

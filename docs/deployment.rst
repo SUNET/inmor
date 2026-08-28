@@ -5,6 +5,13 @@ This guide covers deploying Inmor using Docker Compose for production environmen
 
 .. danger::
 
+   Existing deployments must run ``pg_upgrade`` on every PostgreSQL 14 data
+   volume **before** starting this version's PostgreSQL 15 container. Follow
+   :doc:`postgresql-upgrade`; starting PostgreSQL 15 against an unconverted
+   PostgreSQL 14 volume will fail.
+
+.. danger::
+
    **Security Critical: Protect the Admin API**
 
    The Admin API (port 8000) provides full management access to the Trust Anchor,
@@ -38,7 +45,7 @@ The Docker Compose setup includes 5 services:
 
 * **ta** - Trust Anchor (Rust) on port 8080
 * **admin** - Admin Portal (Django) on port 8000
-* **db** - PostgreSQL 14 database
+* **db** - PostgreSQL 15 database
 * **redis** - Redis 7 for caching and federation data
 * **frontend** - UI for admin work on port 5173
 
@@ -66,7 +73,7 @@ The Docker Compose setup includes 5 services:
            condition: service_healthy
 
      db:
-       image: postgres:14-alpine
+       image: postgres:15-alpine
        ports:
          - "5432:5432"
 
@@ -292,6 +299,11 @@ Mount a persistent volume::
 
    volumes:
      postgres_data:
+
+When moving an existing deployment from PostgreSQL 14 to 15, a persistent
+volume must be converted before the new database service starts. See
+:doc:`postgresql-upgrade` for the required backup, ``pg_upgrade``, verification,
+and rollback procedure.
 
 Database Backup
 ^^^^^^^^^^^^^^^

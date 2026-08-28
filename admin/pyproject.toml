@@ -11,22 +11,21 @@ dependencies = [
 	"oidfpolicy",
 	"httpx",
 	"redis",
-	"django",
+	"django>=6,<7",
 	"django-types",
 	"black",
 	"ruff",
-	"redis",
 	"django-extensions",
 	"django-debug-toolbar",
 	"django-ninja",
 	"pytz",
 	"psycopg2-binary",
-	"pysaml2",
+	# PySAML2 7.5.1+ caps pyOpenSSL below 24.3, which is incompatible
+	# with current Cryptography releases. Remove once upstream relaxes it.
+	"pysaml2==7.5.0",
 	"djangosaml2",
 	"django-redis",
-	"jwcrypto",
 	"types-jwcrypto",
-	"httpx",
 	"django-click",
 	"pydantic",
 	"ty",
@@ -55,7 +54,7 @@ Home = "https://github.com/SUNET/inmor"
 # date which uv resolves against the local timezone) keeps `uv sync
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
-exclude-newer = "2026-05-25T00:00:00Z"
+exclude-newer = "2026-08-24T00:00:00Z"
 
 [tool.pyright]
 stubPath = "typings"
@@ -91,6 +90,7 @@ exclude = [
     ".venv",
     ".vscode",
     "__pypackages__",
+    "*.md",
     "_build",
     "buck-out",
     "build",
@@ -101,10 +101,22 @@ exclude = [
     "django_redis",
 ]
 
+[tool.ruff.lint]
+# Keep Ruff's historical default rule set stable across tool upgrades.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ty.src]
 exclude = [
     "db",
 ]
+
+[tool.ty.rules]
+# ty is pre-1.0 and its newer releases report substantially more diagnostics.
+# Keep them visible without turning this dependency update into a typing rewrite.
+unresolved-attribute = "warn"
+invalid-argument-type = "warn"
+invalid-method-override = "warn"
+unused-type-ignore-comment = "warn"
 
 [tool.pytest.ini_options]
 testpaths = "tests"

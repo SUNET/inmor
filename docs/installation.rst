@@ -31,6 +31,13 @@ Installing just
 Quick Installation
 ------------------
 
+.. danger::
+
+   Upgrading an existing checkout with PostgreSQL 14 data is not a quick-start
+   operation. Complete :doc:`postgresql-upgrade` before running ``just up`` or
+   ``docker compose up`` with this version. New installations with no existing
+   database volume can continue below.
+
 1. Clone the repository::
 
       git clone https://github.com/SUNET/inmor.git
@@ -191,8 +198,8 @@ For local development without Docker:
 
       just venv
 
-   This runs ``uv sync`` in the admin directory to create a virtual environment
-   and install all dependencies.
+   This runs ``uv sync --locked`` in the admin directory to create a virtual
+   environment and install the exact dependency versions from ``uv.lock``.
 
 3. Install the development root CA certificate to the system trust store.
 

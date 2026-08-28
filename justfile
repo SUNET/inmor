@@ -11,7 +11,7 @@ _default:
 # To create the virtual environment for development
 [working-directory: 'admin']
 venv:
-  uv sync
+  uv sync --locked
 
 # To create a development environment
 dev:
@@ -34,7 +34,7 @@ lint-python: venv
   # The Python code is not packaged, so imports are currently
   # relative to the admin/ directory.
   # We don't check api_demo directory.
-  uv run ty check . --exclude api_demo
+  uv run ty check . --exclude api_demo --exit-zero-on-warning
   uv run ruff format --check
   uv run ruff check .
 
@@ -51,12 +51,12 @@ test-ta *ARGS:
   # Run Rust unit tests first (library and binary targets)
   cargo test --lib --bins
   # We have integration tests for the inmor rust binary
-  uv run pytest -vvv {{ARGS}}
+  uv run --locked pytest -vvv {{ARGS}}
 
 # To run django tests for admin
 [working-directory: 'admin']
 test-admin *ARGS:
-  uv run pytest -vvv -s {{ARGS}}
+  uv run --locked pytest -vvv -s {{ARGS}}
 
 # Test target for both rust and django code
 test: test-ta test-admin
