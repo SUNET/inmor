@@ -23,7 +23,7 @@ dependencies = [
 	# PySAML2 7.5.1+ caps pyOpenSSL below 24.3, which is incompatible
 	# with current Cryptography releases. Remove once upstream relaxes it.
 	"pysaml2==7.5.0",
-	"djangosaml2",
+	"djangosaml2 @ git+https://github.com/kushaldas/djangosaml2.git@feat/pygamlastan",
 	"django-redis",
 	"types-jwcrypto",
 	"django-click",
@@ -55,6 +55,8 @@ Home = "https://github.com/SUNET/inmor"
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
 exclude-newer = "2026-08-24T00:00:00Z"
+# The djangosaml2 pygamlastan branch requires pygamlastan >=0.6.0.
+exclude-newer-package = { pygamlastan = "2026-09-24T00:00:00Z" }
 
 [tool.pyright]
 stubPath = "typings"
