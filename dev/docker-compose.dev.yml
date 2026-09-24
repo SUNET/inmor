@@ -47,7 +47,9 @@ services:
       - "8080:8080"
   db:
     restart: always
-    image: postgres:14-alpine
+    # If ./db contains PostgreSQL 14 data, upgrade it first. See
+    # docs/postgresql-upgrade.rst before starting this PostgreSQL 15 service.
+    image: postgres:15-alpine
     shm_size: 1024mb
     networks:
       - inmor-net

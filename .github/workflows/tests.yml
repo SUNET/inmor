@@ -13,7 +13,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:14-alpine
+        image: postgres:15-alpine
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_USER: postgres
@@ -37,6 +37,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
 
       - name: actions-setup-redis
         uses: shogo82148/actions-setup-redis@v1.56.1
@@ -48,7 +50,7 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      - name: Build TA appliation
+      - name: Build TA application
         run: cargo build
 
       - name: Add our CA public certificate to the system trust store
@@ -63,7 +65,8 @@ jobs:
         run: just test-admin
         env:
           # use localhost for the host here because we are running the job on the VM.
-          # If we were running the job on in a container this would be postgres
+          # If we were running the job in a container this would be postgres.
           DB_HOST: localhost
-          DB_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
+          # Use the randomly assigned host port published by the PostgreSQL service.
+          DB_PORT: ${{ job.services.postgres.ports['5432'] }}
           REDIS_LOCATION: "redis://localhost:6088/0"

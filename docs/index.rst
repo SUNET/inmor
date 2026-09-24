@@ -57,6 +57,7 @@ Documentation Contents
 
    installation
    deployment
+   postgresql-upgrade
    reverse-proxy
 
 .. toctree::
@@ -77,6 +78,7 @@ Documentation Contents
    :caption: User Guides
 
    guides/admin-ui
+   guides/audit-logging
    guides/mfa
    guides/api-keys
    guides/trustmarks

@@ -1,4 +1,4 @@
-django
+django>=6,<7
 django-types
 black
 ruff
@@ -7,8 +7,8 @@ django-extensions
 django-debug-toolbar
 pytz
 psycopg2-binary
-pysaml2
-djangosaml2
+# Pin the selected commit from the feat/pygamlastan branch.
+djangosaml2 @ git+https://github.com/kushaldas/djangosaml2.git@5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7
 django-redis
 jwcrypto
 types-jwcrypto
