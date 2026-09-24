@@ -6,7 +6,7 @@ requires-python = ">=3.13"
 exclude-newer = "2026-08-24T00:00:00Z"
 
 [options.exclude-newer-package]
-pygamlastan = "2026-09-24T00:00:00Z"
+pygamlastan = "2026-09-21T00:00:00Z"
 
 [[package]]
 name = "annotated-types"
@@ -354,7 +354,7 @@ wheels = [
 [[package]]
 name = "djangosaml2"
 version = "1.12.0"
-source = { git = "https://github.com/kushaldas/djangosaml2.git?rev=feat%2Fpygamlastan#5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7" }
+source = { git = "https://github.com/kushaldas/djangosaml2.git?rev=5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7#5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7" }
 dependencies = [
     { name = "defusedxml" },
     { name = "django" },
@@ -554,7 +554,7 @@ requires-dist = [
     { name = "django-ninja" },
     { name = "django-redis" },
     { name = "django-types" },
-    { name = "djangosaml2", git = "https://github.com/kushaldas/djangosaml2.git?rev=feat%2Fpygamlastan" },
+    { name = "djangosaml2", git = "https://github.com/kushaldas/djangosaml2.git?rev=5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7" },
     { name = "fido2" },
     { name = "granian" },
     { name = "httpx" },

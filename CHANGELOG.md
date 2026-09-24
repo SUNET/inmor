@@ -16,8 +16,11 @@
 - Refreshed and relocked all Admin Python dependencies using a fixed
   2026-08-24 UTC `exclude-newer` cutoff, providing a three-day package cooling
   period at update time.
-- Kept PySAML2 at 7.5.0 until its newer pyOpenSSL constraint is compatible with
-  the current Cryptography release.
+- Replaced PySAML2 with pygamlastan 0.6.0 through the djangosaml2
+  `feat/pygamlastan` fork, pinned to commit
+  `5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7` in both dependency manifests.
+  The pygamlastan-specific cutoff is 2026-09-21 UTC, preserving a three-day
+  cooling period at the September 24 update.
 - Python setup and test recipes now use the checked-in uv lock file. Ruff keeps
   its historical default rule set explicit, while new pre-1.0 ty diagnostics
   remain visible as warnings.
