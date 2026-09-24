@@ -20,9 +20,6 @@ dependencies = [
 	"django-ninja",
 	"pytz",
 	"psycopg2-binary",
-	# PySAML2 7.5.1+ caps pyOpenSSL below 24.3, which is incompatible
-	# with current Cryptography releases. Remove once upstream relaxes it.
-	"pysaml2==7.5.0",
 	"djangosaml2 @ git+https://github.com/kushaldas/djangosaml2.git@feat/pygamlastan",
 	"django-redis",
 	"types-jwcrypto",
