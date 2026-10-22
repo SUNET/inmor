@@ -73,6 +73,6 @@ Release steps
 3. Build the release images with a fresh base and package index so security
    updates (for example ``ca-certificates``) are included::
 
-      docker compose -f dev/docker-compose.prod.yml --project-directory . build --pull --no-cache
+      docker compose -f dev/docker-compose.prod.yml --project-directory . --profile frontend build --pull --no-cache
 
    ``just build-prod`` builds the same images but may reuse cached layers.
