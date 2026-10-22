@@ -187,19 +187,42 @@ fn apply_display_name_fallback(
 
     // Sources are visited in priority order, so the first value found for a
     // language tag wins and an explicit display_name is never overwritten.
+    // Language tags are case-insensitive (RFC 5646 sec 2.1.1), so the
+    // existing-value check ignores tag case: `client_name#sv-se` must not add
+    // a second Swedish name next to `display_name#sv-SE`.
     for source in sources {
         for (claim, value) in type_meta {
             let (base, tag) = split_claim_lang(claim);
-            if base != source || !value.is_string() {
+            if base != source || !value.is_string() || has_display_name(info, tag) {
                 continue;
             }
             let target = match tag {
                 Some(tag) => format!("display_name#{tag}"),
                 None => "display_name".to_string(),
             };
-            info.entry(target).or_insert_with(|| value.clone());
+            info.insert(target, value.clone());
         }
     }
+}
+
+/// Whether `info` already holds a `display_name` for the language tag
+/// `tag` (`None` = the untagged value), comparing tags case-insensitively.
+fn has_display_name(info: &EntityTypeInfo, tag: Option<&str>) -> bool {
+    info.keys().any(|claim| match split_claim_lang(claim) {
+        ("display_name", None) => tag.is_none(),
+        ("display_name", Some(existing)) => tag.is_some_and(|t| t.eq_ignore_ascii_case(existing)),
+        _ => false,
+    })
+}
+
+/// The entity's `federation_list_endpoint`, when it is a string. Used both to
+/// classify Intermediates and to discover subordinates, so the two can never
+/// disagree: a `null` or otherwise non-string value makes the entity a leaf.
+fn federation_list_endpoint(metadata: &Map<String, Value>) -> Option<&str> {
+    metadata
+        .get("federation_entity")
+        .and_then(|v| v.get("federation_list_endpoint"))
+        .and_then(|v| v.as_str())
 }
 
 /// Detect entity types present in metadata.
@@ -481,11 +504,8 @@ async fn collection_tree_walking(
 
     // An entity below the Trust Anchor that lists subordinates is an
     // Intermediate; index it for the `/status` intermediates count.
-    let lists_subordinates = metadata
-        .get("federation_entity")
-        .and_then(|v| v.get("federation_list_endpoint"))
-        .is_some();
-    if lists_subordinates && entity_id != ctx.trust_anchor {
+    let list_endpoint = federation_list_endpoint(metadata);
+    if list_endpoint.is_some() && entity_id != ctx.trust_anchor {
         let _: Result<(), _> =
             redis::Cmd::sadd(format!("{STAGING_PREFIX}:intermediates"), entity_id)
                 .query_async(conn)
@@ -493,13 +513,7 @@ async fn collection_tree_walking(
     }
 
     // If TA/IA, discover subordinates via list endpoint and recurse
-    if let Some(fed_entity) = metadata
-        .get("federation_entity")
-        .and_then(|v| v.as_object())
-        && let Some(list_endpoint) = fed_entity
-            .get("federation_list_endpoint")
-            .and_then(|v| v.as_str())
-    {
+    if let Some(list_endpoint) = list_endpoint {
         debug!("Entity {entity_id} has list endpoint: {list_endpoint}");
         debug!("Fetching subordinate list from {list_endpoint}");
         match get_query(list_endpoint).await {
@@ -802,6 +816,59 @@ mod tests {
         );
         // An explicit display_name is never overwritten.
         assert_eq!(infos["openid_provider"]["display_name"], "Explicit");
+    }
+
+    /// Fallback display names never duplicate a language that already has
+    /// one under different tag casing (regression: `display_name#sv-SE` and
+    /// `client_name#sv-se` produced two Swedish names).
+    #[test]
+    fn test_display_name_fallback_ignores_tag_case() {
+        let md = metadata(json!({
+            "openid_relying_party": {
+                "display_name#sv-SE": "Explicit SV",
+                "client_name#sv-se": "Client SV",
+                "client_name#FI": "Client FI",
+                "organization_name#fi": "Org FI",
+                "organization_name#de": "Org DE"
+            }
+        }));
+        let rp = &extract_entity_infos(&md)["openid_relying_party"];
+        let display_names: Vec<&String> = rp
+            .keys()
+            .filter(|k| split_claim_lang(k).0 == "display_name")
+            .collect();
+        // One display name per language: the explicit sv-SE value wins over
+        // client_name#sv-se, client_name#FI wins over organization_name#fi,
+        // and organization_name still fills a language nobody else covers.
+        assert_eq!(display_names.len(), 3, "{display_names:?}");
+        assert_eq!(rp["display_name#sv-SE"], "Explicit SV");
+        assert_eq!(rp["display_name#FI"], "Client FI");
+        assert_eq!(rp["display_name#de"], "Org DE");
+    }
+
+    /// Only a string `federation_list_endpoint` makes an entity list
+    /// subordinates (regression: `null` was counted as an Intermediate while
+    /// discovery treated the entity as a leaf).
+    #[test]
+    fn test_federation_list_endpoint_requires_string() {
+        let with = |value: Value| {
+            metadata(json!({"federation_entity": {"federation_list_endpoint": value}}))
+        };
+        assert_eq!(
+            federation_list_endpoint(&with(json!("https://ia.example.com/list"))),
+            Some("https://ia.example.com/list")
+        );
+        assert_eq!(federation_list_endpoint(&with(Value::Null)), None);
+        assert_eq!(federation_list_endpoint(&with(json!(42))), None);
+        assert_eq!(federation_list_endpoint(&with(json!(["x"]))), None);
+        assert_eq!(
+            federation_list_endpoint(&metadata(json!({"federation_entity": {}}))),
+            None
+        );
+        assert_eq!(
+            federation_list_endpoint(&metadata(json!({"openid_provider": {}}))),
+            None
+        );
     }
 
     /// Types without informational claims, and unknown types, are omitted.

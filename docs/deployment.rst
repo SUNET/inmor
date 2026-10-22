@@ -412,7 +412,9 @@ language-tagged variant such as ``display_name#sv``: ``display_name``,
 metadata (keys, endpoints, ...) is never copied.
 
 When ``display_name`` is not set, it is filled per language tag from the
-first available of (Entity Collection spec sec 5.2):
+first available of the following (Entity Collection spec sec 5.2). Language
+tags are compared case-insensitively, so ``client_name#sv-se`` does not add a
+second Swedish name next to ``display_name#sv-SE``:
 
 1. ``client_name`` for ``openid_relying_party`` and ``oauth_client``, or
    ``resource_name`` for ``oauth_resource``
@@ -451,7 +453,7 @@ clients must still resolve and validate the entity.
      - entity_ids for ordering
    * - ``inmor:collection:intermediates``
      - Set
-     - entity_ids below the trust anchor that publish a ``federation_list_endpoint``
+     - entity_ids below the trust anchor whose ``federation_list_endpoint`` is a string
    * - ``inmor:collection:last_updated``
      - String
      - Unix timestamp of last walk

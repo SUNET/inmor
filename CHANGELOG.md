@@ -61,6 +61,12 @@
 - `/collection` validates `locale` against the RFC 4647 basic language range
   grammar (long valid ranges were rejected, `123` accepted), and an unreadable
   or oversized `POST` body gets the JSON error object instead of plain text.
+- The collection walker compares language tags case-insensitively when
+  filling `display_name` fallbacks, so `client_name#sv-se` no longer adds a
+  second Swedish name next to `display_name#sv-SE`.
+- Only a string `federation_list_endpoint` marks an entity as an Intermediate;
+  a `null` or other non-string value is a leaf, matching subordinate
+  discovery, so `/status` and the Admin statistics no longer over-count.
 - `just lint-frontend` now type-checks the frontend (`vue-tsc -b`); the old
   `vue-tsc --noEmit` checked no files. It runs as part of `just lint` and CI.
 
