@@ -1,6 +1,7 @@
 import { safeParse } from 'valibot';
 import { FetchError, ValidationError } from './errors';
 import {
+    CollectionStatsSchema,
     EntityConfigSchema,
     SubordinateCreateOptionsSchema,
     SubordinateSchema,
@@ -14,6 +15,7 @@ import {
     TrustMarkTypesSchema,
     TrustMarkTypeUpdateOptionsSchema,
     TrustMarkUpdateOptionsSchema,
+    type CollectionStats,
     type EntityConfig,
     type HttpMethod,
     type Subordinate,
@@ -451,6 +453,27 @@ export class AdminSDK {
     async regenerateServerEntity(): Promise<{ entity_statement: string }> {
         const res = await this.#fetch('POST', '/server/entity');
         return res as { entity_statement: string };
+    }
+
+    /**
+     * Get statistics of the Entity Collection published by the
+     * inmor-collection walker.
+     *
+     * @throws {FetchError}
+     * @throws {ValidationError} when the response does not match the schema
+     */
+    async getCollectionStats(): Promise<CollectionStats> {
+        const res = await this.#fetch('GET', '/server/collection');
+
+        const data = safeParse(CollectionStatsSchema, res);
+        if (!data.success) {
+            throw new ValidationError({
+                message: 'Invalid response when fetching collection statistics',
+                issues: data.issues,
+            });
+        }
+
+        return data.output;
     }
 
     /**
