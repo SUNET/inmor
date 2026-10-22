@@ -1,0 +1,10 @@
+# cargo-audit configuration (https://github.com/rustsec/rustsec/tree/main/cargo-audit)
+
+[advisories]
+ignore = [
+    # rustls-pemfile is unmaintained (informational, no vulnerability).
+    # Known and accepted: the inmor binary only uses it to read the TLS
+    # certificate chain and PKCS#8 key at startup. Revisit by moving to the
+    # rustls-pki-types PemObject API.
+    "RUSTSEC-2025-0134",
+]
