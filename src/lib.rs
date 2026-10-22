@@ -1362,8 +1362,7 @@ pub async fn get_jwks_from_uri_cached(
     uri: &str,
     conn: &mut redis::aio::ConnectionManager,
 ) -> Result<JwkSet> {
-    let hash = Sha256::digest(uri);
-    let cache_key = format!("inmor:jwks_cache:{:x}", hash);
+    let cache_key = format!("inmor:jwks_cache:{}", sha256_hex(uri.as_bytes()));
 
     // Try cache first
     let cached: Option<String> = redis::Cmd::get(&cache_key)
@@ -2387,9 +2386,7 @@ async fn verify_ta_issued_trust_mark(
     trust_mark_type: &str,
 ) -> bool {
     // 1. Was this mark ever issued by us?
-    let mut hasher = Sha256::new();
-    hasher.update(trust_mark_jwt.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
+    let hash = sha256_hex(trust_mark_jwt.as_bytes());
     match redis::Cmd::sismember("inmor:tm:alltime", &hash)
         .query_async::<bool>(conn)
         .await
@@ -3389,9 +3386,7 @@ pub async fn trust_mark_status(
         .map_err(error::ErrorInternalServerError)?;
 
     // Create sha256sum of the trust_mark and see if it exists in `inmor:tm:alltime` set.
-    let mut hasher = Sha256::new();
-    hasher.update(trust_mark.as_bytes());
-    let trust_mark_hash = format!("{:x}", hasher.finalize());
+    let trust_mark_hash = sha256_hex(trust_mark.as_bytes());
 
     let exists: bool = redis::Cmd::sismember("inmor:tm:alltime", &trust_mark_hash)
         .query_async::<bool>(&mut conn)
@@ -3804,6 +3799,20 @@ pub(crate) const KNOWN_ENTITY_TYPES: &[&str] = &[
     "oauth_client",
     "oauth_resource",
 ];
+
+/// Lowercase hex SHA-256 of `data`, the format of the `inmor:tm:alltime`
+/// trust mark hashes (written by the Admin with Python's `hexdigest()`) and of
+/// the JWKS cache keys. sha2 0.11 digests no longer implement `LowerHex`, so
+/// the hex encoding is done here.
+pub(crate) fn sha256_hex(data: &[u8]) -> String {
+    use std::fmt::Write;
+    Sha256::digest(data)
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
+}
 
 /// Validates that a user-supplied string is safe to use in a Redis key.
 /// Rejects control characters (including newlines and null bytes) and
@@ -5523,6 +5532,20 @@ mod ssrf_tests {
                 .is_ok()
         );
         assert!(validate_redis_key_input("https://entity.example.com:8443/path?q=1").is_ok());
+    }
+
+    /// `sha256_hex` keeps the lowercase hex format the Admin stores in
+    /// `inmor:tm:alltime` (regression guard for the sha2 0.11 upgrade).
+    #[test]
+    fn test_sha256_hex_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

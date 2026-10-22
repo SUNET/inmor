@@ -1,7 +1,7 @@
 [project]
 name = "inmoradmin"
 authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
-version = "0.4.1"
+version = "0.5.0"
 description = "Inmor Trust Anchor Admin portal"
 license = { file="LICENSE" }
 requires-python = '>=3.13'
@@ -52,10 +52,12 @@ Home = "https://github.com/SUNET/inmor"
 # date which uv resolves against the local timezone) keeps `uv sync
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
-exclude-newer = "2026-08-24T00:00:00Z"
-# The djangosaml2 pygamlastan branch requires pygamlastan >=0.6.0.
-# Preserve a three-day cooling window as of the 2026-09-24 update.
-exclude-newer-package = { pygamlastan = "2026-09-21T00:00:00Z" }
+exclude-newer = "2026-10-19T00:00:00Z"
+# Security exception to the cooling window: certifi 2026.10.19 is the
+# corrected root CA incident release. It drops "emSign ECC Root CA - G3",
+# matching Debian's ca-certificates 20250419+deb13u1 (2026.10.18 had also
+# dropped three emSign roots that were later restored).
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
 
 [tool.pyright]
 stubPath = "typings"

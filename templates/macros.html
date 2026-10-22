@@ -1,4 +1,5 @@
-{% macro entity_card(e) %}
+{# Tera 2 components (formerly macros); global to every loaded template. #}
+{% component entity_card(e) %}
 <div class="entity-card">
   <div class="entity-icon">
     {% if e.logo_uri %}
@@ -21,9 +22,9 @@
     </div>
   </div>
 </div>
-{% endmacro %}
+{% endcomponent entity_card %}
 
-{% macro subordinate_card(eid) %}
+{% component subordinate_card(eid) %}
 <div class="entity-card">
   <div class="entity-icon"><span class="entity-initial">{{ eid | split(pat="//") | last | truncate(length=1, end="") | upper }}</span></div>
   <div class="entity-info">
@@ -36,4 +37,4 @@
     </div>
   </div>
 </div>
-{% endmacro %}
+{% endcomponent subordinate_card %}

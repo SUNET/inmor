@@ -98,7 +98,9 @@ class APIKeyAdmin(admin.ModelAdmin):
     def get_readonly_fields(self, request: HttpRequest, obj=None):
         """Prevent owner changes and reactivation of existing API keys."""
         if obj:  # Editing existing object
-            return self.readonly_fields + ["user", "is_active"]
+            # Unpack instead of `+`: Django types readonly_fields as a
+            # Sequence, which may be a tuple and does not support `+ list`.
+            return [*self.readonly_fields, "user", "is_active"]
         return self.readonly_fields
 
     def has_change_permission(self, request: HttpRequest, obj=None) -> bool:

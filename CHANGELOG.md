@@ -1,6 +1,22 @@
 
-<a id='changelog-unreleased'></a>
-# Unreleased
+<a id='changelog-0.5.0'></a>
+# 0.5.0 - 2026-10-22
+
+## Security
+
+- Root CA incident: the Admin and test environments use certifi 2026.10.19,
+  which removes "emSign ECC Root CA - G3" in line with Debian's
+  `ca-certificates` 20250419+deb13u1. It is taken inside the dependency
+  cooling window as an explicit, documented exception. The TA trusts the
+  system CA store (OpenSSL via native-tls), and both runtime images pick up
+  the Debian update through `apt dist-upgrade`: rebuild the 0.5.0 images
+  with `--pull --no-cache` so a cached layer does not keep the old roots.
+- The TA no longer compiles actix-web's HTTP/2 server, which depends on h2
+  0.3 with no fix for RUSTSEC-2026-0258 (unbounded empty DATA frames). The
+  TA's own TLS listener now serves HTTP/1.1 only; reverse proxies can still
+  offer HTTP/2 to clients.
+- `.cargo/audit.toml` records the known `rustls-pemfile` unmaintained
+  advisory (RUSTSEC-2025-0134), so `cargo audit` passes.
 
 ## Breaking changes
 
@@ -31,6 +47,19 @@
   the Admin dashboard.
 
 ## Changed
+
+- Updated all Rust dependencies, including the semver-major bumps
+  actix-web-lab 0.29, base64 0.23, redis 1.7, reqwest 0.13, sha2 0.11,
+  tera 2.4 and toml 1.1. reqwest stays on native-tls (its 0.13 default is
+  rustls) so outbound requests keep using the system CA store. Crates
+  published after 2026-10-19 UTC are held back to their previous release
+  for a three-day cooling period.
+- The index page templates moved from Tera macros to Tera 2 components.
+- Updated all Python dependencies with the `exclude-newer` cutoff moved to
+  2026-10-19 UTC in both projects. The pygamlastan-specific cutoff is no
+  longer needed and was removed.
+- Pinned the root project's Ruff rule set (`E4`, `E7`, `E9`, `F`), as the
+  Admin already does, so Ruff upgrades do not change the lint rules.
 
 - Refreshed and relocked all Admin Python dependencies using a fixed
   2026-08-24 UTC `exclude-newer` cutoff, providing a three-day package cooling
