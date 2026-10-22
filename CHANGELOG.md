@@ -58,6 +58,12 @@
 - Updated all Python dependencies with the `exclude-newer` cutoff moved to
   2026-10-19 UTC in both projects. The pygamlastan-specific cutoff is no
   longer needed and was removed.
+- All compose files and the deployment docs reference the 0.5.0 images. The
+  root `docker-compose.yml` bind-mounts `./templates`, which now use Tera 2
+  component syntax that older TA images cannot load.
+- New `docs/releasing.rst` lists every place the release version must be
+  updated, and `just check-version` (run by `just lint` and CI) fails when any
+  of them disagrees with `Cargo.toml`.
 - Pinned the root project's Ruff rule set (`E4`, `E7`, `E9`, `F`), as the
   Admin already does, so Ruff upgrades do not change the lint rules.
 

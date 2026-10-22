@@ -21,7 +21,7 @@
 services:
   ta:
     restart: always
-    image: docker.sunet.se/inmor:0.4.0
+    image: docker.sunet.se/inmor:0.5.0
     networks:
       - inmor-net
     healthcheck:
@@ -35,6 +35,8 @@ services:
       - ./private.json:/app/private.json:ro
       - ./publickeys:/app/publickeys:ro
       - ./historical_keys:/app/historical_keys:ro
+      # The templates must match the image version: 0.5.0 moved them to
+      # Tera 2 component syntax, which older images cannot load.
       - ./templates:/app/templates:ro
       # TLS certificates — update paths for your deployment
       - /etc/ssl/certs/inmor.pem:/app/tls.pem:ro
@@ -89,7 +91,7 @@ services:
     # No port exposed — only accessible within the container network
 
   admin:
-    image: docker.sunet.se/inmor-admin:0.4.0
+    image: docker.sunet.se/inmor-admin:0.5.0
     networks:
       - inmor-net
     depends_on:
@@ -118,7 +120,7 @@ services:
   # Uncomment and configure if needed:
   #
   # frontend:
-  #   image: docker.sunet.se/inmor-frontend:0.4.0
+  #   image: docker.sunet.se/inmor-frontend:0.5.0
   #   networks:
   #     - inmor-net
   #   depends_on:

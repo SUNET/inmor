@@ -639,7 +639,7 @@ page; pass it back as the ``from`` parameter to retrieve them.
      - Optional. Entity Type Info object per entity type, holding the
        informational metadata claims listed under ``info_claims``. Claims
        without a value are omitted, as are types without any claim. See
-       :ref:`collection-entity-info` for how the values are derived.
+       :ref:`Entity Type Info extraction <collection-entity-info>` for how the values are derived.
    * - ``entities[].trust_marks``
      - Optional. Trust Mark objects (``trust_mark_type``, ``trust_mark``) from
        the entity's configuration, unverified
