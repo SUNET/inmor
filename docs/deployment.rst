@@ -400,6 +400,12 @@ The ``/collection`` endpoint on the Trust Anchor reads this data.
 The staging-to-live swap ensures the ``/collection`` endpoint never serves partial data
 during a walk.
 
+If a write to the trust mark index (``by_trustmark:*``, ``trustmark_types``) or
+the Intermediate index (``intermediates``) fails during the walk, the walk logs
+the failure and exits with an error **without** swapping, so the previous
+collection, its counts and ``last_updated`` stay live until the next
+successful walk.
+
 .. _collection-entity-info:
 
 **Entity Type Info extraction:**

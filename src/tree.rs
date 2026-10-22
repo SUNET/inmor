@@ -35,12 +35,38 @@ struct CollectionWalkContext {
     trust_mark_issuers: Map<String, Value>,
     /// `trust_mark_owners` pinned by the Trust Anchor.
     trust_mark_owners: TrustMarkOwners,
-    /// Counts SADD failures on the `by_trustmark:{type}` / `trustmark_types`
-    /// staging keys, which drive the `/collection?trust_mark_type=...`
-    /// filter. A nonzero count means the index would be silently incomplete,
-    /// so `run_collection_walk` aborts the swap and surfaces the failure
-    /// instead of publishing inconsistent data.
-    tm_index_errors: AtomicU32,
+    /// Counts failed writes to the staging indexes that must be complete to
+    /// be correct: `by_trustmark:{type}` / `trustmark_types` (the
+    /// `/collection?trust_mark_type=...` filter) and `intermediates` (the
+    /// `/status` and Admin Intermediate counts). A nonzero count means an
+    /// index would be silently incomplete, so `run_collection_walk` aborts
+    /// the swap and surfaces the failure instead of publishing inconsistent
+    /// data.
+    index_errors: AtomicU32,
+}
+
+impl CollectionWalkContext {
+    /// Records the result of a write to a must-be-complete staging index:
+    /// a failure is logged with `what` (built only on failure) and counted
+    /// on `index_errors` so the walk refuses to publish.
+    fn record_index_write(&self, result: redis::RedisResult<()>, what: impl FnOnce() -> String) {
+        if let Err(e) = result {
+            error!("{}: {e}", what());
+            self.index_errors.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Fails when any index write was recorded as failed, so the caller
+    /// stops before swapping staging into the live collection.
+    fn ensure_indexes_complete(&self) -> Result<()> {
+        let errors = self.index_errors.load(Ordering::Relaxed);
+        if errors > 0 {
+            return Err(anyhow::anyhow!(
+                "{errors} collection index write(s) failed; refusing to swap staging into the live collection"
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Fetches authority subordinate statements and stores them in Redis.
@@ -468,23 +494,21 @@ async fn collection_tree_walking(
     // `/collection?trust_mark_type=...` responses, so record any failure on
     // the shared counter so `run_collection_walk` can abort the swap.
     for tm_type in &verified_tm_types {
-        if let Err(e) = redis::Cmd::sadd(
+        let result = redis::Cmd::sadd(
             format!("{STAGING_PREFIX}:by_trustmark:{tm_type}"),
             entity_id,
         )
         .query_async::<()>(conn)
-        .await
-        {
-            error!("Failed to index trust mark type {tm_type} for {entity_id}: {e}");
-            ctx.tm_index_errors.fetch_add(1, Ordering::Relaxed);
-        }
-        if let Err(e) = redis::Cmd::sadd(format!("{STAGING_PREFIX}:trustmark_types"), tm_type)
+        .await;
+        ctx.record_index_write(result, || {
+            format!("Failed to index trust mark type {tm_type} for {entity_id}")
+        });
+        let result = redis::Cmd::sadd(format!("{STAGING_PREFIX}:trustmark_types"), tm_type)
             .query_async::<()>(conn)
-            .await
-        {
-            error!("Failed to record trust mark type {tm_type} in registry: {e}");
-            ctx.tm_index_errors.fetch_add(1, Ordering::Relaxed);
-        }
+            .await;
+        ctx.record_index_write(result, || {
+            format!("Failed to record trust mark type {tm_type} in registry")
+        });
     }
 
     // Also populate the existing inmor:op/rp/taia sets for backward compat
@@ -503,13 +527,17 @@ async fn collection_tree_walking(
     }
 
     // An entity below the Trust Anchor that lists subordinates is an
-    // Intermediate; index it for the `/status` intermediates count.
+    // Intermediate; index it for the `/status` intermediates count. A failed
+    // write would publish an undercount, so it blocks the swap like the
+    // trust mark index.
     let list_endpoint = federation_list_endpoint(metadata);
     if list_endpoint.is_some() && entity_id != ctx.trust_anchor {
-        let _: Result<(), _> =
-            redis::Cmd::sadd(format!("{STAGING_PREFIX}:intermediates"), entity_id)
-                .query_async(conn)
-                .await;
+        let result = redis::Cmd::sadd(format!("{STAGING_PREFIX}:intermediates"), entity_id)
+            .query_async::<()>(conn)
+            .await;
+        ctx.record_index_write(result, || {
+            format!("Failed to index Intermediate {entity_id}")
+        });
     }
 
     // If TA/IA, discover subordinates via list endpoint and recurse
@@ -623,7 +651,7 @@ async fn build_walk_context(
         ta_keyset,
         trust_mark_issuers,
         trust_mark_owners,
-        tm_index_errors: AtomicU32::new(0),
+        index_errors: AtomicU32::new(0),
     })
 }
 
@@ -672,15 +700,10 @@ pub async fn run_collection_walk(
     let entity_count = visited.len();
     info!("Walk complete: {entity_count} entities discovered");
 
-    // Abort before the atomic swap if any trust-mark index write failed --
-    // publishing the collection would yield silently incomplete
-    // `trust_mark_type` filter results.
-    let tm_errors = ctx.tm_index_errors.load(Ordering::Relaxed);
-    if tm_errors > 0 {
-        return Err(anyhow::anyhow!(
-            "{tm_errors} trust mark index write(s) failed; refusing to swap staging into the live collection"
-        ));
-    }
+    // Abort before the atomic swap if any trust mark or Intermediate index
+    // write failed -- publishing the collection would yield silently
+    // incomplete `trust_mark_type` filter results or Intermediate counts.
+    ctx.ensure_indexes_complete()?;
 
     // Atomic swap: delete old live keys, rename staging -> live.
     debug!("Preparing atomic swap of staging -> live keys");
@@ -844,6 +867,43 @@ mod tests {
         assert_eq!(rp["display_name#sv-SE"], "Explicit SV");
         assert_eq!(rp["display_name#FI"], "Client FI");
         assert_eq!(rp["display_name#de"], "Org DE");
+    }
+
+    /// A walk context with empty recognition maps, for index bookkeeping tests.
+    fn test_context() -> CollectionWalkContext {
+        CollectionWalkContext {
+            trust_anchor: "https://ta.example.com".to_string(),
+            ta_keyset: JwkSet::new(),
+            trust_mark_issuers: Map::new(),
+            trust_mark_owners: TrustMarkOwners::default(),
+            index_errors: AtomicU32::new(0),
+        }
+    }
+
+    /// Successful index writes leave the walk publishable.
+    #[test]
+    fn test_index_writes_ok_allow_publication() {
+        let ctx = test_context();
+        ctx.record_index_write(Ok(()), || unreachable!("only built on failure"));
+        assert!(ctx.ensure_indexes_complete().is_ok());
+    }
+
+    /// Any failed index write (trust mark or Intermediate) blocks publication
+    /// (regression: a failed Intermediate SADD was ignored and the walk still
+    /// swapped, publishing an undercount).
+    #[test]
+    fn test_failed_index_write_blocks_publication() {
+        let ctx = test_context();
+        let failure = || {
+            Err(redis::RedisError::from((
+                redis::ErrorKind::IoError,
+                "connection lost",
+            )))
+        };
+        ctx.record_index_write(failure(), || "Failed to index Intermediate".to_string());
+        ctx.record_index_write(failure(), || "Failed to index trust mark type".to_string());
+        let err = ctx.ensure_indexes_complete().unwrap_err().to_string();
+        assert!(err.contains("2 collection index write(s) failed"), "{err}");
     }
 
     /// Only a string `federation_list_endpoint` makes an entity list

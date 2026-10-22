@@ -67,6 +67,9 @@
 - Only a string `federation_list_endpoint` marks an entity as an Intermediate;
   a `null` or other non-string value is a leaf, matching subordinate
   discovery, so `/status` and the Admin statistics no longer over-count.
+- A failed write to the collection Intermediate index now aborts the walk
+  before publication, like trust mark index failures, instead of publishing
+  an undercount to `/status` and the Admin statistics.
 - `just lint-frontend` now type-checks the frontend (`vue-tsc -b`); the old
   `vue-tsc --noEmit` checked no files. It runs as part of `just lint` and CI.
 
