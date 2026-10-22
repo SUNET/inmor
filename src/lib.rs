@@ -614,6 +614,25 @@ fn query_matches(entity: &EntityCollectionResponse, needle: &str) -> bool {
     false
 }
 
+/// Validates an RFC 4647 sec 2.1 basic language range, the grammar
+/// `locale_matches` filters with: `*`, or a first subtag of 1-8 ASCII
+/// letters followed by any number of `-` and 1-8 ASCII alphanumeric
+/// subtags. There is deliberately no overall length cap, since long valid
+/// tags such as `de-Latn-DE-1996-u-ca-gregory-co-phonebk` exist.
+fn is_basic_language_range(range: &str) -> bool {
+    if range == "*" {
+        return true;
+    }
+    let mut subtags = range.split('-');
+    let first_ok = subtags.next().is_some_and(|first| {
+        (1..=8).contains(&first.len()) && first.chars().all(|c| c.is_ascii_alphabetic())
+    });
+    first_ok
+        && subtags.all(|sub| {
+            (1..=8).contains(&sub.len()) && sub.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+}
+
 /// RFC 4647 sec 3.3.1 basic filtering: a language range matches a tag when
 /// it equals the tag or is a prefix of it followed by `-` (so `en` matches
 /// `en-US`), compared case-insensitively. `*` matches every tag.
@@ -708,6 +727,22 @@ impl CollectionError {
             status: actix_web::http::StatusCode::BAD_REQUEST,
             error,
             description: description.into(),
+        }
+    }
+
+    /// An `invalid_request` for a POST body actix-web failed to read. The
+    /// extractor's status is kept (413 for an oversized body, 400 otherwise)
+    /// so clients still learn why the body was refused.
+    fn unreadable_body(e: actix_web::Error) -> Self {
+        let status = e.as_response_error().status_code();
+        CollectionError {
+            status: if status.is_client_error() {
+                status
+            } else {
+                actix_web::http::StatusCode::BAD_REQUEST
+            },
+            error: "invalid_request",
+            description: format!("the request body could not be read: {e}"),
         }
     }
 
@@ -1003,10 +1038,14 @@ pub async fn fetch_collections(
 #[post("/collection")]
 pub async fn post_collections(
     req: HttpRequest,
-    body: web::Bytes,
+    // Taken as a `Result` so a body that cannot be read (for example one
+    // over the payload size limit) still gets the sec 3.4.2 JSON error
+    // instead of actix-web's plain-text response.
+    body: std::result::Result<web::Bytes, actix_web::Error>,
     redis: web::Data<redis::Client>,
 ) -> std::result::Result<HttpResponse, CollectionError> {
     use actix_web::HttpMessage;
+    let body = body.map_err(CollectionError::unreadable_body)?;
     if !req
         .content_type()
         .eq_ignore_ascii_case("application/x-www-form-urlencoded")
@@ -1094,14 +1133,7 @@ async fn collection_response(
                 shaping.info_claims.push(p);
             }
             "locale" => {
-                // BCP47 tags are ASCII alphanumerics joined by '-'.
-                let valid = p == "*"
-                    || (!p.is_empty()
-                        && p.len() <= 35
-                        && p.split('-').all(|sub| {
-                            !sub.is_empty() && sub.chars().all(|c| c.is_ascii_alphanumeric())
-                        }));
-                if !valid {
+                if !is_basic_language_range(&p) {
                     return Err(CollectionError::bad_request(
                         "invalid_request",
                         format!("'{p}' is not a valid language tag"),
@@ -5685,6 +5717,43 @@ mod collection_tests {
         assert!(locale_matches("fi", &strings(&["*"])));
         // Non-ASCII tags never panic on the prefix slice.
         assert!(!locale_matches("\u{e9}\u{e9}-x", &strings(&["e"])));
+    }
+
+    /// Locale validation follows the RFC 4647 basic language range grammar
+    /// (regression: long valid ranges were rejected, `123` accepted).
+    #[test]
+    fn test_is_basic_language_range() {
+        for valid in [
+            "*",
+            "en",
+            "en-US",
+            "sv-SE",
+            "zh-Hant-TW",
+            "de-Latn-DE-1996-u-ca-gregory-co-phonebk",
+            "abcdefgh",
+            "x-12345678",
+        ] {
+            assert!(is_basic_language_range(valid), "{valid} should be valid");
+        }
+        for invalid in [
+            "",
+            "123",
+            "1en",
+            "en-abcdefghi",
+            "abcdefghi",
+            "en-",
+            "-en",
+            "en--US",
+            "en_US",
+            "en-US!",
+            "*-US",
+            "\u{e9}n",
+        ] {
+            assert!(
+                !is_basic_language_range(invalid),
+                "{invalid} should be invalid"
+            );
+        }
     }
 
     /// Without shaping parameters every stored claim is returned.

@@ -1841,13 +1841,50 @@ def test_collection_unsupported_claim(loaddata: Redis, start_server: int, http_c
 
 
 def test_collection_invalid_locale(loaddata: Redis, start_server: int, http_client: Client):
-    "A locale that is not a language tag is rejected with invalid_request."
+    "Locales outside the RFC 4647 basic language range grammar are invalid_request."
     rdb = loaddata
     port = start_server
     _seed_collection(rdb, [_SHAPED_ENTITY])
-    resp = _collection(http_client, port, {"locale": "en_US!"})
-    assert resp.status_code == 400
-    assert resp.json()["error"] == "invalid_request"
+    # Regression: `123` and over-long subtags used to be accepted.
+    for locale in ("en_US!", "123", "en-abcdefghi", "en--US"):
+        resp = _collection(http_client, port, {"locale": locale})
+        assert resp.status_code == 400, locale
+        assert resp.json()["error"] == "invalid_request"
+
+
+def test_collection_long_valid_locale(loaddata: Redis, start_server: int, http_client: Client):
+    "A valid language range longer than 35 characters is accepted."
+    # Regression: a 35-byte cap rejected valid ranges like this one.
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port, {"locale": "de-Latn-DE-1996-u-ca-gregory-co-phonebk"})
+    assert resp.status_code == 200, resp.text
+    # Only untagged values survive: no stored tag matches the range.
+    infos = resp.json()["entities"][0]["entity_infos"]
+    assert "display_name#sv" not in infos["openid_provider"]
+    assert infos["openid_provider"]["display_name"] == "Example OP"
+
+
+def test_collection_post_oversized_body_is_json_error(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "A POST body over the payload limit gets the JSON error object, not plain text."
+    # Regression: body extraction failures bypassed the endpoint's JSON errors.
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    # actix-web's default payload limit is 256 KiB.
+    resp = http_client.post(
+        f"https://localhost:{port}/collection",
+        content=b"query=" + b"a" * (300 * 1024),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 413
+    assert resp.headers["content-type"].startswith("application/json")
+    body = resp.json()
+    assert body["error"] == "invalid_request"
+    assert body["error_description"]
 
 
 def test_collection_entity_type_restricts_entity_infos(

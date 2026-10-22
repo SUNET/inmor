@@ -563,7 +563,9 @@ with ``POST`` they are passed in an ``application/x-www-form-urlencoded`` body
        (``display_name#sv``) follow their base claim. When omitted, all
        collected claims are returned.
    * - ``locale``
-     - Repeatable. BCP47 language range. Language-tagged claims are limited to
+     - Repeatable. RFC 4647 basic language range: ``*``, or a 1-8 letter
+       subtag followed by ``-``-separated 1-8 character alphanumeric subtags
+       (e.g. ``en``, ``sv-SE``). Language-tagged claims are limited to
        tags matching any given range using RFC 4647 basic filtering (``en``
        matches ``en`` and ``en-US``); untagged values are always returned.
        When omitted, all languages are returned.
@@ -683,7 +685,9 @@ Error responses are JSON objects with ``error`` and ``error_description`` fields
      - 400
      - A malformed request -- unparseable parameters, a ``limit`` that is not
        a positive integer, an unparseable ``from`` cursor, an invalid
-       ``locale``, or a ``POST`` body that is not form-urlencoded
+       ``locale``, or a ``POST`` body that is not form-urlencoded or cannot
+       be read. A ``POST`` body over the 256 KiB payload limit returns this
+       error with status 413
    * - ``page_not_found``
      - 404
      - The ``from`` cursor points at an entity the responder no longer knows;

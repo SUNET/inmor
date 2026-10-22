@@ -58,6 +58,11 @@
 - The collection staging-to-live swap now runs in `MULTI`/`EXEC`, so readers
   never observe a half-swapped collection.
 - `/collection` reads a page of records with a single `HMGET`.
+- `/collection` validates `locale` against the RFC 4647 basic language range
+  grammar (long valid ranges were rejected, `123` accepted), and an unreadable
+  or oversized `POST` body gets the JSON error object instead of plain text.
+- `just lint-frontend` now type-checks the frontend (`vue-tsc -b`); the old
+  `vue-tsc --noEmit` checked no files. It runs as part of `just lint` and CI.
 
 - The API-key validity column in Django Admin now supplies interpolation
   arguments to `format_html()`, as required by Django 6, instead of raising a

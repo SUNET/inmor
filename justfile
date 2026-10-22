@@ -39,12 +39,15 @@ lint-python: venv
   uv run ruff check .
 
 # To check for TypeScript errors in frontend
+# Build mode (-b) is required: tsconfig.json only lists project references,
+# so a plain `vue-tsc --noEmit` type-checks no files and always passes.
+# Needs the frontend dependencies installed (`pnpm install`).
 [working-directory: 'admin/frontend']
 lint-frontend:
-  pnpm vue-tsc --noEmit
+  pnpm exec vue-tsc -b --noEmit
 
-# Lint target for both rust and python
-lint: lint-rust lint-python
+# Lint target for rust, python and the frontend
+lint: lint-rust lint-python lint-frontend
 
 # To run inmor tests
 test-ta *ARGS:

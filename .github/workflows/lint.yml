@@ -24,5 +24,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
+      # pnpm comes from corepack (bundled with the runner's Node.js), pinned
+      # to the version that wrote admin/frontend/pnpm-lock.yaml. The frozen
+      # lockfile install is needed by the lint-frontend type check.
+      - name: Install frontend dependencies
+        working-directory: admin/frontend
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+          pnpm install --frozen-lockfile
+
       - name: lint
         run: uvx --from=rust-just just lint
