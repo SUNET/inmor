@@ -85,6 +85,12 @@ Documentation Contents
    guides/subordinates
    guides/management-commands
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Development
+
+   releasing
+
 Architecture Overview
 ---------------------
 

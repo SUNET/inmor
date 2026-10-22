@@ -13,8 +13,12 @@ use std::collections::HashMap;
 
 lazy_static! {
     static ref TERA: tera::Tera = {
-        let mut tera = tera::Tera::new("templates/**/*").expect("Failed to load templates");
-        tera.autoescape_on(vec![".html"]);
+        let mut tera = tera::Tera::default();
+        tera.autoescape_on([".html"]);
+        // Loads index.html and macros.html; components defined in any loaded
+        // template are available to all of them (Tera 2 has no imports).
+        tera.load_from_glob("templates/**/*")
+            .expect("Failed to load templates");
         tera
     };
 }
@@ -267,5 +271,59 @@ async fn main() -> io::Result<()> {
     } else {
         info!("Starting HTTP server on 0.0.0.0:{}", port);
         http_server.bind(("0.0.0.0", port))?.run().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The real templates load under Tera 2 and `index.html` renders with
+    /// the context the `/` handler builds (regression guard for the Tera
+    /// 1 -> 2 upgrade, which replaced `{% import %}` macros with components).
+    #[test]
+    fn test_index_template_renders() {
+        let mut ctx = tera::Context::new();
+        ctx.insert("display_title", "Example <TA>");
+        ctx.insert("entity_id", "https://ta.example.com");
+        ctx.insert("version", "0.5.0");
+        ctx.insert("direct_sub_count", &3usize);
+        ctx.insert("authority_hints", &vec!["https://parent.example.com"]);
+        ctx.insert("public_key_count", &2usize);
+        let html = TERA.render("index.html", &ctx).expect("index.html renders");
+        assert!(html.contains("OpenID Federation Trust Anchor"));
+        assert!(html.contains("https://parent.example.com/.well-known/openid-federation"));
+        // .html templates are autoescaped.
+        assert!(html.contains("Example &lt;TA&gt;"));
+    }
+
+    /// The components in macros.html (used by the commented-out collection
+    /// sections of index.html) still compile and render under Tera 2.
+    #[test]
+    fn test_template_components_render() {
+        let mut ctx = tera::Context::new();
+        ctx.insert(
+            "e",
+            &json!({
+                "entity_id": "https://op.example.com",
+                "display_name": "Example OP",
+                "initial": "E",
+                "type_badges": [{"class": "badge-op", "short": "OP"}]
+            }),
+        );
+        ctx.insert("eid", "https://rp.example.com");
+        let html = TERA
+            .render_str(
+                "{{ <entity_card e={e}/> }}{{ <subordinate_card eid={eid}/> }}",
+                &ctx,
+                true,
+            )
+            .expect("components render");
+        assert!(html.contains("Example OP"));
+        assert!(html.contains("badge-op"));
+        assert!(html.contains("https://rp.example.com/.well-known/openid-federation"));
+        // subordinate_card derives the initial from the host part of the URL.
+        assert!(html.contains(r#"<span class="entity-initial">R</span>"#));
     }
 }

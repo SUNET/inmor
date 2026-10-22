@@ -53,7 +53,7 @@ The Docker Compose setup includes 5 services:
 
    services:
      ta:
-       image: docker.sunet.se/inmor:0.3.0
+       image: docker.sunet.se/inmor:0.5.0
        ports:
          - "8080:8080"
        depends_on:
@@ -61,7 +61,7 @@ The Docker Compose setup includes 5 services:
            condition: service_healthy
 
      admin:
-       image: docker.sunet.se/inmor-admin:0.3.0
+       image: docker.sunet.se/inmor-admin:0.5.0
        ports:
          - "8000:8000"
        depends_on:
@@ -81,7 +81,7 @@ The Docker Compose setup includes 5 services:
        image: redis:7-alpine
 
      frontend:
-       image: docker.sunet.se/inmor-frontend:0.3.0
+       image: docker.sunet.se/inmor-frontend:0.5.0
        depends_on:
          - admin
        ports:
@@ -389,7 +389,7 @@ The ``/collection`` endpoint on the Trust Anchor reads this data.
    recognition maps (``trust_mark_issuers`` / ``trust_mark_owners``)
 3. Recursively discovers all subordinates by following ``federation_list_endpoint`` links
 4. For each entity, extracts entity types, Entity Type Info (see
-   :ref:`collection-entity-info`), and trust marks
+   :ref:`Entity Type Info extraction <collection-entity-info>`), and trust marks
 5. Verifies each entity's trust marks against the trust anchor and indexes the
    verified ones by trust mark type, so the ``/collection`` ``trust_mark_type``
    filter matches only verified marks
@@ -782,7 +782,7 @@ to, then run the generator::
    mkdir -p keys
    sudo chown 999:999 keys
 
-   docker run --rm -v ./keys:/data docker.sunet.se/inmor:0.4.0 \
+   docker run --rm -v ./keys:/data docker.sunet.se/inmor:0.5.0 \
      /app/inmor-keygeneration --type=RS256 --output=/data
 
 This writes two files into the ``keys`` directory:

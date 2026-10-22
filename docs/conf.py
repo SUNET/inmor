@@ -9,7 +9,7 @@
 project = "Inmor Trust Anchor"
 copyright = "2025, SUNET"
 author = "SUNET"
-release = "0.2.0"
+release = "0.5.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

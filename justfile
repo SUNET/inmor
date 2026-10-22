@@ -46,8 +46,13 @@ lint-python: venv
 lint-frontend:
   pnpm exec vue-tsc -b --noEmit
 
-# Lint target for rust, python and the frontend
-lint: lint-rust lint-python lint-frontend
+# Check that every release version reference (manifests, lockfiles, compose
+# image tags, docs) matches Cargo.toml. See docs/releasing.rst.
+check-version:
+  uv run --locked python scripts/check_version.py
+
+# Lint target for rust, python, the frontend and release version references
+lint: lint-rust lint-python lint-frontend check-version
 
 # To run inmor tests
 test-ta *ARGS:
@@ -87,7 +92,8 @@ build:
 
 # Build the production release images (release-built TA, granian-served
 # admin, built frontend) and tag them per dev/docker-compose.prod.yml.
-# This is the target to run when cutting a release like 0.4.0.
+# This is the target to run when cutting a release like 0.5.0; see
+# docs/releasing.rst for the full checklist.
 build-prod:
   {{dc_prod}} build ta
   {{dc_prod}} build admin

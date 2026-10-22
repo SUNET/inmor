@@ -1,7 +1,7 @@
 [project]
 name = "pyinmor"
 authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
-version = "0.4.1"
+version = "0.5.0"
 description = "Inmor Trust Anchor"
 license = { file="LICENSE" }
 requires-python = '>=3.13'
@@ -28,7 +28,12 @@ Home = "https://github.com/SUNET/inmor"
 # date which uv resolves against the local timezone) keeps `uv sync
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
-exclude-newer = "2026-05-25T00:00:00Z"
+exclude-newer = "2026-10-19T00:00:00Z"
+# Security exception to the cooling window: certifi 2026.10.19 is the
+# corrected root CA incident release. It drops "emSign ECC Root CA - G3",
+# matching Debian's ca-certificates 20250419+deb13u1 (2026.10.18 had also
+# dropped three emSign roots that were later restored).
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
 
 [tool.pyright]
 stubPath = "typings"
@@ -73,6 +78,11 @@ exclude = [
     "venv",
     "django_redis",
 ]
+
+[tool.ruff.lint]
+# Keep Ruff's historical default rule set stable across tool upgrades, as
+# admin/pyproject.toml does.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.ty.src]
 exclude = [

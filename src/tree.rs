@@ -896,7 +896,7 @@ mod tests {
         let ctx = test_context();
         let failure = || {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "connection lost",
             )))
         };
