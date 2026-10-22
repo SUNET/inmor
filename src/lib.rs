@@ -21,7 +21,7 @@ use oidfed_metadata_policy::*;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error as StdError;
 use std::ops::Deref;
 use std::sync::Mutex;
@@ -300,23 +300,20 @@ pub struct SubListingParams {
 
 // Response type(s)
 
-/// For https://zachmann.github.io/openid-federation-entity-collection/main.html#section-2.3.2.2
+/// Entity Type Info object (Entity Collection spec sec 3.4.1.1.1.1): the
+/// informational claims of one entity type, including any language-tagged
+/// variants such as `display_name#sv`.
+pub type EntityTypeInfo = Map<String, Value>;
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct UiInfo {
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub logo_uri: Option<String>,
-    pub policy_uri: Option<String>,
-    pub information_uri: Option<String>,
-}
-
+/// Entity Info object (Entity Collection spec sec 3.4.1.1).
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EntityCollectionResponse {
     pub entity_id: String,
     pub entity_types: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ui_infos: Option<HashMap<String, UiInfo>>,
+    /// `ui_infos` is the draft 00 name; the alias keeps records written by an
+    /// older walker readable until the next walk replaces them.
+    #[serde(alias = "ui_infos", skip_serializing_if = "Option::is_none")]
+    pub entity_infos: Option<BTreeMap<String, EntityTypeInfo>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trust_marks: Option<Vec<Value>>,
 }
@@ -326,7 +323,7 @@ impl EntityCollectionResponse {
         EntityCollectionResponse {
             entity_id,
             entity_types,
-            ui_infos: None,
+            entity_infos: None,
             trust_marks: None,
         }
     }
@@ -537,11 +534,42 @@ const COLLECTION_DEFAULT_LIMIT: usize = 100;
 /// Practical upper bound for a `/collection` page (spec sec 3.1.2).
 const COLLECTION_MAX_LIMIT: usize = 500;
 
+/// Entity Info claims (spec sec 3.4.1.1) a client may request through
+/// `entity_claims`.
+pub(crate) const COLLECTION_ENTITY_CLAIMS: &[&str] =
+    &["entity_id", "entity_types", "entity_infos", "trust_marks"];
+
+/// Entity Type Info claims (spec sec 3.4.1.1.1.1, the informational metadata
+/// claims of OpenID Federation sec 5.2.2) collected by the walker and
+/// requestable through `info_claims`. Language-tagged variants
+/// (`display_name#sv`) are matched on the part before `#`.
+pub(crate) const COLLECTION_INFO_CLAIMS: &[&str] = &[
+    "display_name",
+    "description",
+    "keywords",
+    "contacts",
+    "logo_uri",
+    "policy_uri",
+    "information_uri",
+    "organization_name",
+    "organization_uri",
+];
+
+/// Splits a claim name into its base name and optional language tag
+/// (`display_name#sv` -> (`display_name`, Some(`sv`))).
+pub(crate) fn split_claim_lang(claim: &str) -> (&str, Option<&str>) {
+    match claim.split_once('#') {
+        Some((base, tag)) => (base, Some(tag)),
+        None => (claim, None),
+    }
+}
+
 /// Clamps a requested `limit` to the supported range. `None` (parameter
-/// absent) falls back to the default page size.
+/// absent) falls back to the default page size. Zero is rejected by the
+/// caller, since returning anything would exceed the requested limit.
 fn clamp_limit(requested: Option<usize>) -> usize {
     match requested {
-        Some(n) => n.clamp(1, COLLECTION_MAX_LIMIT),
+        Some(n) => n.min(COLLECTION_MAX_LIMIT),
         None => COLLECTION_DEFAULT_LIMIT,
     }
 }
@@ -561,51 +589,193 @@ fn decode_cursor(cursor: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Implementation-defined `query` filter (spec sec 3.3.1-2.6.1): a
-/// case-insensitive substring match over the entity_id and any UI display
-/// names. `needle` must already be lowercased by the caller -- this avoids
-/// reallocating the query string on every entity. The haystacks are still
-/// lowercased per match because Unicode case folding cannot be done in
-/// place without allocating.
+/// Implementation-defined `query` filter (spec sec 3.3.1): a
+/// case-insensitive substring match over the entity_id and any display
+/// names, in every language. `needle` must already be lowercased by the
+/// caller -- this avoids reallocating the query string on every entity. The
+/// haystacks are still lowercased per match because Unicode case folding
+/// cannot be done in place without allocating.
 fn query_matches(entity: &EntityCollectionResponse, needle: &str) -> bool {
     if entity.entity_id.to_lowercase().contains(needle) {
         return true;
     }
-    if let Some(ui_infos) = &entity.ui_infos {
-        for ui in ui_infos.values() {
-            if let Some(name) = &ui.display_name
-                && name.to_lowercase().contains(needle)
-            {
-                return true;
+    if let Some(entity_infos) = &entity.entity_infos {
+        for info in entity_infos.values() {
+            for (claim, value) in info {
+                if split_claim_lang(claim).0 == "display_name"
+                    && let Some(name) = value.as_str()
+                    && name.to_lowercase().contains(needle)
+                {
+                    return true;
+                }
             }
         }
     }
     false
 }
 
+/// RFC 4647 sec 3.3.1 basic filtering: a language range matches a tag when
+/// it equals the tag or is a prefix of it followed by `-` (so `en` matches
+/// `en-US`), compared case-insensitively. `*` matches every tag.
+fn locale_matches(tag: &str, ranges: &[String]) -> bool {
+    ranges.iter().any(|range| {
+        range == "*"
+            || tag.eq_ignore_ascii_case(range)
+            || (tag.len() > range.len()
+                && tag.as_bytes()[range.len()] == b'-'
+                && tag
+                    .get(..range.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(range)))
+    })
+}
+
+/// Response-shaping parameters of a `/collection` request (spec sec 3.3.1).
+/// An empty list means the parameter was not given.
+#[derive(Debug, Default)]
+struct CollectionShaping {
+    /// `entity_type` filter; restricts `entity_infos` to these types.
+    entity_types: Vec<String>,
+    /// `entity_claims`: Entity Info claims to return.
+    entity_claims: Vec<String>,
+    /// `info_claims`: Entity Type Info claims to return.
+    info_claims: Vec<String>,
+    /// `locale`: language ranges for language-tagged claims.
+    locales: Vec<String>,
+}
+
+/// Turns a stored collection record into the Entity Info object returned
+/// for one request, applying `entity_type`, `entity_claims`, `info_claims`
+/// and `locale` (spec sec 3.3.1, 3.4.1.1). Null values (written by draft 00
+/// era walkers) are always dropped, and an Entity Type Info object left
+/// without claims is omitted.
+fn shape_entity(mut entity: EntityCollectionResponse, opts: &CollectionShaping) -> Value {
+    if let Some(infos) = entity.entity_infos.as_mut() {
+        if !opts.entity_types.is_empty() {
+            // Only the requested types, plus federation_entity (MAY).
+            infos.retain(|etype, _| {
+                etype == "federation_entity" || opts.entity_types.contains(etype)
+            });
+        }
+        for info in infos.values_mut() {
+            info.retain(|claim, value| {
+                let (base, tag) = split_claim_lang(claim);
+                !value.is_null()
+                    && (opts.info_claims.is_empty() || opts.info_claims.iter().any(|c| c == base))
+                    && match tag {
+                        // The untagged default value is always included.
+                        None => true,
+                        Some(tag) => opts.locales.is_empty() || locale_matches(tag, &opts.locales),
+                    }
+            });
+        }
+        infos.retain(|_, info| !info.is_empty());
+    }
+    if entity
+        .entity_infos
+        .as_ref()
+        .is_some_and(|infos| infos.is_empty())
+    {
+        entity.entity_infos = None;
+    }
+
+    let mut value = json!(entity);
+    if !opts.entity_claims.is_empty()
+        && let Some(obj) = value.as_object_mut()
+    {
+        // entity_id is REQUIRED and therefore always returned.
+        obj.retain(|claim, _| claim == "entity_id" || opts.entity_claims.contains(claim));
+    }
+    value
+}
+
+/// Error returned by the `/collection` endpoint, rendered as the JSON error
+/// object of spec sec 3.4.2.
+#[derive(Debug)]
+pub struct CollectionError {
+    /// HTTP status of the error response (spec sec 3.4.2 table).
+    status: actix_web::http::StatusCode,
+    /// The `error` code, e.g. `unsupported_parameter`.
+    error: &'static str,
+    /// Human-readable `error_description` (REQUIRED by spec sec 3.4.2).
+    description: String,
+}
+
+impl CollectionError {
+    /// A 400 error: `invalid_request`, `unsupported_parameter` or
+    /// `unsupported_claim`.
+    fn bad_request(error: &'static str, description: impl Into<String>) -> Self {
+        CollectionError {
+            status: actix_web::http::StatusCode::BAD_REQUEST,
+            error,
+            description: description.into(),
+        }
+    }
+
+    /// A 404 error: `page_not_found` or `invalid_trust_anchor`.
+    fn not_found(error: &'static str, description: impl Into<String>) -> Self {
+        CollectionError {
+            status: actix_web::http::StatusCode::NOT_FOUND,
+            error,
+            description: description.into(),
+        }
+    }
+}
+
+/// Used by actix-web when logging the error.
+impl Display for CollectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.error, self.description)
+    }
+}
+
+/// Renders the error as the spec sec 3.4.2 JSON object with the matching
+/// status code.
+impl error::ResponseError for CollectionError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        self.status
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status).json(json!({
+            "error": self.error,
+            "error_description": self.description,
+        }))
+    }
+}
+
+/// Storage failures become a JSON 500 `server_error`. The Redis error is
+/// logged rather than echoed, so internal details never reach the client.
+impl From<redis::RedisError> for CollectionError {
+    fn from(e: redis::RedisError) -> Self {
+        log::error!("collection storage error: {e}");
+        CollectionError {
+            status: actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error: "server_error",
+            description: "the collection data is temporarily unavailable".to_string(),
+        }
+    }
+}
+
 /// Returns the entity_id-sorted candidate ids matching the `entity_type`
 /// (OR) and `trust_mark_type` (AND) filters. Only ids are read here -- no
 /// entity records are materialized -- so a paginated request can fetch just
-/// the page it serves rather than the whole filtered set.
+/// the page it serves rather than the whole filtered set. An entity type
+/// the walker never indexed simply matches nothing.
 async fn collect_collection_ids(
     conn: &mut redis::aio::ConnectionManager,
     entity_types: &[String],
     trust_mark_types: &[String],
-) -> actix_web::Result<Vec<String>> {
+) -> std::result::Result<Vec<String>, redis::RedisError> {
     // entity_type filter: union (OR) of by_type sets.
     let etype_ids: Option<HashSet<String>> = if entity_types.is_empty() {
         None
     } else {
         let mut ids = HashSet::new();
         for etype in entity_types {
-            validate_entity_type(etype).map_err(|e| {
-                error::ErrorBadRequest(format!("invalid entity_type '{}': {}", etype, e))
-            })?;
             let type_ids: Vec<String> =
                 redis::Cmd::smembers(format!("inmor:collection:by_type:{etype}"))
                     .query_async(conn)
-                    .await
-                    .map_err(error::ErrorInternalServerError)?;
+                    .await?;
             ids.extend(type_ids);
         }
         Some(ids)
@@ -620,8 +790,7 @@ async fn collect_collection_ids(
             let set: HashSet<String> =
                 redis::Cmd::smembers(format!("inmor:collection:by_trustmark:{tmt}"))
                     .query_async(conn)
-                    .await
-                    .map_err(error::ErrorInternalServerError)?;
+                    .await?;
             acc = Some(match acc {
                 None => set,
                 Some(prev) => prev.intersection(&set).cloned().collect(),
@@ -632,10 +801,11 @@ async fn collect_collection_ids(
 
     // Combine the active filters (AND across filter kinds).
     let mut entity_ids: Vec<String> = match (etype_ids, tmtype_ids) {
-        (None, None) => redis::Cmd::hkeys("inmor:collection:entities")
-            .query_async(conn)
-            .await
-            .map_err(error::ErrorInternalServerError)?,
+        (None, None) => {
+            redis::Cmd::hkeys("inmor:collection:entities")
+                .query_async(conn)
+                .await?
+        }
         (Some(a), None) => a.into_iter().collect(),
         (None, Some(b)) => b.into_iter().collect(),
         (Some(a), Some(b)) => a.intersection(&b).cloned().collect(),
@@ -647,24 +817,25 @@ async fn collect_collection_ids(
 }
 
 /// Fetches and deserializes the given entity records from the collection
-/// hash, preserving input order and skipping unreadable entries.
+/// hash in one HMGET, preserving input order and skipping unreadable entries.
 async fn fetch_collection_records(
     conn: &mut redis::aio::ConnectionManager,
     ids: &[String],
-) -> Vec<EntityCollectionResponse> {
-    let mut records = Vec::with_capacity(ids.len());
-    for eid in ids {
-        let json_str: Option<String> = redis::Cmd::hget("inmor:collection:entities", eid)
-            .query_async(conn)
-            .await
-            .ok();
-        if let Some(json_str) = json_str
-            && let Ok(entry) = serde_json::from_str::<EntityCollectionResponse>(&json_str)
-        {
-            records.push(entry);
-        }
+) -> std::result::Result<Vec<EntityCollectionResponse>, redis::RedisError> {
+    if ids.is_empty() {
+        // HMGET without fields is a Redis syntax error.
+        return Ok(Vec::new());
     }
-    records
+    let values: Vec<Option<String>> = redis::cmd("HMGET")
+        .arg("inmor:collection:entities")
+        .arg(ids)
+        .query_async(conn)
+        .await?;
+    Ok(values
+        .into_iter()
+        .flatten()
+        .filter_map(|json_str| serde_json::from_str::<EntityCollectionResponse>(&json_str).ok())
+        .collect())
 }
 
 /// Index of the first entity_id strictly greater than the `from` cursor in
@@ -686,7 +857,7 @@ async fn paginate_collection_zset(
     conn: &mut redis::aio::ConnectionManager,
     from: Option<&str>,
     limit: usize,
-) -> actix_web::Result<(Vec<EntityCollectionResponse>, Option<String>)> {
+) -> std::result::Result<(Vec<EntityCollectionResponse>, Option<String>), redis::RedisError> {
     // `(value` is an exclusive lower bound; `-` is the start of the set.
     let min = match from {
         None => "-".to_string(),
@@ -701,11 +872,10 @@ async fn paginate_collection_zset(
         .arg(0)
         .arg(limit + 1)
         .query_async(conn)
-        .await
-        .map_err(error::ErrorInternalServerError)?;
+        .await?;
     let has_more = ids.len() > limit;
     let page_ids: Vec<String> = ids.into_iter().take(limit).collect();
-    let page = fetch_collection_records(conn, &page_ids).await;
+    let page = fetch_collection_records(conn, &page_ids).await?;
     // Anchor `next` on the last entity actually returned so a cursor never
     // points at an id that was dropped by `fetch_collection_records` (e.g.
     // because the hash entry is missing). When the page is empty but more
@@ -817,83 +987,164 @@ async fn list_subordinates(
     Ok(HttpResponse::Ok().json(res))
 }
 
-/// Federation Entity Collection endpoint (Entity Collection spec sec 3).
-/// Reads data populated by the inmor-collection CLI. Supports `entity_type`
-/// (OR), `trust_mark_type` (AND), `trust_anchor`, and `query` filters plus
-/// `from` / `limit` pagination.
+/// Federation Entity Collection endpoint (Entity Collection spec draft 01,
+/// sec 3), GET form: parameters in the query string.
 #[get("/collection")]
 pub async fn fetch_collections(
     req: HttpRequest,
     redis: web::Data<redis::Client>,
-) -> actix_web::Result<impl Responder> {
-    let params: Vec<(String, String)> =
-        match web::Query::<Vec<(String, String)>>::from_query(req.query_string()) {
-            Ok(data) => data.to_vec(),
-            Err(_) => Vec::new(),
-        };
+) -> std::result::Result<HttpResponse, CollectionError> {
+    let params = parse_collection_params(req.query_string())?;
+    collection_response(params, &redis).await
+}
 
-    let mut conn = redis
-        .get_connection_manager()
-        .await
-        .map_err(error::ErrorInternalServerError)?;
+/// Federation Entity Collection endpoint, POST form (spec sec 3.3.1):
+/// parameters in an `application/x-www-form-urlencoded` body.
+#[post("/collection")]
+pub async fn post_collections(
+    req: HttpRequest,
+    body: web::Bytes,
+    redis: web::Data<redis::Client>,
+) -> std::result::Result<HttpResponse, CollectionError> {
+    use actix_web::HttpMessage;
+    if !req
+        .content_type()
+        .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+    {
+        return Err(CollectionError::bad_request(
+            "invalid_request",
+            "the request body must be application/x-www-form-urlencoded",
+        ));
+    }
+    let body = std::str::from_utf8(&body).map_err(|_| {
+        CollectionError::bad_request("invalid_request", "the request body is not valid UTF-8")
+    })?;
+    let params = parse_collection_params(body)?;
+    collection_response(params, &redis).await
+}
 
-    let mut entity_types: Vec<String> = Vec::new();
+/// Parses `application/x-www-form-urlencoded` collection parameters,
+/// keeping repeated names in order.
+fn parse_collection_params(
+    encoded: &str,
+) -> std::result::Result<Vec<(String, String)>, CollectionError> {
+    web::Query::<Vec<(String, String)>>::from_query(encoded)
+        .map(|q| q.into_inner())
+        .map_err(|_| {
+            CollectionError::bad_request("invalid_request", "the request parameters are malformed")
+        })
+}
+
+/// Shared implementation of GET and POST `/collection`. Reads data populated
+/// by the inmor-collection CLI. Supports `entity_type` (OR),
+/// `trust_mark_type` (AND), `trust_anchor` and `query` filters, `from` /
+/// `limit` pagination, and the `entity_claims` / `info_claims` / `locale`
+/// response-shaping parameters.
+async fn collection_response(
+    params: Vec<(String, String)>,
+    redis: &redis::Client,
+) -> std::result::Result<HttpResponse, CollectionError> {
+    let mut shaping = CollectionShaping::default();
     let mut trust_mark_types: Vec<String> = Vec::new();
     let mut from_cursor: Option<String> = None;
     let mut limit_param: Option<usize> = None;
     let mut requested_ta: Option<String> = None;
     let mut query: Option<String> = None;
 
-    // Parse query parameters. Unknown parameters (including the optional
-    // entity_claims / ui_claims response-shaping parameters inmor does not
-    // implement) are rejected with unsupported_parameter per spec sec 3.4.2.
-    for (q, p) in params.iter() {
+    // Parse parameters. Unknown parameters are rejected with
+    // unsupported_parameter per spec sec 3.4.2.
+    for (q, p) in params {
         match q.as_str() {
-            "entity_type" => entity_types.push(p.clone()),
-            "trust_mark_type" => {
-                if let Err(e) = validate_redis_key_input(p) {
-                    return error_response_400(
+            "entity_type" => {
+                // Used verbatim in a Redis key name. Any other value is a
+                // valid Entity Type Identifier that may simply match nothing.
+                validate_redis_key_input(&p).map_err(|e| {
+                    CollectionError::bad_request(
                         "invalid_request",
-                        &format!("invalid trust_mark_type: {e}"),
-                    );
-                }
-                trust_mark_types.push(p.clone());
+                        format!("invalid entity_type: {e}"),
+                    )
+                })?;
+                shaping.entity_types.push(p);
             }
-            "from" => from_cursor = Some(p.clone()),
-            "limit" => match p.parse::<usize>() {
-                Ok(n) => limit_param = Some(n),
-                Err(_) => {
-                    return error_response_400(
+            "trust_mark_type" => {
+                validate_redis_key_input(&p).map_err(|e| {
+                    CollectionError::bad_request(
                         "invalid_request",
-                        "the 'limit' parameter must be a non-negative integer",
-                    );
+                        format!("invalid trust_mark_type: {e}"),
+                    )
+                })?;
+                trust_mark_types.push(p);
+            }
+            "entity_claims" => {
+                if !COLLECTION_ENTITY_CLAIMS.contains(&p.as_str()) {
+                    return Err(CollectionError::bad_request(
+                        "unsupported_claim",
+                        format!("the entity claim '{p}' is not supported"),
+                    ));
+                }
+                shaping.entity_claims.push(p);
+            }
+            "info_claims" => {
+                if !COLLECTION_INFO_CLAIMS.contains(&p.as_str()) {
+                    return Err(CollectionError::bad_request(
+                        "unsupported_claim",
+                        format!("the entity type info claim '{p}' is not supported"),
+                    ));
+                }
+                shaping.info_claims.push(p);
+            }
+            "locale" => {
+                // BCP47 tags are ASCII alphanumerics joined by '-'.
+                let valid = p == "*"
+                    || (!p.is_empty()
+                        && p.len() <= 35
+                        && p.split('-').all(|sub| {
+                            !sub.is_empty() && sub.chars().all(|c| c.is_ascii_alphanumeric())
+                        }));
+                if !valid {
+                    return Err(CollectionError::bad_request(
+                        "invalid_request",
+                        format!("'{p}' is not a valid language tag"),
+                    ));
+                }
+                shaping.locales.push(p);
+            }
+            "from" => from_cursor = Some(p),
+            "limit" => match p.parse::<usize>() {
+                Ok(n) if n > 0 => limit_param = Some(n),
+                _ => {
+                    return Err(CollectionError::bad_request(
+                        "invalid_request",
+                        "the 'limit' parameter must be a positive integer",
+                    ));
                 }
             },
-            "trust_anchor" => requested_ta = Some(p.clone()),
-            "query" => query = Some(p.clone()),
+            "trust_anchor" => requested_ta = Some(p),
+            "query" => query = Some(p),
             _ => {
-                return error_response_400(
+                return Err(CollectionError::bad_request(
                     "unsupported_parameter",
-                    &format!("the '{q}' parameter is not supported by this endpoint"),
-                );
+                    format!("the '{q}' parameter is not supported by this endpoint"),
+                ));
             }
         }
     }
 
-    // trust_anchor (spec sec 3.3.1-2.5.1): the collection is precomputed for a
-    // single Trust Anchor by the inmor-collection CLI. Accept the parameter
-    // only when it matches that Trust Anchor.
+    let mut conn = redis.get_connection_manager().await?;
+
+    // trust_anchor (spec sec 3.3.1): the collection is precomputed for a
+    // single Trust Anchor by the inmor-collection CLI. When omitted, that
+    // Trust Anchor is used; any other value is not supported.
     let collection_ta: Option<String> = redis::Cmd::get("inmor:collection:trust_anchor")
         .query_async(&mut conn)
-        .await
-        .map_err(error::ErrorInternalServerError)?;
+        .await?;
     if let Some(req_ta) = &requested_ta
         && collection_ta.as_deref() != Some(req_ta.as_str())
     {
-        return error_response_400(
-            "invalid_request",
+        return Err(CollectionError::not_found(
+            "invalid_trust_anchor",
             "collection data is not available for the requested trust_anchor",
-        );
+        ));
     }
 
     // Resolve the `from` cursor. page_not_found is checked against the full
@@ -902,20 +1153,19 @@ pub async fn fetch_collections(
         None => None,
         Some(cursor) => {
             let Some(id) = decode_cursor(cursor) else {
-                return error_response_400(
+                return Err(CollectionError::bad_request(
                     "invalid_request",
                     "the 'from' parameter is not a valid pagination cursor",
-                );
+                ));
             };
             let known: bool = redis::Cmd::hexists("inmor:collection:entities", &id)
                 .query_async(&mut conn)
-                .await
-                .map_err(error::ErrorInternalServerError)?;
+                .await?;
             if !known {
-                return error_response_404(
+                return Err(CollectionError::not_found(
                     "page_not_found",
                     "the pagination pointer in 'from' is not or no longer known",
-                );
+                ));
             }
             Some(id)
         }
@@ -924,14 +1174,14 @@ pub async fn fetch_collections(
     // Pagination (spec sec 3.1).
     let limit = clamp_limit(limit_param);
     let (page, next): (Vec<EntityCollectionResponse>, Option<String>) =
-        if entity_types.is_empty() && trust_mark_types.is_empty() && query.is_none() {
+        if shaping.entity_types.is_empty() && trust_mark_types.is_empty() && query.is_none() {
             // No filter active: page straight off the ordered ZSET so the
             // whole id set is never loaded just to serve one page.
             paginate_collection_zset(&mut conn, from_id.as_deref(), limit).await?
         } else {
             // A filter is active: resolve the candidate id set first.
             let candidate_ids =
-                collect_collection_ids(&mut conn, &entity_types, &trust_mark_types).await?;
+                collect_collection_ids(&mut conn, &shaping.entity_types, &trust_mark_types).await?;
             match query.as_deref() {
                 Some(q) => {
                     // The query filter must inspect entity records, so the
@@ -940,7 +1190,7 @@ pub async fn fetch_collections(
                     let needle = q.to_lowercase();
                     let records: Vec<EntityCollectionResponse> =
                         fetch_collection_records(&mut conn, &candidate_ids)
-                            .await
+                            .await?
                             .into_iter()
                             .filter(|e| query_matches(e, &needle))
                             .collect();
@@ -967,7 +1217,7 @@ pub async fn fetch_collections(
                         .cloned()
                         .collect();
                     let has_more = start + page_ids.len() < candidate_ids.len();
-                    let page = fetch_collection_records(&mut conn, &page_ids).await;
+                    let page = fetch_collection_records(&mut conn, &page_ids).await?;
                     // Anchor `next` on the last entity actually returned so
                     // the cursor can never point at an id that was dropped
                     // while materializing records.
@@ -979,17 +1229,19 @@ pub async fn fetch_collections(
             }
         };
 
-    // Default to 0 when no walk has populated the collection yet, so the
-    // response always carries a numeric `last_updated`.
-    let last_updated: u64 = redis::Cmd::get("inmor:collection:last_updated")
+    // Absent until a walk has populated the collection.
+    let last_updated: Option<u64> = redis::Cmd::get("inmor:collection:last_updated")
         .query_async(&mut conn)
-        .await
-        .unwrap_or(0);
+        .await?;
 
-    let mut response = json!({
-        "entities": page,
-        "last_updated": last_updated,
-    });
+    let entities: Vec<Value> = page
+        .into_iter()
+        .map(|e| shape_entity(e, &shaping))
+        .collect();
+    let mut response = json!({ "entities": entities });
+    if let Some(last_updated) = last_updated {
+        response["last_updated"] = json!(last_updated);
+    }
     if let Some(next) = next {
         response["next"] = json!(next);
     }
@@ -3510,8 +3762,9 @@ impl reqwest::dns::Resolve for FederationDnsResolver {
     }
 }
 
-/// Known OpenID Federation entity types accepted in query parameters.
-const KNOWN_ENTITY_TYPES: &[&str] = &[
+/// Known OpenID Federation entity types: the types the collection walker
+/// indexes and extracts Entity Type Info for.
+pub(crate) const KNOWN_ENTITY_TYPES: &[&str] = &[
     "openid_provider",
     "openid_relying_party",
     "federation_entity",
@@ -3535,15 +3788,6 @@ pub(crate) fn validate_redis_key_input(input: &str) -> Result<(), &'static str> 
         return Err("value contains control characters");
     }
     Ok(())
-}
-
-/// Validates that a string is a known OpenID Federation entity type.
-fn validate_entity_type(etype: &str) -> Result<(), &'static str> {
-    if KNOWN_ENTITY_TYPES.contains(&etype) {
-        Ok(())
-    } else {
-        Err("unknown entity type")
-    }
 }
 
 /// Validates URL-level federation policy before a request is built.
@@ -3815,7 +4059,7 @@ pub async fn server_status(
         .cmd("SCARD")
         .arg("inmor:collection:by_type:openid_relying_party")
         .cmd("SCARD")
-        .arg("inmor:collection:by_type:federation_entity")
+        .arg("inmor:collection:intermediates")
         .cmd("GET")
         .arg("inmor:collection:last_updated")
         .cmd("SMEMBERS")
@@ -5250,30 +5494,6 @@ mod ssrf_tests {
     }
 
     #[test]
-    fn test_validate_entity_type_accepts_known() {
-        for etype in KNOWN_ENTITY_TYPES {
-            assert!(
-                validate_entity_type(etype).is_ok(),
-                "should accept {}",
-                etype
-            );
-        }
-    }
-
-    #[test]
-    fn test_validate_entity_type_rejects_unknown() {
-        assert_eq!(
-            validate_entity_type("unknown_type"),
-            Err("unknown entity type")
-        );
-        assert_eq!(validate_entity_type(""), Err("unknown entity type"));
-        assert_eq!(
-            validate_entity_type("openid_provider; DROP TABLE keys"),
-            Err("unknown entity type")
-        );
-    }
-
-    #[test]
     fn test_parse_jwks_json_valid() {
         let json = r#"{"keys":[{"kty":"RSA","n":"test","e":"AQAB","kid":"k1"}]}"#;
         let result = parse_jwks_json(json);
@@ -5327,8 +5547,6 @@ mod collection_tests {
         // Absent parameter falls back to the default page size.
         assert_eq!(clamp_limit(None), COLLECTION_DEFAULT_LIMIT);
         assert_eq!(clamp_limit(Some(10)), 10);
-        // Zero is clamped up to a usable page size.
-        assert_eq!(clamp_limit(Some(0)), 1);
         // Oversized requests are capped at the upper bound.
         assert_eq!(
             clamp_limit(Some(COLLECTION_MAX_LIMIT + 1000)),
@@ -5381,25 +5599,175 @@ mod collection_tests {
         assert!(!query_matches(&e, "missing"));
     }
 
-    #[test]
-    fn test_query_matches_display_name() {
-        let mut ui = HashMap::new();
-        ui.insert(
+    /// Builds an Entity Type Info object from string claim pairs.
+    fn info(pairs: &[(&str, &str)]) -> EntityTypeInfo {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect()
+    }
+
+    /// A stored record with three entity types, language-tagged display
+    /// names and one trust mark, shared by the shaping tests.
+    fn sample_entity() -> EntityCollectionResponse {
+        let mut infos = BTreeMap::new();
+        infos.insert(
             "openid_provider".to_string(),
-            UiInfo {
-                display_name: Some("Example University".to_string()),
-                description: None,
-                logo_uri: None,
-                policy_uri: None,
-                information_uri: None,
-            },
+            info(&[
+                ("display_name", "Example University"),
+                ("display_name#sv", "Exempeluniversitetet"),
+                ("display_name#en-US", "Example University (US)"),
+                ("logo_uri", "https://op.example.com/logo.png"),
+            ]),
+        );
+        infos.insert(
+            "federation_entity".to_string(),
+            info(&[("organization_name", "Example Org")]),
+        );
+        infos.insert(
+            "openid_relying_party".to_string(),
+            info(&[("display_name", "Example RP")]),
         );
         let mut e = EntityCollectionResponse::new(
             "https://op.example.com".to_string(),
-            vec!["openid_provider".to_string()],
+            vec![
+                "openid_provider".to_string(),
+                "openid_relying_party".to_string(),
+                "federation_entity".to_string(),
+            ],
         );
-        e.ui_infos = Some(ui);
+        e.entity_infos = Some(infos);
+        e.trust_marks = Some(vec![
+            json!({"trust_mark_type": "https://tm", "trust_mark": "x.y.z"}),
+        ]);
+        e
+    }
+
+    /// Converts string literals into the owned values the parameters use.
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `query` matches display names in every language.
+    #[test]
+    fn test_query_matches_display_name() {
+        let e = sample_entity();
         assert!(query_matches(&e, "university"));
+        // Language-tagged display names are searched too.
+        assert!(query_matches(&e, "exempel"));
         assert!(!query_matches(&e, "college"));
+    }
+
+    /// Claim names split into base name and optional language tag.
+    #[test]
+    fn test_split_claim_lang() {
+        assert_eq!(split_claim_lang("display_name"), ("display_name", None));
+        assert_eq!(
+            split_claim_lang("display_name#sv-SE"),
+            ("display_name", Some("sv-SE"))
+        );
+    }
+
+    /// `locale` follows RFC 4647 basic filtering.
+    #[test]
+    fn test_locale_matches_basic_filtering() {
+        let en = strings(&["en"]);
+        assert!(locale_matches("en", &en));
+        assert!(locale_matches("en-US", &en));
+        assert!(locale_matches("EN-us", &en));
+        // A range only matches whole subtags.
+        assert!(!locale_matches("eng", &en));
+        assert!(!locale_matches("sv", &en));
+        // A more specific range does not match its parent tag.
+        assert!(!locale_matches("en", &strings(&["en-US"])));
+        // Multiple ranges combine with OR; `*` matches everything.
+        assert!(locale_matches("sv", &strings(&["en", "sv"])));
+        assert!(locale_matches("fi", &strings(&["*"])));
+        // Non-ASCII tags never panic on the prefix slice.
+        assert!(!locale_matches("\u{e9}\u{e9}-x", &strings(&["e"])));
+    }
+
+    /// Without shaping parameters every stored claim is returned.
+    #[test]
+    fn test_shape_entity_defaults_return_everything() {
+        let v = shape_entity(sample_entity(), &CollectionShaping::default());
+        assert_eq!(v["entity_id"], "https://op.example.com");
+        assert!(v["trust_marks"].is_array());
+        assert_eq!(v["entity_infos"].as_object().unwrap().len(), 3);
+        assert_eq!(
+            v["entity_infos"]["openid_provider"]["display_name#sv"],
+            "Exempeluniversitetet"
+        );
+    }
+
+    /// `entity_claims` limits the top-level Entity Info claims.
+    #[test]
+    fn test_shape_entity_entity_claims() {
+        let opts = CollectionShaping {
+            entity_claims: strings(&["entity_types"]),
+            ..Default::default()
+        };
+        let v = shape_entity(sample_entity(), &opts);
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        // entity_id is REQUIRED and always kept.
+        assert_eq!(keys, vec!["entity_id", "entity_types"]);
+    }
+
+    /// An `entity_type` filter restricts `entity_infos` to the requested types.
+    #[test]
+    fn test_shape_entity_restricts_infos_to_requested_types() {
+        let opts = CollectionShaping {
+            entity_types: strings(&["openid_provider"]),
+            ..Default::default()
+        };
+        let v = shape_entity(sample_entity(), &opts);
+        let infos = v["entity_infos"].as_object().unwrap();
+        assert!(infos.contains_key("openid_provider"));
+        // federation_entity MAY accompany the requested types.
+        assert!(infos.contains_key("federation_entity"));
+        assert!(!infos.contains_key("openid_relying_party"));
+        // entity_types still lists every known type of the entity.
+        assert_eq!(v["entity_types"].as_array().unwrap().len(), 3);
+    }
+
+    /// `info_claims` and `locale` filter the Entity Type Info claims.
+    #[test]
+    fn test_shape_entity_info_claims_and_locale() {
+        let opts = CollectionShaping {
+            info_claims: strings(&["display_name"]),
+            locales: strings(&["en"]),
+            ..Default::default()
+        };
+        let v = shape_entity(sample_entity(), &opts);
+        let op = v["entity_infos"]["openid_provider"].as_object().unwrap();
+        // The untagged default is always included; `en` matches `en-US`.
+        assert!(op.contains_key("display_name"));
+        assert!(op.contains_key("display_name#en-US"));
+        assert!(!op.contains_key("display_name#sv"));
+        // Unrequested claims are not returned.
+        assert!(!op.contains_key("logo_uri"));
+        // federation_entity had only organization_name: nothing left, omitted.
+        assert!(
+            !v["entity_infos"]
+                .as_object()
+                .unwrap()
+                .contains_key("federation_entity")
+        );
+    }
+
+    /// Records stored under the draft 00 `ui_infos` name are still served.
+    #[test]
+    fn test_shape_entity_reads_draft00_records() {
+        // Records written by a draft 00 walker use `ui_infos` with nulls.
+        let old = r#"{"entity_id":"https://rp.example.com","entity_types":["openid_relying_party"],
+            "ui_infos":{"openid_relying_party":{"display_name":"RP","description":null,
+            "logo_uri":null,"policy_uri":null,"information_uri":null}}}"#;
+        let e: EntityCollectionResponse = serde_json::from_str(old).unwrap();
+        let v = shape_entity(e, &CollectionShaping::default());
+        assert!(v.get("ui_infos").is_none());
+        assert_eq!(
+            v["entity_infos"]["openid_relying_party"],
+            json!({"display_name": "RP"})
+        );
     }
 }

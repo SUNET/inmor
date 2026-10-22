@@ -25,7 +25,7 @@ We add two validation functions:
 
 1. **`validate_redis_key_input()`** — general-purpose validation that rejects empty strings, strings longer than 2048 bytes, and strings containing control characters. Applied to all user-supplied values before Redis key interpolation.
 
-2. **`validate_entity_type()`** — strict allowlist validation against the known set of OpenID Federation entity types (`openid_provider`, `openid_relying_party`, `federation_entity`, `oauth_authorization_server`, `oauth_client`, `oauth_resource`).
+2. **`validate_entity_type()`** — strict allowlist validation against the known set of OpenID Federation entity types (`openid_provider`, `openid_relying_party`, `federation_entity`, `oauth_authorization_server`, `oauth_client`, `oauth_resource`). Superseded for `/collection` by ADR 0008: any `entity_type` passing `validate_redis_key_input()` is accepted there and an unindexed type matches nothing.
 
 Invalid inputs return HTTP 400 Bad Request with a descriptive error message.
 

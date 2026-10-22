@@ -1,11 +1,12 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { FileLock2, Files, Server, ArrowRight } from 'lucide-vue-next';
+import { FileLock2, Files, Server, ArrowRight, Network } from 'lucide-vue-next';
 import Heading from '../components/base/Heading.vue';
+import type { CollectionStats } from '../lib/admin-sdk/resources';
 
 export default defineComponent({
     name: 'HomeView',
-    components: { Heading, FileLock2, Files, Server, ArrowRight },
+    components: { Heading, FileLock2, Files, Server, ArrowRight, Network },
     data() {
         return {
             stats: {
@@ -14,10 +15,19 @@ export default defineComponent({
                 subordinates: 0,
             },
             loading: true,
+            // Entity Collection statistics; null until loaded or on failure.
+            collection: null as CollectionStats | null,
         };
     },
+    computed: {
+        /** Human-readable time of the last collection walk, if any. */
+        collectionUpdated(): string {
+            const ts = this.collection?.last_updated;
+            return ts ? new Date(ts * 1000).toLocaleString() : 'Never';
+        },
+    },
     async mounted() {
-        await this.loadStats();
+        await Promise.all([this.loadStats(), this.loadCollection()]);
     },
     methods: {
         async loadStats() {
@@ -37,6 +47,14 @@ export default defineComponent({
                 console.error('Failed to load stats:', e);
             } finally {
                 this.loading = false;
+            }
+        },
+        /** Loads Entity Collection statistics; failures leave the card hidden. */
+        async loadCollection() {
+            try {
+                this.collection = await this.$sdk.getCollectionStats();
+            } catch (e) {
+                console.error('Failed to load collection stats:', e);
             }
         },
     },
@@ -81,6 +99,45 @@ export default defineComponent({
                 <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
             </RouterLink>
         </div>
+
+        <section
+            v-if="collection"
+            class="collection"
+            aria-labelledby="collection-heading"
+        >
+            <div class="collection-header">
+                <div class="stat-icon stat-icon--collection" aria-hidden="true">
+                    <Network :size="24" />
+                </div>
+                <Heading id="collection-heading" level="h2">Entity Collection</Heading>
+            </div>
+            <dl class="collection-list">
+                <div>
+                    <dt>Trust Anchor</dt>
+                    <dd>{{ collection.trust_anchor ?? 'Not collected yet' }}</dd>
+                </div>
+                <div>
+                    <dt>Last walk</dt>
+                    <dd>{{ collectionUpdated }}</dd>
+                </div>
+                <div>
+                    <dt>Entities</dt>
+                    <dd>{{ collection.total_entities }}</dd>
+                </div>
+                <div>
+                    <dt>Intermediates</dt>
+                    <dd>{{ collection.intermediates }}</dd>
+                </div>
+                <div>
+                    <dt>OpenID Providers</dt>
+                    <dd>{{ collection.by_entity_type.openid_provider ?? 0 }}</dd>
+                </div>
+                <div>
+                    <dt>Relying Parties</dt>
+                    <dd>{{ collection.by_entity_type.openid_relying_party ?? 0 }}</dd>
+                </div>
+            </dl>
+        </section>
 
         <section class="quick-start" aria-labelledby="quick-start-heading">
             <Heading id="quick-start-heading" level="h2">Quick Start</Heading>
@@ -185,6 +242,47 @@ export default defineComponent({
 .stat-card:hover .stat-arrow {
     color: var(--ir--color--primary);
     transform: translateX(4px);
+}
+
+.stat-icon--collection {
+    background-color: var(--ir--color--info-bg);
+    color: var(--ir--color--info);
+}
+
+.collection {
+    background-color: white;
+    border: var(--ir--border);
+    border-radius: var(--ir--space--2);
+    padding: var(--ir--space--4);
+}
+
+.collection-header {
+    display: flex;
+    align-items: center;
+    gap: var(--ir--space--3);
+}
+
+.collection-header h2 {
+    margin: 0;
+}
+
+.collection-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--ir--space--3);
+    margin: var(--ir--space--4) 0 0;
+}
+
+.collection-list dt {
+    font-size: var(--ir--font-size--s);
+    color: var(--ir--color--gray-500);
+}
+
+.collection-list dd {
+    margin: var(--ir--space--1) 0 0;
+    font-weight: var(--ir--font-weight--bold);
+    color: var(--ir--color--gray-900);
+    overflow-wrap: anywhere;
 }
 
 .quick-start {

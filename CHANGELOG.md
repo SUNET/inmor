@@ -10,6 +10,25 @@
   `pg_upgrade` before this version is started; see
   `docs/postgresql-upgrade.rst` for the named-volume and development
   bind-mount procedures.
+- The `/collection` endpoint follows the OpenID Federation Entity Collection
+  1.0 draft 01. The response claim `ui_infos` is renamed `entity_infos`; a
+  `trust_anchor` other than the collected one returns 404
+  `invalid_trust_anchor` instead of 400 `invalid_request`; `limit=0` is
+  rejected; and `last_updated` is omitted until the first walk. Re-run
+  `inmor-collection` after upgrading to collect the additional entity
+  information (see ADR 0008).
+
+## Added
+
+- `/collection` accepts `POST` with a form-urlencoded body and the
+  `entity_claims`, `info_claims` and `locale` parameters, returning
+  `unsupported_claim` for unsupported claims.
+- The collection walker now collects `description`, `keywords`, `contacts`,
+  `information_uri`, `organization_name`, `organization_uri` and
+  language-tagged variants, using the metadata `display_name` with the
+  spec sec 5.2 fallbacks.
+- Admin API `GET /api/v1/server/collection` and an Entity Collection card on
+  the Admin dashboard.
 
 ## Changed
 
@@ -30,6 +49,15 @@
   references for Django 6.1.
 
 ## Fixed
+
+- `/collection` errors are always JSON, including unknown `entity_type`
+  values (which now match nothing instead of failing), malformed parameters
+  and Redis failures (500 `server_error`).
+- `/status` `collection.intermediates` counted every entity; it now counts
+  only Intermediates below the Trust Anchor.
+- The collection staging-to-live swap now runs in `MULTI`/`EXEC`, so readers
+  never observe a half-swapped collection.
+- `/collection` reads a page of records with a single `HMGET`.
 
 - The API-key validity column in Django Admin now supplies interpolation
   arguments to `format_html()`, as required by Django 6, instead of raising a

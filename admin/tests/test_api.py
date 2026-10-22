@@ -1090,6 +1090,49 @@ def test_renew_subordinates_command(auth_client: Client, loadredis, clean_subord
     assert sub.statement != original_statement
 
 
+@pytest.mark.django_db
+def test_collection_stats_empty(auth_client: Client, loadredis):
+    """Before any collection walk the stats are zero and null."""
+    response = auth_client.get("/api/v1/server/collection")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_entities"] == 0
+    assert data["intermediates"] == 0
+    assert data["trust_anchor"] is None
+    assert data["last_updated"] is None
+    assert data["by_entity_type"]["openid_provider"] == 0
+
+
+@pytest.mark.django_db
+def test_collection_stats_reads_walker_keys(auth_client: Client, loadredis):
+    """Stats are read from the inmor:collection:* keys the walker publishes."""
+    rdb = loadredis
+    for eid in ("https://op.example.com", "https://ia.example.com"):
+        rdb.hset("inmor:collection:entities", eid, "{}")
+        rdb.sadd("inmor:collection:by_type:federation_entity", eid)
+    rdb.sadd("inmor:collection:by_type:openid_provider", "https://op.example.com")
+    rdb.sadd("inmor:collection:intermediates", "https://ia.example.com")
+    rdb.set("inmor:collection:trust_anchor", "https://ta.example.com")
+    rdb.set("inmor:collection:last_updated", 1700000000)
+
+    response = auth_client.get("/api/v1/server/collection")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_entities"] == 2
+    assert data["by_entity_type"]["federation_entity"] == 2
+    assert data["by_entity_type"]["openid_provider"] == 1
+    assert data["by_entity_type"]["openid_relying_party"] == 0
+    assert data["intermediates"] == 1
+    assert data["trust_anchor"] == "https://ta.example.com"
+    assert data["last_updated"] == 1700000000
+
+
+def test_unauthenticated_collection_stats(db):
+    """Collection stats require authentication."""
+    response = Client().get("/api/v1/server/collection")
+    assert response.status_code == 401
+
+
 def test_unauthenticated_server_entity(db):
     """Verify unauthenticated requests to server entity are rejected."""
     client = Client()

@@ -7,29 +7,20 @@ use anyhow::Result;
 use josekit::jwk::JwkSet;
 use log::{debug, error, info, warn};
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    EntityCollectionResponse, TrustMarkOwners, UiInfo, get_entity_configruation_as_jwt,
-    get_jwks_from_payload_or_uri, get_query, get_unverified_payload_header, self_verify_jwt,
-    validate_redis_key_input, verify_jwt_with_jwks, verify_trust_marks,
+    COLLECTION_INFO_CLAIMS, EntityCollectionResponse, EntityTypeInfo, KNOWN_ENTITY_TYPES,
+    TrustMarkOwners, get_entity_configruation_as_jwt, get_jwks_from_payload_or_uri, get_query,
+    get_unverified_payload_header, self_verify_jwt, split_claim_lang, validate_redis_key_input,
+    verify_jwt_with_jwks, verify_trust_marks,
 };
 
 /// Prefix for staging keys used during tree walk.
 /// Data is written here first, then atomically swapped to live keys.
 const STAGING_PREFIX: &str = "inmor:collection:staging";
-
-/// Known entity type keys we look for in metadata.
-const KNOWN_ENTITY_TYPES: &[&str] = &[
-    "openid_provider",
-    "openid_relying_party",
-    "federation_entity",
-    "oauth_authorization_server",
-    "oauth_client",
-    "oauth_resource",
-];
 
 /// Federation context captured once from the walk-from Trust Anchor's Entity
 /// Configuration and threaded through the recursion. Lets the walker verify
@@ -152,34 +143,63 @@ async fn fetch_all_subordinate_statements(
     }
 }
 
-/// Extract UI info from metadata for each entity type.
-fn extract_ui_infos(metadata: &serde_json::Map<String, Value>) -> HashMap<String, UiInfo> {
-    let mut ui_infos = HashMap::new();
+/// Extracts the Entity Type Info object for each known entity type
+/// (Entity Collection spec sec 5.2): every informational claim in
+/// `COLLECTION_INFO_CLAIMS`, including language-tagged variants, followed by
+/// the `display_name` fallbacks. Types without any such claim are omitted.
+fn extract_entity_infos(metadata: &Map<String, Value>) -> BTreeMap<String, EntityTypeInfo> {
+    let mut entity_infos = BTreeMap::new();
 
     for &etype in KNOWN_ENTITY_TYPES {
         if let Some(type_meta) = metadata.get(etype).and_then(|v| v.as_object()) {
-            let ui = UiInfo {
-                display_name: type_meta
-                    .get("organization_name")
-                    .or_else(|| type_meta.get("client_name"))
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                description: None,
-                logo_uri: type_meta
-                    .get("logo_uri")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                policy_uri: type_meta
-                    .get("policy_uri")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                information_uri: None,
-            };
-            ui_infos.insert(etype.to_string(), ui);
+            let mut info: EntityTypeInfo = type_meta
+                .iter()
+                .filter(|(claim, value)| {
+                    !value.is_null() && COLLECTION_INFO_CLAIMS.contains(&split_claim_lang(claim).0)
+                })
+                .map(|(claim, value)| (claim.clone(), value.clone()))
+                .collect();
+            apply_display_name_fallback(etype, type_meta, &mut info);
+            if !info.is_empty() {
+                entity_infos.insert(etype.to_string(), info);
+            }
         }
     }
 
-    ui_infos
+    entity_infos
+}
+
+/// Fills `display_name` (per language tag) when the metadata does not set
+/// it (spec sec 5.2): `client_name` for openid_relying_party / oauth_client,
+/// `resource_name` for oauth_resource, then `organization_name` as a last
+/// resort for every type.
+fn apply_display_name_fallback(
+    etype: &str,
+    type_meta: &Map<String, Value>,
+    info: &mut EntityTypeInfo,
+) {
+    let mut sources = match etype {
+        "openid_relying_party" | "oauth_client" => vec!["client_name"],
+        "oauth_resource" => vec!["resource_name"],
+        _ => Vec::new(),
+    };
+    sources.push("organization_name");
+
+    // Sources are visited in priority order, so the first value found for a
+    // language tag wins and an explicit display_name is never overwritten.
+    for source in sources {
+        for (claim, value) in type_meta {
+            let (base, tag) = split_claim_lang(claim);
+            if base != source || !value.is_string() {
+                continue;
+            }
+            let target = match tag {
+                Some(tag) => format!("display_name#{tag}"),
+                None => "display_name".to_string(),
+            };
+            info.entry(target).or_insert_with(|| value.clone());
+        }
+    }
 }
 
 /// Detect entity types present in metadata.
@@ -314,14 +334,19 @@ async fn collection_tree_walking(
         entity_types.join(", ")
     );
 
-    // Extract UI info
-    let ui_infos = extract_ui_infos(metadata);
-    if !ui_infos.is_empty() {
+    // Extract Entity Type Info
+    let entity_infos = extract_entity_infos(metadata);
+    if !entity_infos.is_empty() {
         debug!(
-            "Extracted UI info for {entity_id}: {}",
-            ui_infos
+            "Extracted entity info for {entity_id}: {}",
+            entity_infos
                 .iter()
-                .map(|(k, v)| format!("{k}: {}", v.display_name.as_deref().unwrap_or("(no name)")))
+                .map(|(k, v)| format!(
+                    "{k}: {}",
+                    v.get("display_name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("(no name)")
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -381,10 +406,10 @@ async fn collection_tree_walking(
     let response = EntityCollectionResponse {
         entity_id: entity_id.to_string(),
         entity_types: entity_types.clone(),
-        ui_infos: if ui_infos.is_empty() {
+        entity_infos: if entity_infos.is_empty() {
             None
         } else {
-            Some(ui_infos)
+            Some(entity_infos)
         },
         trust_marks,
     };
@@ -454,6 +479,19 @@ async fn collection_tree_walking(
             .await;
     }
 
+    // An entity below the Trust Anchor that lists subordinates is an
+    // Intermediate; index it for the `/status` intermediates count.
+    let lists_subordinates = metadata
+        .get("federation_entity")
+        .and_then(|v| v.get("federation_list_endpoint"))
+        .is_some();
+    if lists_subordinates && entity_id != ctx.trust_anchor {
+        let _: Result<(), _> =
+            redis::Cmd::sadd(format!("{STAGING_PREFIX}:intermediates"), entity_id)
+                .query_async(conn)
+                .await;
+    }
+
     // If TA/IA, discover subordinates via list endpoint and recurse
     if let Some(fed_entity) = metadata
         .get("federation_entity")
@@ -513,6 +551,7 @@ fn known_collection_keys(prefix: &str, trustmark_types: &[String]) -> Vec<String
         format!("{prefix}:all_sorted"),
         format!("{prefix}:trust_anchor"),
         format!("{prefix}:trustmark_types"),
+        format!("{prefix}:intermediates"),
     ];
     for etype in KNOWN_ENTITY_TYPES {
         keys.push(format!("{prefix}:by_type:{etype}"));
@@ -657,7 +696,10 @@ pub async fn run_collection_walk(
         .filter_map(|(key, exists)| if exists { Some(key) } else { None })
         .collect();
 
+    // MULTI/EXEC so a concurrent /collection request never observes a
+    // half-swapped collection.
     let mut pipe = redis::pipe();
+    pipe.atomic();
 
     // Delete old live collection keys.
     let mut live_keys = known_collection_keys("inmor:collection", &old_types);
@@ -688,4 +730,87 @@ pub async fn run_collection_walk(
 
     info!("Collection data swapped to live keys (last_updated={now})");
     Ok(entity_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Unwraps a JSON object literal into an EC `metadata` map.
+    fn metadata(value: Value) -> Map<String, Value> {
+        value.as_object().cloned().unwrap()
+    }
+
+    /// Only allowlisted informational claims are collected.
+    #[test]
+    fn test_extract_entity_infos_copies_allowlisted_claims() {
+        let md = metadata(json!({
+            "openid_provider": {
+                "display_name": "Example OP",
+                "display_name#sv": "Exempel OP",
+                "description": "An OP",
+                "keywords": ["university"],
+                "logo_uri": "https://op.example.com/logo.png",
+                "information_uri": "https://op.example.com/info",
+                "issuer": "https://op.example.com",
+                "jwks": {"keys": []},
+                "policy_uri": null
+            }
+        }));
+        let infos = extract_entity_infos(&md);
+        let op = &infos["openid_provider"];
+        assert_eq!(op["display_name"], "Example OP");
+        assert_eq!(op["display_name#sv"], "Exempel OP");
+        assert_eq!(op["keywords"], json!(["university"]));
+        assert_eq!(op["information_uri"], "https://op.example.com/info");
+        // Non-informational metadata and null values are never copied.
+        assert!(!op.contains_key("issuer"));
+        assert!(!op.contains_key("jwks"));
+        assert!(!op.contains_key("policy_uri"));
+    }
+
+    /// `display_name` falls back per spec sec 5.2, then to `organization_name`.
+    #[test]
+    fn test_extract_entity_infos_display_name_fallbacks() {
+        let md = metadata(json!({
+            "openid_relying_party": {
+                "client_name": "Example RP",
+                "client_name#sv": "Exempel RP",
+                "organization_name": "Example Org"
+            },
+            "oauth_resource": {"resource_name": "Example API"},
+            "federation_entity": {"organization_name": "Example Org"},
+            "openid_provider": {
+                "display_name": "Explicit",
+                "organization_name": "Example Org"
+            }
+        }));
+        let infos = extract_entity_infos(&md);
+        // client_name wins over organization_name, per language tag.
+        assert_eq!(infos["openid_relying_party"]["display_name"], "Example RP");
+        assert_eq!(
+            infos["openid_relying_party"]["display_name#sv"],
+            "Exempel RP"
+        );
+        assert_eq!(infos["oauth_resource"]["display_name"], "Example API");
+        // organization_name is the last resort and is also kept as its own claim.
+        assert_eq!(infos["federation_entity"]["display_name"], "Example Org");
+        assert_eq!(
+            infos["federation_entity"]["organization_name"],
+            "Example Org"
+        );
+        // An explicit display_name is never overwritten.
+        assert_eq!(infos["openid_provider"]["display_name"], "Explicit");
+    }
+
+    /// Types without informational claims, and unknown types, are omitted.
+    #[test]
+    fn test_extract_entity_infos_skips_types_without_info() {
+        let md = metadata(json!({
+            "openid_provider": {"issuer": "https://op.example.com"},
+            "unknown_type": {"display_name": "Ignored"}
+        }));
+        assert!(extract_entity_infos(&md).is_empty());
+    }
 }

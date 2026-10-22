@@ -899,6 +899,44 @@ The entity statement includes:
      -H "X-API-Key: $INMOR_API_KEY" \
      http://localhost:8000/api/v1/server/entity
 
+Get Entity Collection Statistics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   GET /api/v1/server/collection
+
+Returns statistics of the Entity Collection published by the
+``inmor-collection`` walker, read from the ``inmor:collection:*`` Redis keys.
+The Admin dashboard shows these values. ``trust_anchor`` and ``last_updated``
+are ``null`` until the first walk.
+
+**Response (200 OK):**
+
+.. code-block:: json
+
+   {
+     "total_entities": 523,
+     "by_entity_type": {
+       "openid_provider": 150,
+       "openid_relying_party": 300,
+       "federation_entity": 523,
+       "oauth_authorization_server": 0,
+       "oauth_client": 0,
+       "oauth_resource": 0
+     },
+     "intermediates": 10,
+     "trust_anchor": "https://ta.example.com",
+     "last_updated": 1708420000
+   }
+
+**Example:**
+
+.. code-block:: bash
+
+   curl -H "X-API-Key: $INMOR_API_KEY" \
+     http://localhost:8000/api/v1/server/collection
+
 Create Historical Keys JWT
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 

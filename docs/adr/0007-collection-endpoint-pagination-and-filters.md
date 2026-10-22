@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by ADR 0008 (Entity Collection draft 01): a
+mismatching `trust_anchor` now returns `invalid_trust_anchor`.
 
 ## Context
 
