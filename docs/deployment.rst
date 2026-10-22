@@ -388,15 +388,47 @@ The ``/collection`` endpoint on the Trust Anchor reads this data.
 2. Fetches the trust anchor's entity configuration and extracts its trust mark
    recognition maps (``trust_mark_issuers`` / ``trust_mark_owners``)
 3. Recursively discovers all subordinates by following ``federation_list_endpoint`` links
-4. For each entity, extracts entity types, UI info (display name, logo, policy URI), and trust marks
+4. For each entity, extracts entity types, Entity Type Info (see
+   :ref:`collection-entity-info`), and trust marks
 5. Verifies each entity's trust marks against the trust anchor and indexes the
    verified ones by trust mark type, so the ``/collection`` ``trust_mark_type``
    filter matches only verified marks
 6. Writes all data to **staging Redis keys** (``inmor:collection:staging:*``) during the walk
-7. On completion, atomically swaps staging keys to live keys using a Redis RENAME pipeline
+7. On completion, atomically swaps staging keys to live keys using a Redis RENAME
+   pipeline wrapped in ``MULTI``/``EXEC``
 
 The staging-to-live swap ensures the ``/collection`` endpoint never serves partial data
 during a walk.
+
+If a write to the trust mark index (``by_trustmark:*``, ``trustmark_types``) or
+the Intermediate index (``intermediates``) fails during the walk, the walk logs
+the failure and exits with an error **without** swapping, so the previous
+collection, its counts and ``last_updated`` stay live until the next
+successful walk.
+
+.. _collection-entity-info:
+
+**Entity Type Info extraction:**
+
+For each known entity type in the entity's metadata, the walker copies these
+informational claims (OpenID Federation sec 5.2.2), including every
+language-tagged variant such as ``display_name#sv``: ``display_name``,
+``description``, ``keywords``, ``contacts``, ``logo_uri``, ``policy_uri``,
+``information_uri``, ``organization_name`` and ``organization_uri``. Other
+metadata (keys, endpoints, ...) is never copied.
+
+When ``display_name`` is not set, it is filled per language tag from the
+first available of the following (Entity Collection spec sec 5.2). Language
+tags are compared case-insensitively, so ``client_name#sv-se`` does not add a
+second Swedish name next to ``display_name#sv-SE``:
+
+1. ``client_name`` for ``openid_relying_party`` and ``oauth_client``, or
+   ``resource_name`` for ``oauth_resource``
+2. ``organization_name`` (all entity types)
+
+Trust chains are **not** validated during the walk: an entity is listed when
+its own entity configuration verifies. The collection is informational and
+clients must still resolve and validate the entity.
 
 **Redis keys populated:**
 
@@ -425,6 +457,9 @@ during a walk.
    * - ``inmor:collection:all_sorted``
      - ZSet
      - entity_ids for ordering
+   * - ``inmor:collection:intermediates``
+     - Set
+     - entity_ids below the trust anchor whose ``federation_list_endpoint`` is a string
    * - ``inmor:collection:last_updated``
      - String
      - Unix timestamp of last walk

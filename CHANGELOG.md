@@ -10,6 +10,25 @@
   `pg_upgrade` before this version is started; see
   `docs/postgresql-upgrade.rst` for the named-volume and development
   bind-mount procedures.
+- The `/collection` endpoint follows the OpenID Federation Entity Collection
+  1.0 draft 01. The response claim `ui_infos` is renamed `entity_infos`; a
+  `trust_anchor` other than the collected one returns 404
+  `invalid_trust_anchor` instead of 400 `invalid_request`; `limit=0` is
+  rejected; and `last_updated` is omitted until the first walk. Re-run
+  `inmor-collection` after upgrading to collect the additional entity
+  information (see ADR 0008).
+
+## Added
+
+- `/collection` accepts `POST` with a form-urlencoded body and the
+  `entity_claims`, `info_claims` and `locale` parameters, returning
+  `unsupported_claim` for unsupported claims.
+- The collection walker now collects `description`, `keywords`, `contacts`,
+  `information_uri`, `organization_name`, `organization_uri` and
+  language-tagged variants, using the metadata `display_name` with the
+  spec sec 5.2 fallbacks.
+- Admin API `GET /api/v1/server/collection` and an Entity Collection card on
+  the Admin dashboard.
 
 ## Changed
 
@@ -30,6 +49,29 @@
   references for Django 6.1.
 
 ## Fixed
+
+- `/collection` errors are always JSON, including unknown `entity_type`
+  values (which now match nothing instead of failing), malformed parameters
+  and Redis failures (500 `server_error`).
+- `/status` `collection.intermediates` counted every entity; it now counts
+  only Intermediates below the Trust Anchor.
+- The collection staging-to-live swap now runs in `MULTI`/`EXEC`, so readers
+  never observe a half-swapped collection.
+- `/collection` reads a page of records with a single `HMGET`.
+- `/collection` validates `locale` against the RFC 4647 basic language range
+  grammar (long valid ranges were rejected, `123` accepted), and an unreadable
+  or oversized `POST` body gets the JSON error object instead of plain text.
+- The collection walker compares language tags case-insensitively when
+  filling `display_name` fallbacks, so `client_name#sv-se` no longer adds a
+  second Swedish name next to `display_name#sv-SE`.
+- Only a string `federation_list_endpoint` marks an entity as an Intermediate;
+  a `null` or other non-string value is a leaf, matching subordinate
+  discovery, so `/status` and the Admin statistics no longer over-count.
+- A failed write to the collection Intermediate index now aborts the walk
+  before publication, like trust mark index failures, instead of publishing
+  an undercount to `/status` and the Admin statistics.
+- `just lint-frontend` now type-checks the frontend (`vue-tsc -b`); the old
+  `vue-tsc --noEmit` checked no files. It runs as part of `just lint` and CI.
 
 - The API-key validity column in Django Admin now supplies interpolation
   arguments to `format_html()`, as required by Django 6, instead of raising a

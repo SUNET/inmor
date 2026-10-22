@@ -761,6 +761,32 @@ def test_status_endpoint(loaddata: Redis, start_server: int, http_client: Client
     assert isinstance(collection.get("intermediates"), int)
 
 
+def test_status_counts_only_intermediates(loaddata: Redis, start_server: int, http_client: Client):
+    "/status counts Intermediates from their own index, not every federation_entity."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [
+            {
+                "entity_id": "https://ia.example.com",
+                "entity_types": ["federation_entity"],
+                "intermediate": True,
+            },
+            {
+                "entity_id": "https://rp.example.com",
+                "entity_types": ["openid_relying_party", "federation_entity"],
+            },
+        ],
+    )
+    resp = http_client.get(f"https://localhost:{port}/status")
+    assert resp.status_code == 200, resp.text
+    collection = resp.json()["collection"]
+    assert collection["total_entities"] == 2
+    assert collection["intermediates"] == 1
+    _reset_collection(rdb)
+
+
 def test_resolve_rejects_private_ip(loaddata: Redis, start_server: int, http_client: Client):
     """C1: SSRF protection blocks requests to private IPs when not in dev mode.
 
@@ -1411,14 +1437,20 @@ def _seed_collection(rdb: Redis, entities, trust_anchor: str = _COLLECTION_TA) -
     """Seed the `inmor:collection:*` keys for one collection.
 
     `entities` is a list of dicts, each with `entity_id`, `entity_types`, and
-    optional `ui_infos` and `trust_mark_types` (the verified trust mark types
-    to index for that entity).
+    optional `entity_infos` (or the draft 00 `ui_infos`), `trust_marks`,
+    `intermediate` (index the entity as an Intermediate) and
+    `trust_mark_types` (the verified trust mark types to index for that
+    entity).
     """
     _reset_collection(rdb)
     for ent in entities:
         record = {"entity_id": ent["entity_id"], "entity_types": ent["entity_types"]}
-        if "ui_infos" in ent:
-            record["ui_infos"] = ent["ui_infos"]
+        # Stored record claims are copied verbatim, as the walker would write them.
+        for claim in ("entity_infos", "ui_infos", "trust_marks"):
+            if claim in ent:
+                record[claim] = ent[claim]
+        if ent.get("intermediate"):
+            rdb.sadd("inmor:collection:intermediates", ent["entity_id"])
         rdb.hset("inmor:collection:entities", ent["entity_id"], json.dumps(record))
         for etype in ent["entity_types"]:
             rdb.sadd(f"inmor:collection:by_type:{etype}", ent["entity_id"])
@@ -1580,8 +1612,8 @@ def test_collection_trust_anchor_match_and_mismatch(
         f"https://localhost:{port}/collection",
         params={"trust_anchor": "https://other-ta.example.com"},
     )
-    assert resp.status_code == 400
-    assert resp.json()["error"] == "invalid_request"
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "invalid_trust_anchor"
 
 
 def test_collection_query_filter(loaddata: Redis, start_server: int, http_client: Client):
@@ -1614,7 +1646,7 @@ def test_collection_unsupported_parameter(loaddata: Redis, start_server: int, ht
         rdb,
         [{"entity_id": "https://a.example.com", "entity_types": ["federation_entity"]}],
     )
-    resp = http_client.get(f"https://localhost:{port}/collection", params={"entity_claims": "x"})
+    resp = http_client.get(f"https://localhost:{port}/collection", params={"ui_claims": "x"})
     assert resp.status_code == 400
     assert resp.json()["error"] == "unsupported_parameter"
 
@@ -1675,3 +1707,231 @@ def test_collection_next_cursor_anchors_on_returned_entity(
     cursor_padded = cursor + "=" * (-len(cursor) % 4)
     decoded_next = base64.urlsafe_b64decode(cursor_padded).decode()
     assert decoded_next == "https://a.example.com"
+
+
+# --- /collection draft 01 additions ---------------------------------------
+
+_SHAPED_ENTITY = {
+    "entity_id": "https://op.example.com",
+    "entity_types": ["openid_provider", "openid_relying_party", "federation_entity"],
+    "entity_infos": {
+        "openid_provider": {
+            "display_name": "Example OP",
+            "display_name#sv": "Exempel OP",
+            "display_name#en-US": "Example OP (US)",
+            "logo_uri": "https://op.example.com/logo.png",
+        },
+        "openid_relying_party": {"display_name": "Example RP"},
+        "federation_entity": {"organization_name": "Example Org"},
+    },
+    "trust_marks": [{"trust_mark_type": "https://tm.example.com/a", "trust_mark": "x.y.z"}],
+}
+
+
+def _collection(http_client: Client, port: int, params=None):
+    "GET /collection with the given parameters."
+    return http_client.get(f"https://localhost:{port}/collection", params=params)
+
+
+def test_collection_post_form_body(loaddata: Redis, start_server: int, http_client: Client):
+    "POST with a form-urlencoded body behaves like GET (spec sec 3.3.1)."
+    rdb = loaddata
+    port = start_server
+    ids = [f"https://{c}.example.com" for c in "abc"]
+    _seed_collection(rdb, [{"entity_id": i, "entity_types": ["federation_entity"]} for i in ids])
+    resp = http_client.post(f"https://localhost:{port}/collection", data={"limit": "2"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [e["entity_id"] for e in data["entities"]] == ids[:2]
+    assert "next" in data
+
+
+def test_collection_post_requires_form_content_type(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "POST bodies other than application/x-www-form-urlencoded are rejected."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb, [{"entity_id": "https://a.example.com", "entity_types": ["federation_entity"]}]
+    )
+    resp = http_client.post(f"https://localhost:{port}/collection", json={"limit": 1})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_request"
+
+
+def test_collection_returns_entity_infos(loaddata: Redis, start_server: int, http_client: Client):
+    "Entity Info objects carry entity_infos (draft 01 name) with all claims by default."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port)
+    assert resp.status_code == 200, resp.text
+    entity = resp.json()["entities"][0]
+    assert "ui_infos" not in entity
+    assert entity["entity_infos"] == _SHAPED_ENTITY["entity_infos"]
+    assert entity["trust_marks"] == _SHAPED_ENTITY["trust_marks"]
+
+
+def test_collection_serves_draft00_records(loaddata: Redis, start_server: int, http_client: Client):
+    "Records stored as ui_infos by an older walker are served as entity_infos, nulls dropped."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(
+        rdb,
+        [
+            {
+                "entity_id": "https://rp.example.com",
+                "entity_types": ["openid_relying_party", "federation_entity"],
+                "ui_infos": {
+                    "openid_relying_party": {
+                        "display_name": "Old RP",
+                        "description": None,
+                        "logo_uri": None,
+                        "policy_uri": None,
+                        "information_uri": None,
+                    }
+                },
+            }
+        ],
+    )
+    entity = _collection(http_client, port).json()["entities"][0]
+    assert "ui_infos" not in entity
+    assert entity["entity_infos"] == {"openid_relying_party": {"display_name": "Old RP"}}
+
+
+def test_collection_entity_claims(loaddata: Redis, start_server: int, http_client: Client):
+    "entity_claims limits the returned Entity Info claims; entity_id is always present."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port, {"entity_claims": "entity_types"})
+    assert resp.status_code == 200, resp.text
+    entity = resp.json()["entities"][0]
+    assert set(entity) == {"entity_id", "entity_types"}
+
+
+def test_collection_info_claims_and_locale(loaddata: Redis, start_server: int, http_client: Client):
+    "info_claims and locale filter the Entity Type Info claims (RFC 4647 basic filtering)."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port, [("info_claims", "display_name"), ("locale", "en")])
+    assert resp.status_code == 200, resp.text
+    infos = resp.json()["entities"][0]["entity_infos"]
+    assert infos["openid_provider"] == {
+        "display_name": "Example OP",
+        "display_name#en-US": "Example OP (US)",
+    }
+    # federation_entity had no display_name left, so it is omitted.
+    assert "federation_entity" not in infos
+
+
+def test_collection_unsupported_claim(loaddata: Redis, start_server: int, http_client: Client):
+    "Requesting a claim the responder does not support returns unsupported_claim."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    for params in ({"entity_claims": "metadata"}, {"info_claims": "jwks"}):
+        resp = _collection(http_client, port, params)
+        assert resp.status_code == 400, params
+        body = resp.json()
+        assert body["error"] == "unsupported_claim"
+        assert body["error_description"]
+
+
+def test_collection_invalid_locale(loaddata: Redis, start_server: int, http_client: Client):
+    "Locales outside the RFC 4647 basic language range grammar are invalid_request."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    # Regression: `123` and over-long subtags used to be accepted.
+    for locale in ("en_US!", "123", "en-abcdefghi", "en--US"):
+        resp = _collection(http_client, port, {"locale": locale})
+        assert resp.status_code == 400, locale
+        assert resp.json()["error"] == "invalid_request"
+
+
+def test_collection_long_valid_locale(loaddata: Redis, start_server: int, http_client: Client):
+    "A valid language range longer than 35 characters is accepted."
+    # Regression: a 35-byte cap rejected valid ranges like this one.
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port, {"locale": "de-Latn-DE-1996-u-ca-gregory-co-phonebk"})
+    assert resp.status_code == 200, resp.text
+    # Only untagged values survive: no stored tag matches the range.
+    infos = resp.json()["entities"][0]["entity_infos"]
+    assert "display_name#sv" not in infos["openid_provider"]
+    assert infos["openid_provider"]["display_name"] == "Example OP"
+
+
+def test_collection_post_oversized_body_is_json_error(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "A POST body over the payload limit gets the JSON error object, not plain text."
+    # Regression: body extraction failures bypassed the endpoint's JSON errors.
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    # actix-web's default payload limit is 256 KiB.
+    resp = http_client.post(
+        f"https://localhost:{port}/collection",
+        content=b"query=" + b"a" * (300 * 1024),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 413
+    assert resp.headers["content-type"].startswith("application/json")
+    body = resp.json()
+    assert body["error"] == "invalid_request"
+    assert body["error_description"]
+
+
+def test_collection_entity_type_restricts_entity_infos(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "With entity_type, entity_infos only holds the requested types plus federation_entity."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port, {"entity_type": "openid_provider"})
+    assert resp.status_code == 200, resp.text
+    entity = resp.json()["entities"][0]
+    assert set(entity["entity_infos"]) == {"openid_provider", "federation_entity"}
+    # entity_types still lists every type known for the entity.
+    assert entity["entity_types"] == _SHAPED_ENTITY["entity_types"]
+
+
+def test_collection_unknown_entity_type_matches_nothing(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "An entity type the walker never indexed yields an empty list, not an error."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    resp = _collection(http_client, port, {"entity_type": "https://example.com/custom_type"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["entities"] == []
+
+
+def test_collection_zero_limit_rejected(loaddata: Redis, start_server: int, http_client: Client):
+    "limit=0 cannot be honoured without exceeding it, so it is invalid_request."
+    rdb = loaddata
+    port = start_server
+    _seed_collection(rdb, [_SHAPED_ENTITY])
+    for value in ("0", "-1", "abc"):
+        resp = _collection(http_client, port, {"limit": value})
+        assert resp.status_code == 400, value
+        assert resp.json()["error"] == "invalid_request"
+
+
+def test_collection_without_walk_omits_last_updated(
+    loaddata: Redis, start_server: int, http_client: Client
+):
+    "Before any walk the response is an empty list without last_updated."
+    rdb = loaddata
+    port = start_server
+    _reset_collection(rdb)
+    resp = _collection(http_client, port)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"entities": []}

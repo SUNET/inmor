@@ -914,6 +914,67 @@ def create_server_entity(request: HttpRequest):
     return 201, {"entity_statement": token}
 
 
+# Entity types whose collection index sizes are reported. Mirrors
+# KNOWN_ENTITY_TYPES in the Rust walker (src/lib.rs).
+COLLECTION_ENTITY_TYPES = (
+    "openid_provider",
+    "openid_relying_party",
+    "federation_entity",
+    "oauth_authorization_server",
+    "oauth_client",
+    "oauth_resource",
+)
+
+
+class CollectionStats(Schema):
+    "Summary of the Entity Collection data written by the inmor-collection walker."
+
+    total_entities: int
+    by_entity_type: dict[str, int]
+    intermediates: int
+    trust_anchor: str | None
+    last_updated: int | None
+
+
+def _redis_str(value: bytes | str | None) -> str | None:
+    "Decodes a Redis string reply, which django-redis returns as bytes."
+    if isinstance(value, bytes):
+        return value.decode()
+    return value
+
+
+@router.get("/server/collection", response={200: CollectionStats})
+def get_collection_stats(request: HttpRequest):
+    """Returns Entity Collection statistics read from Redis.
+
+    The counts come from the `inmor:collection:*` keys the inmor-collection
+    walker publishes. `trust_anchor` and `last_updated` are null until the
+    first successful walk.
+    """
+    con: Redis = get_redis_connection("default")
+    # One round-trip for every count.
+    pipe = con.pipeline()
+    pipe.hlen("inmor:collection:entities")
+    for etype in COLLECTION_ENTITY_TYPES:
+        pipe.scard(f"inmor:collection:by_type:{etype}")
+    pipe.scard("inmor:collection:intermediates")
+    pipe.get("inmor:collection:trust_anchor")
+    pipe.get("inmor:collection:last_updated")
+    results = pipe.execute()
+
+    total, *rest = results
+    type_counts = rest[: len(COLLECTION_ENTITY_TYPES)]
+    intermediates, trust_anchor, last_updated = rest[len(COLLECTION_ENTITY_TYPES) :]
+    last_updated = _redis_str(last_updated)
+    return 200, {
+        "total_entities": total,
+        "by_entity_type": dict(zip(COLLECTION_ENTITY_TYPES, type_counts, strict=True)),
+        "intermediates": intermediates,
+        "trust_anchor": _redis_str(trust_anchor),
+        "last_updated": int(last_updated) if last_updated is not None else None,
+    }
+
+
 @router.post("/server/historical_keys", response={201: Message, 404: Message})
 def create_historical_keys(request: HttpRequest):
     """Creates signed historical keys JWT and stores in Redis.

@@ -365,6 +365,8 @@ The Trust Anchor stores federation data in Redis:
      - Entity Identifier the collection was walked from
    * - ``inmor:collection:all_sorted``
      - Sorted set of entity IDs for consistent ordering
+   * - ``inmor:collection:intermediates``
+     - Set of Intermediate entity IDs (counted by ``/status``)
    * - ``inmor:collection:last_updated``
      - Unix timestamp of the last collection walk
 

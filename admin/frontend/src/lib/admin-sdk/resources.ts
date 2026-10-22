@@ -137,3 +137,17 @@ export const EntityConfigSchema = object({
     authority_hints: optional(nullable(array(string()))),
     trust_marks: optional(nullable(array(record(string(), unknown())))),
 });
+
+/**
+ * Entity Collection statistics from `GET /server/collection`, read from the
+ * Redis keys the inmor-collection walker publishes. `trust_anchor` and
+ * `last_updated` (Unix seconds) are null until the first walk.
+ */
+export type CollectionStats = InferOutput<typeof CollectionStatsSchema>;
+export const CollectionStatsSchema = object({
+    total_entities: number(),
+    by_entity_type: record(string(), number()),
+    intermediates: number(),
+    trust_anchor: nullable(string()),
+    last_updated: nullable(number()),
+});

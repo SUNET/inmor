@@ -507,18 +507,26 @@ Entity Collection
 .. code-block:: text
 
    GET /collection
+   POST /collection
 
 Returns a list of all entities discovered in the federation tree, per the
 `Entity Collection Endpoint specification <https://openid.net/specs/openid-federation-entity-collection-endpoint-1_0.html>`_
-(draft 00).
+(draft 01).
 
 This endpoint reads pre-populated data from Redis. The data is populated by running the
 ``inmor-collection`` CLI tool, which walks the federation tree from a trust anchor and
 stores entity information. See :ref:`collection-cli` for details.
 
+The response is informational and unsigned. Clients must still perform trust
+validation (for example through ``/resolve``) before relying on an entity, and
+must treat the returned ``trust_marks`` as unverified.
+
 **Request Parameters:**
 
-All parameters are optional and passed as query parameters.
+All parameters are optional. With ``GET`` they are passed in the query string;
+with ``POST`` they are passed in an ``application/x-www-form-urlencoded`` body
+(any other ``Content-Type`` returns ``invalid_request``). Parameters marked
+*repeatable* may be given several times.
 
 .. list-table::
    :header-rows: 1
@@ -528,20 +536,42 @@ All parameters are optional and passed as query parameters.
      - Description
    * - ``entity_type``
      - Repeatable. Filter to entities that include the given Entity Type.
-       Multiple values combine with **OR**.
+       Multiple values combine with **OR**. A type that the walker never
+       indexed (any type outside ``openid_provider``, ``openid_relying_party``,
+       ``federation_entity``, ``oauth_authorization_server``, ``oauth_client``,
+       ``oauth_resource``) matches no entity. When given, ``entity_infos`` only
+       contains the requested types plus ``federation_entity``.
    * - ``trust_mark_type``
      - Repeatable. Filter to entities that have a *verified* Trust Mark of the
        given type. Multiple values combine with **AND**.
    * - ``trust_anchor``
      - The Trust Anchor the collection was built from. When omitted it
-       defaults to the collected Trust Anchor; a value that does not match it
-       returns ``invalid_request``.
+       defaults to the collected Trust Anchor; any other value returns
+       ``invalid_trust_anchor``.
    * - ``query``
      - Free-text filter. Matched case-insensitively as a substring against the
-       entity_id and any UI display names.
+       entity_id and every ``display_name`` (in all languages).
+   * - ``entity_claims``
+     - Repeatable. Entity Info claims to return: ``entity_id``,
+       ``entity_types``, ``entity_infos``, ``trust_marks``. ``entity_id`` is
+       always returned. When omitted, all claims are returned.
+   * - ``info_claims``
+     - Repeatable. Entity Type Info claims to return inside ``entity_infos``:
+       ``display_name``, ``description``, ``keywords``, ``contacts``,
+       ``logo_uri``, ``policy_uri``, ``information_uri``,
+       ``organization_name``, ``organization_uri``. Language-tagged variants
+       (``display_name#sv``) follow their base claim. When omitted, all
+       collected claims are returned.
+   * - ``locale``
+     - Repeatable. RFC 4647 basic language range: ``*``, or a 1-8 letter
+       subtag followed by ``-``-separated 1-8 character alphanumeric subtags
+       (e.g. ``en``, ``sv-SE``). Language-tagged claims are limited to
+       tags matching any given range using RFC 4647 basic filtering (``en``
+       matches ``en`` and ``en-US``); untagged values are always returned.
+       When omitted, all languages are returned.
    * - ``limit``
-     - Maximum number of entities in the response. Defaults to 100 and is
-       capped at 500.
+     - Maximum number of entities in the response, at least 1. Defaults to
+       100 and is capped at 500.
    * - ``from``
      - Opaque pagination cursor. Pass the ``next`` value from a previous
        response to fetch the following page.
@@ -559,23 +589,25 @@ Filters of different kinds combine with **AND**.
        {
          "entity_id": "https://op.example.com",
          "entity_types": ["openid_provider", "federation_entity"],
-         "ui_infos": {
+         "entity_infos": {
            "openid_provider": {
              "display_name": "Example OP",
+             "display_name#sv": "Exempel OP",
              "logo_uri": "https://op.example.com/logo.png"
            },
            "federation_entity": {
-             "display_name": "Example Organization"
+             "display_name": "Example Organization",
+             "organization_name": "Example Organization"
            }
          },
          "trust_marks": [
-           {"id": "https://ta.example.com/tm/member", "trust_mark": "eyJ..."}
+           {"trust_mark_type": "https://ta.example.com/tm/member", "trust_mark": "eyJ..."}
          ]
        },
        {
          "entity_id": "https://rp.example.com",
          "entity_types": ["openid_relying_party", "federation_entity"],
-         "ui_infos": {
+         "entity_infos": {
            "openid_relying_party": {
              "display_name": "Example RP"
            }
@@ -602,24 +634,34 @@ page; pass it back as the ``from`` parameter to retrieve them.
    * - ``entities[].entity_id``
      - The entity identifier (URL)
    * - ``entities[].entity_types``
-     - Array of entity types (``openid_provider``, ``openid_relying_party``, ``federation_entity``, ``oauth_authorization_server``, ``oauth_client``, ``oauth_resource``)
-   * - ``entities[].ui_infos``
-     - Optional. UI information per entity type (display_name, logo_uri, policy_uri)
+     - Array of every known entity type of the entity (``openid_provider``, ``openid_relying_party``, ``federation_entity``, ``oauth_authorization_server``, ``oauth_client``, ``oauth_resource``), independent of the ``entity_type`` filter
+   * - ``entities[].entity_infos``
+     - Optional. Entity Type Info object per entity type, holding the
+       informational metadata claims listed under ``info_claims``. Claims
+       without a value are omitted, as are types without any claim. See
+       :ref:`collection-entity-info` for how the values are derived.
    * - ``entities[].trust_marks``
-     - Optional. Array of trust marks attached to the entity
+     - Optional. Trust Mark objects (``trust_mark_type``, ``trust_mark``) from
+       the entity's configuration, unverified
    * - ``next``
      - Optional. Opaque pagination cursor; present only when more results exist
    * - ``last_updated``
-     - Unix timestamp of the last collection walk
+     - Unix timestamp of the last collection walk. Absent until the first walk
 
 **Example:**
 
 .. code-block:: bash
 
-   curl https://federation.example.com/collection
+   curl 'https://federation.example.com/collection?entity_type=openid_provider&info_claims=display_name&locale=sv'
+   curl -X POST -d 'limit=10' -d 'entity_claims=entity_types' https://federation.example.com/collection
 
-If no collection data has been populated yet, the response will be an empty entity list
-with ``last_updated: 0``.
+If no collection data has been populated yet, the response is ``{"entities": []}``.
+
+.. note::
+
+   Draft 00 named ``entity_infos`` ``ui_infos``. Collections written by an
+   older ``inmor-collection`` are still served under the new name; re-run the
+   walker after upgrading to collect the additional claims.
 
 **Errors:**
 
@@ -634,15 +676,28 @@ Error responses are JSON objects with ``error`` and ``error_description`` fields
      - Cause
    * - ``unsupported_parameter``
      - 400
-     - The request used a query parameter the endpoint does not support
+     - The request used a parameter the endpoint does not support
+   * - ``unsupported_claim``
+     - 400
+     - ``entity_claims`` or ``info_claims`` requested a claim the endpoint
+       does not support
    * - ``invalid_request``
      - 400
-     - A malformed parameter -- a bad ``limit``, an unparseable ``from``
-       cursor, or a ``trust_anchor`` that does not match the collected one
+     - A malformed request -- unparseable parameters, a ``limit`` that is not
+       a positive integer, an unparseable ``from`` cursor, an invalid
+       ``locale``, or a ``POST`` body that is not form-urlencoded or cannot
+       be read. A ``POST`` body over the 256 KiB payload limit returns this
+       error with status 413
    * - ``page_not_found``
      - 404
      - The ``from`` cursor points at an entity the responder no longer knows;
        restart pagination from the first page
+   * - ``invalid_trust_anchor``
+     - 404
+     - ``trust_anchor`` is not the Trust Anchor the collection was built from
+   * - ``server_error``
+     - 500
+     - The collection data could not be read from Redis
 
 Index Page
 ^^^^^^^^^^
