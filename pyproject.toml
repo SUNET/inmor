@@ -1,7 +1,7 @@
 [project]
 name = "pyinmor"
 authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
-version = "0.5.0"
+version = "0.5.1"
 description = "Inmor Trust Anchor"
 license = { file="LICENSE" }
 requires-python = '>=3.13'
@@ -28,12 +28,7 @@ Home = "https://github.com/SUNET/inmor"
 # date which uv resolves against the local timezone) keeps `uv sync
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
-exclude-newer = "2026-10-19T00:00:00Z"
-# Security exception to the cooling window: certifi 2026.10.19 is the
-# corrected root CA incident release. It drops "emSign ECC Root CA - G3",
-# matching Debian's ca-certificates 20250419+deb13u1 (2026.10.18 had also
-# dropped three emSign roots that were later restored).
-exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
+exclude-newer = "2026-11-01T00:00:00Z"
 
 [tool.pyright]
 stubPath = "typings"
