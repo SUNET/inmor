@@ -40,12 +40,15 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: actions-setup-redis
-        uses: shogo82148/actions-setup-redis@v1.58.0
-        with:
-          auto-start: false
-          distribution: "valkey"
-          redis-version: "7.2"
+      # pytest-redis starts its own redis-server, so only the binary is needed.
+      # The Ubuntu package comes from the runner's apt mirror instead of a
+      # GitHub release download, which failed with HTTP 504s.
+      - name: Install redis-server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends redis-server
+          sudo systemctl stop redis-server || true
+          redis-server --version
 
       - name: Install just
         uses: extractions/setup-just@v4
