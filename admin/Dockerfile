@@ -1,4 +1,4 @@
-FROM python:3.13 as build
+FROM python:3.14 as build
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 RUN <<EOT
@@ -10,7 +10,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
-    UV_PYTHON=python3.13 \
+    UV_PYTHON=python3.14 \
     UV_PROJECT_ENVIRONMENT=/app
 
 RUN --mount=type=cache,target=/root/.cache \
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache \
         --no-install-project
 
 ##### Production image
-FROM python:3.13
+FROM python:3.14
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/app/bin:$PATH
 # Don't run your app as root.

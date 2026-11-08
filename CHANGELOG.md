@@ -1,4 +1,32 @@
 
+<a id='changelog-0.5.1'></a>
+# 0.5.1 - 2026-11-08
+
+## Breaking changes
+
+- The Admin and the TA test environment now require Python 3.14
+  (`requires-python = '>=3.14'`). The Admin image is built from
+  `python:3.14`.
+
+## Dependencies
+
+- Rust: in-range updates via `cargo update`, including actix-web 4.18.2,
+  redis 1.8.1, tokio 1.54.1, toml 1.2.1 and openssl 0.10.82. `cargo audit`
+  reports no advisories.
+- Python: the uv dependency cooling window (`exclude-newer`) moves to
+  2026-11-01T00:00:00Z for both the TA test environment and the Admin. The
+  certifi exception from 0.5.0 is removed because the window now covers it;
+  certifi moves to 2026.10.23. Admin updates include django-allauth 65.21.1,
+  django-ninja 1.7.3, granian 2.8.7 and pydantic 2.14.2.
+- Frontend: in-range updates with a 7-day minimum release age, including
+  vue 3.5.44, vite 7.3.7, vue-tsc 3.3.14, valibot 1.5.0 and the CodeMirror
+  packages. Major upgrades (TypeScript 7, Vite 8, vue-router 5) are not
+  included.
+- CI: GitHub Actions updated (rust-toolchain, setup-uv 10.3.3, setup-just
+  pinned to a commit). Tests run on Python 3.14 against Redis 7.4, copied
+  from the official `redis:7.4` image to match the production Redis 7 line,
+  instead of downloading Valkey from GitHub releases.
+
 <a id='changelog-0.5.0'></a>
 # 0.5.0 - 2026-10-22
 

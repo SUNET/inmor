@@ -1000,7 +1000,7 @@ def create_historical_keys(request: HttpRequest):
                     # Only include keys that have an "exp" field
                     if "exp" in key_data:
                         keys.append(key_data)
-            except (json.JSONDecodeError, IOError):
+            except json.JSONDecodeError, IOError:
                 continue
 
     if not keys:

@@ -3,6 +3,9 @@
 !db.json
 !private.json
 !public.json
+# Frontend project config must stay visible to tools that honor .gitignore
+!package.json
+!tsconfig*.json
 
 
 # Byte-compiled / optimized / DLL files
