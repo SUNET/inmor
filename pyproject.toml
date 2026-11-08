@@ -4,7 +4,7 @@ authors = [{name = "Kushal Das", email = "kushal@sunet.se"}]
 version = "0.5.1"
 description = "Inmor Trust Anchor"
 license = { file="LICENSE" }
-requires-python = '>=3.13'
+requires-python = '>=3.14'
 
 dependencies = [
 	"jwcrypto",

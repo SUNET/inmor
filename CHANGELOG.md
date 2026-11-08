@@ -2,6 +2,12 @@
 <a id='changelog-0.5.1'></a>
 # 0.5.1 - 2026-11-08
 
+## Breaking changes
+
+- The Admin and the TA test environment now require Python 3.14
+  (`requires-python = '>=3.14'`). The Admin image is built from
+  `python:3.14`.
+
 ## Dependencies
 
 - Rust: in-range updates via `cargo update`, including actix-web 4.18.2,
@@ -16,6 +22,10 @@
   vue 3.5.44, vite 7.3.7, vue-tsc 3.3.14, valibot 1.5.0 and the CodeMirror
   packages. Major upgrades (TypeScript 7, Vite 8, vue-router 5) are not
   included.
+- CI: GitHub Actions updated (rust-toolchain, setup-uv 10.3.3, setup-just
+  pinned to a commit). Tests run on Python 3.14 against Redis 7.4, copied
+  from the official `redis:7.4` image to match the production Redis 7 line,
+  instead of downloading Valkey from GitHub releases.
 
 <a id='changelog-0.5.0'></a>
 # 0.5.0 - 2026-10-22
