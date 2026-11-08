@@ -42,21 +42,26 @@ jobs:
         with:
           python-version: "3.14"
 
-      # pytest-redis starts its own redis-server, so only the binary is needed.
-      # Copy it from the official image instead of downloading a GitHub
-      # release (which failed with HTTP 504s) or using the apt package (whose
-      # version follows the runner image). redis:7.4 is the 7.x line that
+      # pytest-redis starts its own redis-server, and tests/conftest.py loads
+      # the fixture data with redis-cli, so both binaries are needed. Copy
+      # them from the official image instead of downloading a GitHub release
+      # (which failed with HTTP 504s) or using the apt package (whose version
+      # follows the runner image). redis:7.4 is the 7.x line that
       # production's redis:7-alpine tracks; the Debian-based tag is needed
-      # because the Alpine binary is musl-linked. Nothing is started here.
-      - name: Install redis-server
+      # because the Alpine binaries are musl-linked. Nothing is started here.
+      - name: Install redis-server and redis-cli
         env:
           REDIS_IMAGE: redis:7.4
         run: |
           docker create --name redis-bin "$REDIS_IMAGE"
-          sudo docker cp redis-bin:/usr/local/bin/redis-server /usr/local/bin/redis-server
+          for bin in redis-server redis-cli; do
+            sudo docker cp "redis-bin:/usr/local/bin/$bin" "/usr/local/bin/$bin"
+          done
           docker rm redis-bin
-          redis-server --version
-          redis-server --version | grep -q ' v=7\.4\.' || { echo "expected Redis 7.4"; exit 1; }
+          for bin in redis-server redis-cli; do
+            "$bin" --version
+            "$bin" --version | grep -qE '(v=| )7\.4\.' || { echo "expected $bin 7.4"; exit 1; }
+          done
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
