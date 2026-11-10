@@ -60,14 +60,11 @@ services:
       retries: 5
       start_period: 80s
     volumes:
-      - ./db:/var/lib/postgresql/data
+      - ./db:/var/lib/postgresql
     ports:
       - "5432:5432"
     environment:
       - 'POSTGRES_HOST_AUTH_METHOD=trust'
-      # Keep the pre-18 data layout so ./db keeps working (the 18 image
-      # defaults to /var/lib/postgresql/18/docker).
-      - 'PGDATA=/var/lib/postgresql/data'
   redis:
     restart: always
     image: redis:7-alpine

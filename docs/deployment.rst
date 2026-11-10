@@ -76,9 +76,6 @@ The Docker Compose setup includes 5 services:
        image: postgres:18-alpine
        ports:
          - "5432:5432"
-       environment:
-         - PGDATA=/var/lib/postgresql/data
-
      redis:
        image: redis:7-alpine
 
@@ -297,16 +294,10 @@ Mount a persistent volume::
    services:
      db:
        volumes:
-         - postgres_data:/var/lib/postgresql/data
-       environment:
-         - PGDATA=/var/lib/postgresql/data
+         - postgres_data:/var/lib/postgresql
 
    volumes:
      postgres_data:
-
-The PostgreSQL 18 image defaults to ``/var/lib/postgresql/18/docker``; setting
-``PGDATA=/var/lib/postgresql/data`` keeps the layout used by earlier Inmor
-releases, so existing volumes stay mounted at the same path.
 
 When moving an existing deployment from PostgreSQL 14 or 15 to 18, a persistent
 volume must be converted before the new database service starts. See

@@ -21,24 +21,15 @@ Data directory layout
 
 The official PostgreSQL 18 image changed its default data directory from
 ``/var/lib/postgresql/data`` to ``/var/lib/postgresql/18/docker`` and now
-expects a single mount at ``/var/lib/postgresql``. Inmor keeps the earlier
-layout instead: the bundled Compose files still mount the database at
-``/var/lib/postgresql/data`` and set ``PGDATA=/var/lib/postgresql/data`` on the
-``db`` service. Existing volumes therefore only need ``pg_upgrade``; no files
-have to be moved.
+expects a single mount at ``/var/lib/postgresql``.
 
-If you maintain your own Compose file, add the ``PGDATA`` setting to its
+If you maintain your own Compose file, adjust the postgres mount to its
 ``db`` service as well::
 
    db:
      image: postgres:18-alpine
      volumes:
-       - postgres_data:/var/lib/postgresql/data
-     environment:
-       - PGDATA=/var/lib/postgresql/data
-
-Without it, PostgreSQL 18 refuses to start and reports that there
-``appears to be PostgreSQL data in: /var/lib/postgresql/data``.
+       - postgres_data:/var/lib/postgresql
 
 Upgrade tool
 ------------
@@ -51,14 +42,6 @@ should review and pin the upgrade image according to their image-promotion
 policy before use. See the `pgautoupgrade project documentation
 <https://github.com/pgautoupgrade/docker-pgautoupgrade>`_ for implementation
 and image details.
-
-.. warning::
-
-   Always pass ``--env PGDATA=/var/lib/postgresql/data`` to the upgrade
-   container, as shown below. Without it the container looks in
-   ``/var/lib/postgresql/18/docker``, finds nothing, and **exits successfully
-   without upgrading anything**. The ``PG_VERSION`` check after the upgrade
-   catches this.
 
 The upgraded cluster keeps the data checksum setting of the old cluster.
 PostgreSQL 18 enables checksums by default only for newly initialized
@@ -127,8 +110,7 @@ The command must print ``14`` or ``15``. Run the one-shot upgrade::
    test -s postgres-old-data.tar.gz
 
    docker run --rm \
-     --volume <postgres-volume>:/var/lib/postgresql/data \
-     --env PGDATA=/var/lib/postgresql/data \
+     --volume <postgres-volume>:/var/lib/postgresql \
      --env PGAUTO_ONESHOT=yes \
      --env POSTGRES_USER=postgres \
      --env POSTGRES_DB=postgres \
