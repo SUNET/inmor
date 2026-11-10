@@ -5,10 +5,10 @@ This guide covers deploying Inmor using Docker Compose for production environmen
 
 .. danger::
 
-   Existing deployments must run ``pg_upgrade`` on every PostgreSQL 14 data
-   volume **before** starting this version's PostgreSQL 15 container. Follow
-   :doc:`postgresql-upgrade`; starting PostgreSQL 15 against an unconverted
-   PostgreSQL 14 volume will fail.
+   Existing deployments must run ``pg_upgrade`` on every PostgreSQL 14 or 15
+   data volume **before** starting this version's PostgreSQL 18 container.
+   Follow :doc:`postgresql-upgrade`; starting PostgreSQL 18 against an
+   unconverted volume will fail.
 
 .. danger::
 
@@ -45,7 +45,7 @@ The Docker Compose setup includes 5 services:
 
 * **ta** - Trust Anchor (Rust) on port 8080
 * **admin** - Admin Portal (Django) on port 8000
-* **db** - PostgreSQL 15 database
+* **db** - PostgreSQL 18 database
 * **redis** - Redis 7 for caching and federation data
 * **frontend** - UI for admin work on port 5173
 
@@ -73,9 +73,11 @@ The Docker Compose setup includes 5 services:
            condition: service_healthy
 
      db:
-       image: postgres:15-alpine
+       image: postgres:18-alpine
        ports:
          - "5432:5432"
+       environment:
+         - PGDATA=/var/lib/postgresql/data
 
      redis:
        image: redis:7-alpine
@@ -296,11 +298,17 @@ Mount a persistent volume::
      db:
        volumes:
          - postgres_data:/var/lib/postgresql/data
+       environment:
+         - PGDATA=/var/lib/postgresql/data
 
    volumes:
      postgres_data:
 
-When moving an existing deployment from PostgreSQL 14 to 15, a persistent
+The PostgreSQL 18 image defaults to ``/var/lib/postgresql/18/docker``; setting
+``PGDATA=/var/lib/postgresql/data`` keeps the layout used by earlier Inmor
+releases, so existing volumes stay mounted at the same path.
+
+When moving an existing deployment from PostgreSQL 14 or 15 to 18, a persistent
 volume must be converted before the new database service starts. See
 :doc:`postgresql-upgrade` for the required backup, ``pg_upgrade``, verification,
 and rollback procedure.

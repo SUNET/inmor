@@ -52,9 +52,9 @@ services:
 
   db:
     restart: always
-    # Existing PostgreSQL 14 volumes must be converted first. See
-    # docs/postgresql-upgrade.rst before starting this PostgreSQL 15 service.
-    image: postgres:15-alpine
+    # Existing PostgreSQL 14 or 15 volumes must be converted first. See
+    # docs/postgresql-upgrade.rst before starting this PostgreSQL 18 service.
+    image: postgres:18-alpine
     shm_size: 1024mb
     networks:
       - inmor-net
@@ -74,6 +74,10 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=changeme
       - POSTGRES_DB=postgres
+      # Keep the pre-18 data layout so existing volumes mounted at
+      # /var/lib/postgresql/data keep working (the 18 image defaults to
+      # /var/lib/postgresql/18/docker).
+      - PGDATA=/var/lib/postgresql/data
 
   redis:
     restart: always
