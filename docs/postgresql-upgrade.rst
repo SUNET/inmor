@@ -158,6 +158,12 @@ archive, and run the one-shot upgrade::
 
 The final command must print ``18``.
 
+Move data into new structure::
+
+   mkdir -p db/18/docker/
+
+   mv db/* db/18/docker/
+
 If the development database is disposable, removing ``./db`` while all
 services are stopped lets PostgreSQL 18 create a new empty cluster. This
 permanently deletes the local database and is not an upgrade; never use that
