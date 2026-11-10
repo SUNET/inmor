@@ -1,3 +1,12 @@
+# Unreleased
+
+## Breaking changes
+
+- All bundled Docker Compose configurations and CI now use PostgreSQL 18
+  (`postgres:18-alpine`) instead of PostgreSQL 15. Existing PostgreSQL 14 or
+  15 database volumes must be backed up and converted with `pg_upgrade`
+  before this version is started; see `docs/postgresql-upgrade.rst`.
+
 
 <a id='changelog-0.5.1'></a>
 # 0.5.1 - 2026-11-08

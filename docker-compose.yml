@@ -52,9 +52,9 @@ services:
 
   db:
     restart: always
-    # Existing PostgreSQL 14 volumes must be converted first. See
-    # docs/postgresql-upgrade.rst before starting this PostgreSQL 15 service.
-    image: postgres:15-alpine
+    # Existing PostgreSQL 14 or 15 volumes must be converted first. See
+    # docs/postgresql-upgrade.rst before starting this PostgreSQL 18 service.
+    image: postgres:18-alpine
     shm_size: 1024mb
     networks:
       - inmor-net
@@ -65,7 +65,7 @@ services:
       retries: 5
       start_period: 80s
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     # No port exposed — only accessible within the container network
     environment:
       # Option 1: Trust auth (simple, no password)
