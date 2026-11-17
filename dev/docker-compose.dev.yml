@@ -47,9 +47,9 @@ services:
       - "8080:8080"
   db:
     restart: always
-    # If ./db contains PostgreSQL 14 data, upgrade it first. See
-    # docs/postgresql-upgrade.rst before starting this PostgreSQL 15 service.
-    image: postgres:15-alpine
+    # If ./db contains PostgreSQL 14 or 15 data, upgrade it first. See
+    # docs/postgresql-upgrade.rst before starting this PostgreSQL 18 service.
+    image: postgres:18-alpine
     shm_size: 1024mb
     networks:
       - inmor-net
@@ -60,7 +60,7 @@ services:
       retries: 5
       start_period: 80s
     volumes:
-      - ./db:/var/lib/postgresql/data
+      - ./db:/var/lib/postgresql
     ports:
       - "5432:5432"
     environment:

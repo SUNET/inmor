@@ -33,10 +33,10 @@ Quick Installation
 
 .. danger::
 
-   Upgrading an existing checkout with PostgreSQL 14 data is not a quick-start
-   operation. Complete :doc:`postgresql-upgrade` before running ``just up`` or
-   ``docker compose up`` with this version. New installations with no existing
-   database volume can continue below.
+   Upgrading an existing checkout with PostgreSQL 14 or 15 data is not a
+   quick-start operation. Complete :doc:`postgresql-upgrade` before running
+   ``just up`` or ``docker compose up`` with this version. New installations
+   with no existing database volume can continue below.
 
 1. Clone the repository::
 
