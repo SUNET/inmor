@@ -293,21 +293,9 @@ mod tests {
         (private_jwk, public_jwk, kid)
     }
 
-    fn all_types() -> [KeyType; 7] {
-        [
-            KeyType::Rs256,
-            KeyType::Ps256,
-            KeyType::Es256,
-            KeyType::Es384,
-            KeyType::Es512,
-            KeyType::Ed25519,
-            KeyType::Ed448,
-        ]
-    }
-
     #[test]
     fn generated_keys_have_expected_fields() {
-        for key_type in all_types() {
+        for &key_type in KeyType::value_variants() {
             let (private_jwk, public_jwk, kid) = generate_stamped(key_type);
 
             for jwk in [&private_jwk, &public_jwk] {
@@ -327,12 +315,18 @@ mod tests {
                 "{key_type:?} kid"
             );
 
-            // Private material is present in the private JWK only.
-            assert!(
-                private_jwk.d.is_some(),
-                "{key_type:?} private key missing 'd'"
-            );
             assert!(public_jwk.d.is_none(), "{key_type:?} public key leaked 'd'");
+            assert!(
+                public_jwk.priv_.is_none(),
+                "{key_type:?} public key leaked 'priv'"
+            );
+            if key_type.alg().starts_with("ML-DSA-") {
+                assert_eq!(private_jwk.kty, "AKP");
+                assert!(private_jwk.priv_.is_some(), "{key_type:?} missing 'priv'");
+                assert!(public_jwk.pub_.is_some(), "{key_type:?} missing 'pub'");
+            } else {
+                assert!(private_jwk.d.is_some(), "{key_type:?} missing 'd'");
+            }
 
             // The private JWK is a complete superset of the public JWK.
             assert_eq!(private_jwk.kty, public_jwk.kty, "{key_type:?} kty");
@@ -343,6 +337,7 @@ mod tests {
                     jwk.crv.clone(),
                     jwk.x.clone(),
                     jwk.y.clone(),
+                    jwk.pub_.clone(),
                 ]
             };
             assert_eq!(
@@ -351,7 +346,7 @@ mod tests {
                 "{key_type:?} private key does not carry the public members"
             );
             assert!(
-                public_jwk.n.is_some() || public_jwk.x.is_some(),
+                public_jwk.n.is_some() || public_jwk.x.is_some() || public_jwk.pub_.is_some(),
                 "{key_type:?} public key has no public material"
             );
         }
@@ -372,7 +367,7 @@ mod tests {
     #[test]
     fn generated_keys_sign_and_verify() {
         let payload = b"inmor-keygeneration round-trip";
-        for key_type in all_types() {
+        for &key_type in KeyType::value_variants() {
             let (private_jwk, public_jwk, _) = generate_stamped(key_type);
             let header = JoseHeader::new(&header_alg(key_type));
             let token = compact::sign_with_jwk(&private_jwk, payload, &header)
