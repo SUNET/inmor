@@ -4,9 +4,26 @@
 #     "pyjosers>=0.4.1",
 # ]
 # ///
+import argparse
 import os
 
 from pyjosers import jwk
+
+PQC_ALGORITHMS = (
+    "ML-DSA-44",
+    "ML-DSA-65",
+    "ML-DSA-87",
+    "ML-DSA-44-ES256",
+    "ML-DSA-65-ES256",
+    "ML-DSA-87-ES384",
+    "ML-DSA-44-Ed25519",
+    "ML-DSA-65-Ed25519",
+    "ML-DSA-87-Ed448",
+)
+
+parser = argparse.ArgumentParser(description="Generate development signing keypairs")
+parser.add_argument("--pqc", choices=(*PQC_ALGORITHMS, "all"))
+args = parser.parse_args()
 
 # Ensure directories exist
 os.makedirs("publickeys", exist_ok=True)
@@ -27,16 +44,13 @@ key_configs = [
     {"kty": "OKP", "crv": "Ed448", "use": "sig", "alg": "Ed448"},
 ]
 
-for config in key_configs:
-    kty = config["kty"]
-    alg = config["alg"]
+if args.pqc:
+    algorithms = PQC_ALGORITHMS if args.pqc == "all" else [args.pqc]
+    key_configs = [{"kty": "AKP", "use": "sig", "alg": alg} for alg in algorithms]
 
-    if kty == "RSA":
-        key = jwk.JWK.generate(kty=kty, size=config["size"], use=config["use"], alg=alg)
-    elif kty == "EC":
-        key = jwk.JWK.generate(kty=kty, crv=config["crv"], use=config["use"], alg=alg)
-    elif kty == "OKP":
-        key = jwk.JWK.generate(kty=kty, crv=config["crv"], use=config["use"], alg=alg)
+for config in key_configs:
+    alg = config["alg"]
+    key = jwk.JWK.generate(**config)
 
     # Set KID as thumbprint
     key.kid = key.thumbprint()
@@ -49,7 +63,7 @@ for config in key_configs:
 
     # Export private key
     private_path = f"privatekeys/{kid}.json"
-    with open(private_path, "w") as f:
+    with os.fdopen(os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
         f.write(key.export())
 
     print(f"Generated {alg} key with KID: {kid}")

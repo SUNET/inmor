@@ -1218,3 +1218,59 @@ def test_self_validate_with_jwks_uri(monkeypatch):
     payload = self_validate(serialized)
     assert payload["iss"] == "https://example.com"
     assert payload["jwks_uri"] == jwks_url
+
+
+@pytest.mark.parametrize("alg", ("ML-DSA-65-Ed25519", "RS384"))
+def test_federation_verification_policy(alg, monkeypatch):
+    from unittest.mock import Mock
+
+    from pyjosers import JWK, JWKSet
+    from pyjosers.jws import InvalidJWSSignature
+
+    from common.signing import create_signed_jwt
+    from entities.lib import fetch_entity_configuration
+
+    key = JWK.generate(kty="RSA" if alg == "RS384" else "AKP", alg=alg, use="sig")
+    key.kid = key.thumbprint()
+    keys = JWKSet()
+    keys.add(key)
+    keys.add(JWK.generate(kty="EC", crv="P-256", kid="other"))
+    public = keys.export(private_keys=False, as_dict=True)
+    assert isinstance(public, dict)
+    issuer = "https://signer.example"
+    claims = {"iss": issuer, "sub": issuer, "jwks": public}
+    token = create_signed_jwt(claims, key, "entity-statement+jwt")
+    monkeypatch.setattr("entities.lib._federation_get", Mock(return_value=Mock(text=token)))
+    if alg == "RS384":
+        with pytest.raises(InvalidJWSSignature):
+            self_validate(token)
+        with pytest.raises(InvalidJWSSignature):
+            fetch_entity_configuration(issuer, public)
+    else:
+        assert self_validate(token) == claims
+        verified, _, _ = fetch_entity_configuration(issuer, public)
+        assert json.loads(verified.claims) == claims
+
+
+@pytest.mark.django_db
+def test_historical_akp_publication(auth_client, loadredis, settings, tmp_path):
+    from pyjosers import JWK, JWKSet
+
+    from common.signing import verify_federation_jwt
+
+    key = JWK.generate(kty="AKP", alg="ML-DSA-44", use="sig")
+    key.kid = key.thumbprint()
+    settings.SIGNING_PRIVATE_KEY = key
+    settings.HISTORICAL_KEYS_DIR = str(tmp_path)
+    retired = JWK.generate(kty="AKP", alg="ML-DSA-65-ES256", use="sig")
+    retired.kid = retired.thumbprint()
+    metadata = {"exp": 1704067200, "revoked": {"reason": "superseded", "revoked_at": 1704067200}}
+    old_private = retired.export(as_dict=True)
+    assert isinstance(old_private, dict) and "priv" in old_private
+    (tmp_path / "old.json").write_text(json.dumps(old_private | metadata))
+    assert auth_client.post("/api/v1/server/historical_keys").status_code == 201
+    keys = JWKSet.from_json(json.dumps({"keys": [key.export_public(as_dict=True)]}))
+    token = verify_federation_jwt(loadredis.get("inmor:historical_keys").decode(), keys)
+    old_public = retired.export_public(as_dict=True)
+    assert isinstance(old_public, dict) and "priv" not in old_public
+    assert json.loads(token.claims)["keys"] == [old_public | metadata]

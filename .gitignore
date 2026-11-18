@@ -3,6 +3,7 @@
 !db.json
 !private.json
 !public.json
+!/tests/data/composite-03.json
 # Frontend project config must stay visible to tools that honor .gitignore
 !package.json
 !tsconfig*.json

@@ -470,8 +470,7 @@ pub fn jwkset_from_keys(keys: &Value) -> Result<JwkSet> {
 
 /// Generic function to create a signed JWT with the given payload, key, and optional token type.
 ///
-/// This function supports signing with different key types (RSA, EC, OKP) and
-/// algorithms (RS256, PS256, ES256, ES384, ES512, EdDSA for Ed25519/Ed448).
+/// Supports RSA, EC, OKP and AKP federation signing keys.
 ///
 /// # Arguments
 /// * `payload` - Claims containing the JWT claims
@@ -1507,7 +1506,7 @@ pub fn get_unverified_payload_header(data: &str) -> Result<(Claims, JoseHeader)>
 ///
 /// `EdDSA` covers both Ed25519 and Ed448 keys; `Ed25519` and `Ed448` are the
 /// fully specified RFC 9864 names for the same signatures.
-const ACCEPTED_JWS_ALGORITHMS: [JwsAlgorithm; 8] = [
+const ACCEPTED_JWS_ALGORITHMS: [JwsAlgorithm; 17] = [
     JwsAlgorithm::RS256,
     JwsAlgorithm::PS256,
     JwsAlgorithm::ES256,
@@ -1516,6 +1515,15 @@ const ACCEPTED_JWS_ALGORITHMS: [JwsAlgorithm; 8] = [
     JwsAlgorithm::EdDSA,
     JwsAlgorithm::Ed25519,
     JwsAlgorithm::Ed448,
+    JwsAlgorithm::MlDsa44,
+    JwsAlgorithm::MlDsa65,
+    JwsAlgorithm::MlDsa87,
+    JwsAlgorithm::MlDsa44Es256,
+    JwsAlgorithm::MlDsa65Es256,
+    JwsAlgorithm::MlDsa87Es384,
+    JwsAlgorithm::MlDsa44Ed25519,
+    JwsAlgorithm::MlDsa65Ed25519,
+    JwsAlgorithm::MlDsa87Ed448,
 ];
 
 /// Verify JWT *signature only* against the given JWKS (or the JWT's own inline
@@ -5076,6 +5084,22 @@ mod tests {
             jwks.find_by_kid(&expected_kid).is_some(),
             "verified JWKS must contain the signing key (kid={expected_kid})"
         );
+    }
+
+    #[test]
+    fn signed_akp_jwks_requires_matching_public_key_and_algorithm() {
+        let mut key = jose_rs::jwk::generate_mldsa(kryptering::MlDsaVariant::MlDsa44).unwrap();
+        key.kid = Some(jose_rs::jwk::thumbprint::thumbprint_sha256(&key).unwrap());
+        let token = build_signed_jwks_body(&key);
+        let mut keys = verify_signed_jwks_body(&token).unwrap();
+        assert!(keys.keys[0].priv_.is_none());
+        keys.keys[0].alg = Some("ML-DSA-65".into());
+        assert!(verify_jwt_with_jwks(&token, Some(keys)).is_err());
+        let (input, signature) = token.rsplit_once('.').unwrap();
+        let mut damaged = jose_rs::base64url::decode(signature).unwrap();
+        damaged[0] ^= 1;
+        let damaged_token = format!("{input}.{}", jose_rs::base64url::encode(&damaged));
+        assert!(verify_signed_jwks_body(&damaged_token).is_err());
     }
 
     #[test]

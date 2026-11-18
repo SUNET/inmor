@@ -2,6 +2,9 @@
 
 ## Breaking changes
 
+- Admin federation verification now uses the TA signature allowlist. Peers
+  using RS384, RS512, PS384, PS512 or HMAC must switch before upgrading.
+
 - All bundled Docker Compose configurations and CI now use PostgreSQL 18
   (`postgres:18-alpine`) instead of PostgreSQL 15. Existing PostgreSQL 14 or
   15 database volumes must be backed up and converted with `pg_upgrade`
@@ -9,7 +12,11 @@
 
 ## Changes
 
-- All JOSE operations now use `jose-rs` 0.12.0 in the Trust Anchor (replacing
+- Both services support all three RFC 9964 ML-DSA signatures and the six
+  revision-03 JOSE composite signatures. Generate an AKP key with
+  `inmor-keygeneration --type ML-DSA-65` or use `just dev --pqc all` for testing.
+
+- All JOSE operations now use `jose-rs` 0.12.1 in the Trust Anchor (replacing
   `josekit`) and `pyjosers` 0.4.1 in the Admin, scripts and tests (replacing
   `jwcrypto` and `types-jwcrypto`). Stored keys and issued statements keep
   their format; Edwards curve keys are still signed with the `EdDSA` header.

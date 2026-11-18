@@ -999,6 +999,7 @@ def create_historical_keys(request: HttpRequest):
                     key_data = json.load(f)
                     # Only include keys that have an "exp" field
                     if "exp" in key_data:
+                        key_data.pop("priv", None)
                         keys.append(key_data)
             except json.JSONDecodeError, IOError:
                 continue
