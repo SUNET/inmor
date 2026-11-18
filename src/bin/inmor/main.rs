@@ -47,7 +47,7 @@ async fn index(
         && let Ok((payload, _)) = get_unverified_payload_header(jwt_str)
     {
         // Extract federation_entity metadata
-        if let Some(metadata) = payload.claim("metadata").and_then(|v| v.as_object())
+        if let Some(metadata) = payload.extra.get("metadata").and_then(|v| v.as_object())
             && let Some(fed) = metadata
                 .get("federation_entity")
                 .and_then(|v| v.as_object())
@@ -56,7 +56,11 @@ async fn index(
             ta_name = name.to_string();
         }
         // Extract authority_hints
-        if let Some(hints) = payload.claim("authority_hints").and_then(|v| v.as_array()) {
+        if let Some(hints) = payload
+            .extra
+            .get("authority_hints")
+            .and_then(|v| v.as_array())
+        {
             for h in hints {
                 if let Some(s) = h.as_str() {
                     authority_hints.push(s.to_string());
@@ -72,13 +76,7 @@ async fn index(
         .unwrap_or(0);
 
     // Count public keys from the keyset
-    let public_key_count = app_state
-        .public_keyset
-        .as_ref()
-        .get("keys")
-        .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+    let public_key_count = app_state.public_keyset.keys.len();
 
     // Build Tera context
     let entity_id = &app_state.entity_id;

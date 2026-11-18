@@ -5,6 +5,9 @@ requires-python = ">=3.14"
 [options]
 exclude-newer = "2026-11-01T00:00:00Z"
 
+[options.exclude-newer-package]
+pyjosers = "2026-11-19T00:00:00Z"
+
 [[package]]
 name = "annotated-types"
 version = "0.8.0"
@@ -501,11 +504,11 @@ dependencies = [
     { name = "granian" },
     { name = "httpx" },
     { name = "humanreadable" },
-    { name = "jwcrypto" },
     { name = "oidfpolicy" },
     { name = "port-for" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
+    { name = "pyjosers" },
     { name = "pytest" },
     { name = "pytest-django" },
     { name = "pytest-dotenv" },
@@ -516,7 +519,6 @@ dependencies = [
     { name = "redis" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "types-jwcrypto" },
     { name = "whitenoise" },
 ]
 
@@ -538,11 +540,11 @@ requires-dist = [
     { name = "granian" },
     { name = "httpx" },
     { name = "humanreadable" },
-    { name = "jwcrypto" },
     { name = "oidfpolicy" },
     { name = "port-for" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
+    { name = "pyjosers", specifier = ">=0.4.1" },
     { name = "pytest" },
     { name = "pytest-django" },
     { name = "pytest-dotenv" },
@@ -553,21 +555,7 @@ requires-dist = [
     { name = "redis" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "types-jwcrypto" },
     { name = "whitenoise" },
-]
-
-[[package]]
-name = "jwcrypto"
-version = "1.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cryptography" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/13/8f/e802d77957903483129813ce6fa01a72a906f9cdd454039d1ec1e6d1e44a/jwcrypto-1.6.1.tar.gz", hash = "sha256:a1e1570da5c2e35dbcd375ec1d2891a24de8eb35ee2c1fe8e91978efb72cfe90", size = 116287, upload-time = "2026-09-15T21:22:33.286Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/a4/ee780473e42a3edaf65da1ad37f5c601a9c740e215c1e09db36bf90f3f59/jwcrypto-1.6.1-py3-none-any.whl", hash = "sha256:77e856818e514cb3d64a1043b6885a7d52f5cc37773f5e944de02103c8d3a54f", size = 121267, upload-time = "2026-09-15T21:22:32.27Z" },
 ]
 
 [[package]]
@@ -824,6 +812,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyjosers"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/66/91059c570413bfb5060cab1627fafd15cbd2d65e93582b8e13790b8bc45d/pyjosers-0.4.1.tar.gz", hash = "sha256:918cf3437feaa06face1924573da248f6d346c77f0fbdcd40e58b91f5396543f", size = 95612, upload-time = "2026-11-18T13:36:10.433Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/5c/abe55f0a084688bbfe7bf84194c90dce70c7d89fedf263ae0b850fe18433/pyjosers-0.4.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:0dc879bb4a955bac14a65b598b2748ec16e55e5965946b7142110291691fa767", size = 2004878, upload-time = "2026-11-18T13:36:02.187Z" },
+    { url = "https://files.pythonhosted.org/packages/49/5d/13a8998215ac2d624d5c16c2c98d5c40c832b95508cda7458a47e86c61fd/pyjosers-0.4.1-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:52ab567081270fc1262fa3839c6cbfeb96325e26342fbb920e343363cf67d9c3", size = 2160459, upload-time = "2026-11-18T13:36:04.039Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/75/94c30a160e0061184dde739a6e0c8ac2007a57a181817827d8d6d7cab93f/pyjosers-0.4.1-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:fae2068af67a0c6b811a03e7bd05758a0b5753cde5db9b5c4fc9fb6727a50acc", size = 2213352, upload-time = "2026-11-18T13:36:05.493Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/d8/d07727c6a40136cff0fd597bcdc3917166dd3bdee12706645eb11e4169b7/pyjosers-0.4.1-cp310-abi3-win_amd64.whl", hash = "sha256:2ca4e6e7a33a037bc1958770a50092ae622437a0ae39cbdef4bae2ad583a5095", size = 2149870, upload-time = "2026-11-18T13:36:07.252Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/85/060013030f0ce12054c6e7885934fd1b46d1f13fc5ef59795ec22283eadb/pyjosers-0.4.1-cp310-abi3-win_arm64.whl", hash = "sha256:3150c721a38c713eb3a2627f229ab92217bdefcc935d71106e1a3dbb8ca6899d", size = 2061090, upload-time = "2026-11-18T13:36:08.907Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1007,18 +1008,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/c3/0c4382a6c70d0aa119bbf45c56340609c3f206b68756e7ff6b91abf83cd9/typepy-2.0.0.tar.gz", hash = "sha256:413fec52a54a010e2e20d6e18eef68840ebf13b95b719e17b5e2e81c6e85e4a6", size = 39931, upload-time = "2026-05-09T06:41:48.407Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/80/86/02e36d19ad12e27af63b99062f552c6a1eae030753926223c9575c8f5458/typepy-2.0.0-py3-none-any.whl", hash = "sha256:f97d3d26d5643a0aeccefb5f5ebadf64610e53eb2d0fa14133e5929a63314cfc", size = 31369, upload-time = "2026-05-09T06:41:46.686Z" },
-]
-
-[[package]]
-name = "types-jwcrypto"
-version = "1.6.1.20260928"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cryptography" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/06/f2/c1c153127184b5d4de04b71fd879df798e72f03f4e3d0cc3d14588b3d3bc/types_jwcrypto-1.6.1.20260928.tar.gz", hash = "sha256:8bec6bba590b9f51ccfa8908083329600be49800c04eade9f0745eddfad70714", size = 12942, upload-time = "2026-09-28T07:50:56.359Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/97/d4ac9077b0529638e778bfa48230b623123aa4084fe5314f1649108b69de/types_jwcrypto-1.6.1.20260928-py3-none-any.whl", hash = "sha256:237fa9287e78513bd15ce64260f892dd0923786d002c229532e6ea7a9795dc82", size = 13546, upload-time = "2026-09-28T07:50:55.39Z" },
 ]
 
 [[package]]

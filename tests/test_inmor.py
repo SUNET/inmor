@@ -5,7 +5,7 @@ import os
 import time
 
 from httpx import Client
-from jwcrypto import jwk, jwt
+from pyjosers import jwk, jwt
 from redis.client import Redis
 
 file_dir = os.path.dirname(os.path.abspath(__file__))

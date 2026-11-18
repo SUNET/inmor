@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
@@ -566,7 +566,7 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
         expiry = settings.SUBORDINATE_DEFAULT_VALID_FOR
 
     # Now we can build the sub ordinate statement.
-    now = datetime.now()
+    now = datetime.now(UTC)
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
     signed_statement = create_subordinate_statement(
@@ -700,7 +700,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
         expiry = settings.SUBORDINATE_DEFAULT_VALID_FOR
 
     # Now we can build the sub ordinate statement.
-    now = datetime.now()
+    now = datetime.now(UTC)
     exp = now + timedelta(hours=expiry)
     # Next, we create the signed statement
     signed_statement = create_subordinate_statement(
@@ -799,7 +799,7 @@ def renew_subordinate(request: HttpRequest, subid: int):
     expiry = sub.valid_for or settings.SUBORDINATE_DEFAULT_VALID_FOR
 
     # Now we can build the subordinate statement.
-    now = datetime.now()
+    now = datetime.now(UTC)
     exp = now + timedelta(hours=expiry)
     signed_statement = create_subordinate_statement(
         sub.entityid,
@@ -1007,10 +1007,10 @@ def create_historical_keys(request: HttpRequest):
         return 404, {"message": "No historical keys found with exp field"}
 
     # Create the signed JWT
-    now = datetime.now()
+    now = datetime.now(UTC)
     claims: dict[str, Any] = {
         "iss": settings.TA_DOMAIN,
-        "iat": now.timestamp(),
+        "iat": now,
         "keys": keys,
     }
 

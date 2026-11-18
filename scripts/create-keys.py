@@ -1,13 +1,12 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "jwcrypto",
+#     "pyjosers>=0.4.1",
 # ]
 # ///
 import os
-import sys
 
-from jwcrypto import jwk
+from pyjosers import jwk
 
 # Ensure directories exist
 os.makedirs("publickeys", exist_ok=True)

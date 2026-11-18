@@ -115,6 +115,41 @@ Inmor generates multiple key types for signing operations, following `RFC 9864 S
 
 Each key is stored as a JWK JSON file with the key ID (kid) as the thumbprint.
 
+Signature algorithms and JOSE libraries
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+All JOSE operations (JWK, JWS and JWT handling) use
+`jose-rs <https://crates.io/crates/jose-rs>`_ in the Trust Anchor and
+`pyjosers <https://pypi.org/project/pyjosers/>`_ in the Admin, the helper
+scripts and the test suites. The Admin and Trust Anchor share the Rust
+cryptographic implementation and configure their verification policies separately.
+When the Admin self-verifies an entity configuration, it allows 60 seconds of
+leeway for ``exp`` and ``nbf``. The Trust Anchor checks those claims with zero leeway.
+
+The Admin requires pyjosers 0.4.1 or later. It signs timezone-aware UTC
+datetimes as NumericDate values, retaining fractional seconds when present.
+Statements are signed with the ``alg`` stored on the signing key. Edwards
+curve keys are stored with the fully specified names ``Ed25519`` and
+``Ed448``, and are signed with the ``EdDSA`` header value, which is the
+identifier most federation peers understand.
+
+The Trust Anchor applies the following rules during verification.
+
+* When verifying entity statements, trust marks and signed JWK Sets, the
+  Trust Anchor accepts the header algorithms ``RS256``, ``PS256``, ``ES256``,
+  ``ES384``, ``ES512``, ``EdDSA``, ``Ed25519`` and ``Ed448``. Any other
+  algorithm, including ``none``, is rejected.
+* A key published with ``alg`` set to ``Ed25519`` or ``Ed448`` verifies
+  statements whose header says ``EdDSA``, and the reverse. Keys of different
+  curves never verify each other.
+* The header ``kid`` must name exactly one key in the JWK Set used for
+  verification. There is no fallback to trying other keys.
+* A JWT whose payload repeats a member name is rejected before its embedded
+  keys are read.
+* A JWK Set with an entry that is not a valid JWK is rejected as a whole.
+  Keys of an unsupported type are kept and only fail when a statement is
+  signed with them.
+
 .. warning::
 
    Regenerating keys will invalidate all existing entity statements and trust marks.

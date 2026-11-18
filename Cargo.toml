@@ -31,7 +31,7 @@ actix-web = { version = "4.17.0", default-features = false, features = [
     "ws",
     "rustls-0_23",
 ] }
-josekit = "0.10.3"
+jose-rs = { version = "0.12.0", default-features = false }
 redis = { version = "1.7.1",  features = ["tokio-comp", "connection-manager"] }
 serde = "1.0.219"
 serde_json = "1.0.140"
@@ -55,3 +55,6 @@ rustls = "0.23"
 rustls-pemfile = "2.2"
 tera = { version = "2.4", features = ["glob_fs"] }
 url = "2"
+
+[dev-dependencies]
+syn = { version = "2", features = ["full", "visit"] }

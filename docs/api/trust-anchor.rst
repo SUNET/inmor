@@ -960,6 +960,14 @@ The allowlist is parser capability, not per-federation policy. Producer-side
 per-tenant ``crit`` policy on outgoing statements is deferred to the
 multi-tenant track tracked in ``multitenant_plan.md``.
 
+When adding a top-level claim that the Trust Anchor reads, update
+``KNOWN_CLAIMS`` and run ``cargo test --locked test_known_claims``. The
+guardrail checks literal names in ``extra.get(...)`` and
+``extra.contains_key(...)`` calls in ``src/lib.rs``. If a parser refactor
+changes how claims are read, update the visitor and its regression tests in
+the same change. A run that finds zero reads fails so that such a refactor
+cannot silently disable the check.
+
 Content Types
 -------------
 

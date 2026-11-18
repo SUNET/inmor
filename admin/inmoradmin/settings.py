@@ -15,7 +15,7 @@ import os
 # import sys
 from pathlib import Path
 
-from jwcrypto import jwk
+from pyjosers import jwk
 
 from . import localsettings
 

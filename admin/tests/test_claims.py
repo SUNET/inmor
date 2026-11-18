@@ -1,12 +1,12 @@
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import Mock
 
 import pytest
 from django.contrib import admin
 from django.test import RequestFactory
-from jwcrypto import jwk, jwt
-from jwcrypto.common import json_decode
+from pyjosers import jwk, jwt
 
 from entities.lib import create_subordinate_statement
 from entities.models import Subordinate
@@ -33,8 +33,7 @@ ADMIN_PROTECTED_CLAIMS = (
 
 def get_payload(token: str) -> dict:
     """Decode a JWT payload without verifying it."""
-    parsed = jwt.JWT.from_jose_token(token)
-    return json_decode(parsed.token.objects["payload"])
+    return jwt.decode_unverified(token)[1]
 
 
 def public_keyset() -> jwk.JWKSet:
@@ -137,7 +136,7 @@ def test_trust_mark_signing_rejects_protected_additional_claim(protected_claim):
 @pytest.mark.parametrize("protected_claim", SUBORDINATE_PROTECTED_CLAIMS)
 def test_subordinate_signing_rejects_protected_additional_claim(protected_claim):
     """Reject subordinate claim collisions at the signing boundary."""
-    now = datetime.now()
+    now = datetime.now(UTC)
 
     with pytest.raises(ValueError, match=protected_claim):
         create_subordinate_statement(
@@ -152,7 +151,7 @@ def test_subordinate_signing_rejects_protected_additional_claim(protected_claim)
 
 def test_subordinate_signing_preserves_extension_claims(settings):
     """Keep legitimate top-level and nested extension claims in the signed statement."""
-    now = datetime.now()
+    now = datetime.now(UTC)
     extensions = {
         "constraints": {"max_path_length": 1},
         "organization": {"iss": "nested-values-do-not-collide", "exp": 1},
@@ -173,3 +172,19 @@ def test_subordinate_signing_preserves_extension_claims(settings):
     assert payload["iss"] == settings.TA_DOMAIN
     assert payload["sub"] == "https://subject.example"
     assert payload["metadata"] == {"openid_relying_party": {}}
+
+
+def test_subordinate_numeric_dates_on_the_wire(settings):
+    """Whole seconds stay integers and fractional seconds retain every microsecond."""
+    wire = create_subordinate_statement(
+        "https://subject.example",
+        public_keyset(),
+        datetime(2000, 1, 1, tzinfo=UTC),
+        datetime(2100, 1, 1, microsecond=123456, tzinfo=UTC),
+        forced_metadata=None,
+    )
+    verified = jwt.JWT(jwt=wire, key=settings.SIGNING_PRIVATE_KEY.public())
+    payload = json.loads(verified.claims, parse_float=Decimal)
+    assert type(payload["iat"]) is int
+    assert payload["iat"] == 946684800
+    assert payload["exp"] == Decimal("4102444800.123456")

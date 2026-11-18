@@ -7,7 +7,7 @@ license = { file="LICENSE" }
 requires-python = '>=3.14'
 
 dependencies = [
-	"jwcrypto",
+	"pyjosers>=0.4.1",
 	"httpx",
 	"redis",
 	"port-for",
@@ -29,6 +29,8 @@ Home = "https://github.com/SUNET/inmor"
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
 exclude-newer = "2026-11-01T00:00:00Z"
+# Allow the pyjosers release used for JWK metadata assignment and exact JWT dates.
+exclude-newer-package = { pyjosers = "2026-11-19T00:00:00Z" }
 
 [tool.pyright]
 stubPath = "typings"

@@ -4,16 +4,9 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result, bail};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use josekit::jwk::Jwk;
-use josekit::jwk::KeyPair;
-use josekit::jwk::alg::ec::{EcCurve, EcKeyPair};
-use josekit::jwk::alg::ed::{EdCurve, EdKeyPair};
-use josekit::jwk::alg::rsa::RsaKeyPair;
-use sha2::{Digest, Sha256};
+use jose_rs::jwk::{self, Jwk};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -83,93 +76,28 @@ impl KeyType {
 /// material; only the `alg` stamped on the JWK distinguishes them, so both
 /// come from the same RSA generator.
 fn generate_keypair(key_type: KeyType) -> Result<(Jwk, Jwk)> {
-    let pair: (Jwk, Jwk) = match key_type {
+    let private = match key_type {
         KeyType::Rs256 | KeyType::Ps256 => {
-            let kp = RsaKeyPair::generate(2048).context("RSA key generation failed")?;
-            (kp.to_jwk_key_pair(), kp.to_jwk_public_key())
+            jwk::generate_rsa(2048).context("RSA key generation failed")?
         }
-        KeyType::Es256 => {
-            let kp =
-                EcKeyPair::generate(EcCurve::P256).context("EC P-256 key generation failed")?;
-            (kp.to_jwk_key_pair(), kp.to_jwk_public_key())
-        }
-        KeyType::Es384 => {
-            let kp =
-                EcKeyPair::generate(EcCurve::P384).context("EC P-384 key generation failed")?;
-            (kp.to_jwk_key_pair(), kp.to_jwk_public_key())
-        }
-        KeyType::Es512 => {
-            let kp =
-                EcKeyPair::generate(EcCurve::P521).context("EC P-521 key generation failed")?;
-            (kp.to_jwk_key_pair(), kp.to_jwk_public_key())
-        }
-        KeyType::Ed25519 => {
-            let kp =
-                EdKeyPair::generate(EdCurve::Ed25519).context("Ed25519 key generation failed")?;
-            (kp.to_jwk_key_pair(), kp.to_jwk_public_key())
-        }
-        KeyType::Ed448 => {
-            let kp = EdKeyPair::generate(EdCurve::Ed448).context("Ed448 key generation failed")?;
-            (kp.to_jwk_key_pair(), kp.to_jwk_public_key())
-        }
+        KeyType::Es256 => jwk::generate_ec("P-256").context("EC P-256 key generation failed")?,
+        KeyType::Es384 => jwk::generate_ec("P-384").context("EC P-384 key generation failed")?,
+        KeyType::Es512 => jwk::generate_ec("P-521").context("EC P-521 key generation failed")?,
+        KeyType::Ed25519 => jwk::generate_ed25519().context("Ed25519 key generation failed")?,
+        KeyType::Ed448 => jwk::generate_ed448().context("Ed448 key generation failed")?,
     };
-    Ok(pair)
-}
-
-/// Return a complete private JWK that contains every member of the public JWK.
-///
-/// josekit's `to_jwk_key_pair()` returns full RSA and EC keys, but omits the
-/// public `x` member for OKP (Ed) keys. Filling in any missing public member
-/// keeps `private.json` a self-contained, RFC-conformant key pair.
-fn complete_private_jwk(private: &Jwk, public: &Jwk) -> Result<Jwk> {
-    let mut map = private.as_ref().clone();
-    for (key, value) in public.as_ref() {
-        map.entry(key.clone()).or_insert_with(|| value.clone());
-    }
-    Jwk::from_map(map).context("failed to assemble complete private JWK")
+    let public = private.to_public_jwk();
+    Ok((private, public))
 }
 
 /// Compute the RFC 7638 JWK thumbprint (SHA-256, base64url, no padding).
-///
-/// josekit does not expose this, so it is built here from the required
-/// members in lexicographic order. Those member values are base64url strings
-/// (or fixed curve names) with no JSON-escapable characters, so the canonical
-/// JSON is assembled directly.
 fn jwk_thumbprint(jwk: &Jwk) -> Result<String> {
-    let kty = jwk.key_type();
-    let canonical = match kty {
-        "RSA" => {
-            let e = required_member(jwk, "e")?;
-            let n = required_member(jwk, "n")?;
-            format!(r#"{{"e":"{e}","kty":"RSA","n":"{n}"}}"#)
-        }
-        "EC" => {
-            let crv = required_member(jwk, "crv")?;
-            let x = required_member(jwk, "x")?;
-            let y = required_member(jwk, "y")?;
-            format!(r#"{{"crv":"{crv}","kty":"EC","x":"{x}","y":"{y}"}}"#)
-        }
-        "OKP" => {
-            let crv = required_member(jwk, "crv")?;
-            let x = required_member(jwk, "x")?;
-            format!(r#"{{"crv":"{crv}","kty":"OKP","x":"{x}"}}"#)
-        }
-        other => bail!("cannot compute thumbprint for unsupported key type '{other}'"),
-    };
-    Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes())))
-}
-
-/// Read a required string member from a JWK.
-fn required_member(jwk: &Jwk, key: &str) -> Result<String> {
-    jwk.parameter(key)
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .with_context(|| format!("generated JWK is missing required member '{key}'"))
+    jwk::thumbprint::thumbprint_sha256(jwk).context("failed to compute JWK thumbprint")
 }
 
 /// Serialize a JWK to pretty-printed JSON with a trailing newline.
 fn jwk_to_json(jwk: &Jwk) -> Result<String> {
-    let mut json = serde_json::to_string_pretty(jwk.as_ref())?;
+    let mut json = jwk.to_json_pretty()?;
     json.push('\n');
     Ok(json)
 }
@@ -248,14 +176,13 @@ fn run() -> Result<()> {
         return Err(already_exists_error(&private_path));
     }
 
-    let (private_pair, mut public_jwk) = generate_keypair(cli.key_type)?;
-    let mut private_jwk = complete_private_jwk(&private_pair, &public_jwk)?;
+    let (mut private_jwk, mut public_jwk) = generate_keypair(cli.key_type)?;
     let kid = jwk_thumbprint(&public_jwk)?;
 
     for jwk in [&mut private_jwk, &mut public_jwk] {
-        jwk.set_key_use("sig");
-        jwk.set_algorithm(alg);
-        jwk.set_key_id(kid.as_str());
+        jwk.use_ = Some("sig".to_string());
+        jwk.alg = Some(alg.to_string());
+        jwk.kid = Some(kid.clone());
     }
 
     let publickeys_dir = cli.output.join("publickeys");
@@ -299,9 +226,8 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use josekit::jws::{
-        self, ES256, ES384, ES512, EdDSA, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256,
-    };
+    use jose_rs::JoseHeader;
+    use jose_rs::jws::compact;
 
     /// RFC 7638 Section 3.1 worked example.
     #[test]
@@ -313,7 +239,7 @@ mod tests {
             "alg":"RS256",
             "kid":"2011-04-29"
         }"#;
-        let jwk = Jwk::from_bytes(jwk_json.as_bytes()).expect("valid JWK");
+        let jwk = Jwk::from_json(jwk_json).expect("valid JWK");
         assert_eq!(
             jwk_thumbprint(&jwk).expect("thumbprint"),
             "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
@@ -322,14 +248,12 @@ mod tests {
 
     /// Generate a key, stamp it, and return both JWKs the way `run()` does.
     fn generate_stamped(key_type: KeyType) -> (Jwk, Jwk, String) {
-        let (private_pair, mut public_jwk) = generate_keypair(key_type).expect("generation");
-        let mut private_jwk =
-            complete_private_jwk(&private_pair, &public_jwk).expect("complete private JWK");
+        let (mut private_jwk, mut public_jwk) = generate_keypair(key_type).expect("generation");
         let kid = jwk_thumbprint(&public_jwk).expect("thumbprint");
         for jwk in [&mut private_jwk, &mut public_jwk] {
-            jwk.set_key_use("sig");
-            jwk.set_algorithm(key_type.alg());
-            jwk.set_key_id(kid.as_str());
+            jwk.use_ = Some("sig".to_string());
+            jwk.alg = Some(key_type.alg().to_string());
+            jwk.kid = Some(kid.clone());
         }
         (private_jwk, public_jwk, kid)
     }
@@ -352,9 +276,9 @@ mod tests {
             let (private_jwk, public_jwk, kid) = generate_stamped(key_type);
 
             for jwk in [&private_jwk, &public_jwk] {
-                assert_eq!(jwk.algorithm(), Some(key_type.alg()), "{key_type:?} alg");
-                assert_eq!(jwk.key_use(), Some("sig"), "{key_type:?} use");
-                assert_eq!(jwk.key_id(), Some(kid.as_str()), "{key_type:?} kid");
+                assert_eq!(jwk.alg.as_deref(), Some(key_type.alg()), "{key_type:?} alg");
+                assert_eq!(jwk.use_.as_deref(), Some("sig"), "{key_type:?} use");
+                assert_eq!(jwk.kid.as_deref(), Some(kid.as_str()), "{key_type:?} kid");
             }
 
             // The kid must equal the thumbprint of the public key.
@@ -366,61 +290,41 @@ mod tests {
 
             // Private material is present in the private JWK only.
             assert!(
-                private_jwk.parameter("d").is_some(),
+                private_jwk.d.is_some(),
                 "{key_type:?} private key missing 'd'"
             );
-            assert!(
-                public_jwk.parameter("d").is_none(),
-                "{key_type:?} public key leaked 'd'"
-            );
+            assert!(public_jwk.d.is_none(), "{key_type:?} public key leaked 'd'");
 
             // The private JWK is a complete superset of the public JWK.
-            for member in ["kty", "n", "e", "crv", "x", "y"] {
-                if public_jwk.parameter(member).is_some() {
-                    assert_eq!(
-                        private_jwk.parameter(member),
-                        public_jwk.parameter(member),
-                        "{key_type:?} private key missing public member '{member}'"
-                    );
-                }
-            }
+            assert_eq!(private_jwk.kty, public_jwk.kty, "{key_type:?} kty");
+            let members = |jwk: &Jwk| {
+                [
+                    jwk.n.clone(),
+                    jwk.e.clone(),
+                    jwk.crv.clone(),
+                    jwk.x.clone(),
+                    jwk.y.clone(),
+                ]
+            };
+            assert_eq!(
+                members(&private_jwk),
+                members(&public_jwk),
+                "{key_type:?} private key does not carry the public members"
+            );
+            assert!(
+                public_jwk.n.is_some() || public_jwk.x.is_some(),
+                "{key_type:?} public key has no public material"
+            );
         }
     }
 
-    /// Mirror `create_signed_jwt` in src/lib.rs: inmor stores Ed keys with
-    /// `alg` "Ed25519"/"Ed448", but josekit's EdDSA signer requires "EdDSA".
-    fn normalize_for_josekit(jwk: &Jwk) -> Jwk {
-        match jwk.algorithm() {
-            Some("Ed25519") | Some("Ed448") => {
-                let mut map = jwk.as_ref().clone();
-                map.insert("alg".to_string(), serde_json::json!("EdDSA"));
-                Jwk::from_map(map).expect("valid JWK")
-            }
-            _ => jwk.clone(),
-        }
-    }
-
-    fn signer_for(key_type: KeyType, jwk: &Jwk) -> Box<dyn JwsSigner> {
-        let jwk = normalize_for_josekit(jwk);
+    /// The JWS header `alg` the Trust Anchor emits for a key type. Mirrors
+    /// `create_signed_jwt` in src/lib.rs: Ed keys are stored with `alg`
+    /// "Ed25519"/"Ed448" but signed with the `EdDSA` wire identifier.
+    fn header_alg(key_type: KeyType) -> &'static str {
         match key_type {
-            KeyType::Rs256 => Box::new(RS256.signer_from_jwk(&jwk).unwrap()),
-            KeyType::Ps256 => Box::new(PS256.signer_from_jwk(&jwk).unwrap()),
-            KeyType::Es256 => Box::new(ES256.signer_from_jwk(&jwk).unwrap()),
-            KeyType::Es384 => Box::new(ES384.signer_from_jwk(&jwk).unwrap()),
-            KeyType::Es512 => Box::new(ES512.signer_from_jwk(&jwk).unwrap()),
-            KeyType::Ed25519 | KeyType::Ed448 => Box::new(EdDSA.signer_from_jwk(&jwk).unwrap()),
-        }
-    }
-
-    fn verifier_for(key_type: KeyType, jwk: &Jwk) -> Box<dyn JwsVerifier> {
-        let jwk = normalize_for_josekit(jwk);
-        match key_type {
-            KeyType::Rs256 => Box::new(RS256.verifier_from_jwk(&jwk).unwrap()),
-            KeyType::Ps256 => Box::new(PS256.verifier_from_jwk(&jwk).unwrap()),
-            KeyType::Es256 => Box::new(ES256.verifier_from_jwk(&jwk).unwrap()),
-            KeyType::Es384 => Box::new(ES384.verifier_from_jwk(&jwk).unwrap()),
-            KeyType::Es512 => Box::new(ES512.verifier_from_jwk(&jwk).unwrap()),
-            KeyType::Ed25519 | KeyType::Ed448 => Box::new(EdDSA.verifier_from_jwk(&jwk).unwrap()),
+            KeyType::Ed25519 | KeyType::Ed448 => "EdDSA",
+            other => other.alg(),
         }
     }
 
@@ -431,12 +335,10 @@ mod tests {
         let payload = b"inmor-keygeneration round-trip";
         for key_type in all_types() {
             let (private_jwk, public_jwk, _) = generate_stamped(key_type);
-            let signer = signer_for(key_type, &private_jwk);
-            let verifier = verifier_for(key_type, &public_jwk);
-
-            let compact = jws::serialize_compact(payload, &JwsHeader::new(), &*signer)
+            let header = JoseHeader::new(header_alg(key_type));
+            let token = compact::sign_with_jwk(&private_jwk, payload, &header)
                 .unwrap_or_else(|e| panic!("{key_type:?} sign failed: {e}"));
-            let (out, _) = jws::deserialize_compact(&compact, &*verifier)
+            let out = compact::verify_with_jwk(&public_jwk, &token)
                 .unwrap_or_else(|e| panic!("{key_type:?} verify failed: {e}"));
             assert_eq!(out, payload, "{key_type:?} round-trip payload mismatch");
         }

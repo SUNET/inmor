@@ -10,8 +10,7 @@ psycopg2-binary
 # Pin the selected commit from the feat/pygamlastan branch.
 djangosaml2 @ git+https://github.com/kushaldas/djangosaml2.git@5ba29b5f97ae6a6f0aba877ffbadf1c299de18c7
 django-redis
-jwcrypto
-types-jwcrypto
+pyjosers>=0.4.1
 httpx
 django-click
 pydantic

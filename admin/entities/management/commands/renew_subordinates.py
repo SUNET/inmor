@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import djclick as click
@@ -72,7 +72,7 @@ def command():
 
         expiry = sub.valid_for or settings.SUBORDINATE_DEFAULT_VALID_FOR
 
-        now = datetime.now()
+        now = datetime.now(UTC)
         exp = now + timedelta(hours=expiry)
         signed_statement = create_subordinate_statement(
             sub.entityid,

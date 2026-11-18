@@ -4,7 +4,7 @@
 //! subordinate entities and storing their collection data in Redis.
 
 use anyhow::Result;
-use josekit::jwk::JwkSet;
+use jose_rs::jwk::JwkSet;
 use log::{debug, error, info, warn};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -120,7 +120,7 @@ async fn fetch_all_subordinate_statements(
             }
         };
 
-        let metadata = match entity_payload.claim("metadata") {
+        let metadata = match entity_payload.extra.get("metadata") {
             Some(value) => match value.as_object() {
                 Some(obj) => obj,
                 None => {
@@ -353,7 +353,7 @@ async fn collection_tree_walking(
         .await;
 
     // Fetch subordinate statements from authorities
-    if let Some(authority_hints) = payload.claim("authority_hints") {
+    if let Some(authority_hints) = payload.extra.get("authority_hints") {
         let hint_count = authority_hints.as_array().map(|a| a.len()).unwrap_or(0);
         debug!("Entity {entity_id} has {hint_count} authority hint(s)");
         fetch_all_subordinate_statements(authority_hints, entity_id, conn).await;
@@ -362,7 +362,7 @@ async fn collection_tree_walking(
     }
 
     // Extract metadata
-    let metadata = match payload.claim("metadata") {
+    let metadata = match payload.extra.get("metadata") {
         Some(value) => match value.as_object() {
             Some(obj) => obj,
             None => {
@@ -403,7 +403,8 @@ async fn collection_tree_walking(
 
     // Extract trust marks
     let trust_marks = payload
-        .claim("trust_marks")
+        .extra
+        .get("trust_marks")
         .and_then(|v| v.as_array())
         .cloned();
     if let Some(ref tms) = trust_marks {
@@ -632,7 +633,8 @@ async fn build_walk_context(
     let (trust_mark_issuers, trust_mark_owners) = match TrustMarkOwners::from_ta_payload(&payload) {
         Ok(owners) => {
             let issuers = payload
-                .claim("trust_mark_issuers")
+                .extra
+                .get("trust_mark_issuers")
                 .and_then(|v| v.as_object())
                 .cloned()
                 .unwrap_or_default();
@@ -873,7 +875,7 @@ mod tests {
     fn test_context() -> CollectionWalkContext {
         CollectionWalkContext {
             trust_anchor: "https://ta.example.com".to_string(),
-            ta_keyset: JwkSet::new(),
+            ta_keyset: JwkSet { keys: Vec::new() },
             trust_mark_issuers: Map::new(),
             trust_mark_owners: TrustMarkOwners::default(),
             index_errors: AtomicU32::new(0),

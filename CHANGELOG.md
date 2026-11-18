@@ -7,6 +7,29 @@
   15 database volumes must be backed up and converted with `pg_upgrade`
   before this version is started; see `docs/postgresql-upgrade.rst`.
 
+## Changes
+
+- All JOSE operations now use `jose-rs` 0.12.0 in the Trust Anchor (replacing
+  `josekit`) and `pyjosers` 0.4.1 in the Admin, scripts and tests (replacing
+  `jwcrypto` and `types-jwcrypto`). Stored keys and issued statements keep
+  their format; Edwards curve keys are still signed with the `EdDSA` header.
+- Admin statements and trust marks encode UTC datetimes directly as JSON
+  numbers, preserving microseconds. The key-generation script stores the
+  thumbprint as the exported key ID using `key.kid`.
+- Verification additionally accepts the fully specified header algorithms
+  `Ed25519` and `Ed448` (RFC 9864) next to `EdDSA`.
+- Verification is stricter in two places: a JWT payload with duplicate
+  member names is rejected, and a JWK Set in which two keys share the `kid`
+  named by the token is rejected. See "Signature algorithms and
+  JOSE libraries" in `docs/installation.rst`.
+
+## Dependencies
+
+- Python: the required `pyjosers` 0.4.1 falls after the uv dependency cooling
+  window (`exclude-newer`, 2026-11-01), so both `pyproject.toml` files carry
+  an `exclude-newer-package` exception for it. Remove the exception when the
+  window moves past 2026-11-18.
+
 
 <a id='changelog-0.5.1'></a>
 # 0.5.1 - 2026-11-08
