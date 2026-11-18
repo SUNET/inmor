@@ -78,8 +78,8 @@ pub const WELL_KNOWN: &str = ".well-known/openid-federation";
 /// Per OpenID Federation §3.1.1, an issuer can set `crit` on a statement to
 /// require recipients to reject it if they don't understand a listed claim
 /// name. `verify_jwt_with_jwks` enforces that rule by checking every entry of
-/// `crit` against this list. Every new claim that gets a `.extra.get("…")` parse
-/// site MUST be appended here, otherwise an issuer that marks the new claim
+/// `crit` against this list. Every literal claim read with `extra.get` or
+/// `extra.contains_key` MUST be listed here, otherwise an issuer that marks it
 /// critical will see its (correctly-formed) statements rejected.
 ///
 /// Single-tenant note: under the planned multi-tenant work
@@ -5153,43 +5153,118 @@ mod tests {
         assert!(!fe.transient, "SSRF rejection must be permanent");
     }
 
-    #[test]
-    fn test_known_claims_covers_every_parse_site() {
-        // Reflection-style guardrail: every claim name referenced by a
-        // `.extra.get("…")` call in this file must appear in `KNOWN_CLAIMS`. If
-        // someone adds a parser for a new claim and forgets to append it
-        // here, an issuer that lists the new claim in `crit` would see its
-        // (correctly-formed) statement rejected.
-        //
-        // We grep the file at test time rather than maintaining a separate
-        // registry, so the test fails exactly when the source drifts from
-        // the constant.
-        let src = fs::read_to_string("./src/lib.rs").expect("read lib.rs");
-        let mut missing: Vec<String> = Vec::new();
-        for line in src.lines() {
-            let trimmed = line.trim_start();
-            // Skip doc comments and ordinary comments so an example claim
-            // name inside documentation doesn't fail the test.
-            if trimmed.starts_with("//") {
-                continue;
-            }
-            let mut rest = line;
-            while let Some(idx) = rest.find(".claim(\"") {
-                let after = &rest[idx + ".claim(\"".len()..];
-                if let Some(end) = after.find('"') {
-                    let name = &after[..end];
-                    if !KNOWN_CLAIMS.contains(&name) && !missing.iter().any(|m| m == name) {
-                        missing.push(name.to_string());
-                    }
-                    rest = &after[end + 1..];
-                } else {
-                    break;
+    /// Collect the literal claim names read by `extra.get` and `extra.contains_key`.
+    ///
+    /// Walking the Rust syntax tree handles line breaks and skips comments. The
+    /// visitor omits modules marked `#[cfg(test)]`. Reads through aliases, computed
+    /// keys, or macro expansions require separate coverage if the parser adopts them.
+    fn parsed_extra_claims(source: &str) -> std::collections::BTreeSet<String> {
+        use std::collections::BTreeSet;
+        use syn::visit::{self, Visit};
+        use syn::{Expr, ExprMethodCall, Ident, ItemMod, Lit, Member};
+
+        #[derive(Default)]
+        struct ClaimReads(BTreeSet<String>);
+
+        impl<'ast> Visit<'ast> for ClaimReads {
+            fn visit_item_mod(&mut self, module: &'ast ItemMod) {
+                // Test-only reads must never satisfy the production guardrail.
+                if !module.attrs.iter().any(|attr| {
+                    attr.path().is_ident("cfg")
+                        && attr.parse_args::<Ident>().is_ok_and(|name| name == "test")
+                }) {
+                    visit::visit_item_mod(self, module);
                 }
             }
+
+            fn visit_expr_method_call(&mut self, call: &'ast ExprMethodCall) {
+                if (call.method == "get" || call.method == "contains_key")
+                    && let Expr::Field(field) = call.receiver.as_ref()
+                    && let Member::Named(member) = &field.member
+                    && member == "extra"
+                    && let Some(Expr::Lit(arg)) = call.args.first()
+                    && let Lit::Str(name) = &arg.lit
+                {
+                    self.0.insert(name.value());
+                }
+                // In `p.extra.get("metadata").unwrap().get("issuer")`, walking
+                // the receiver finds "metadata", the top-level claim.
+                visit::visit_expr_method_call(self, call);
+            }
         }
+
+        let mut reads = ClaimReads::default();
+        reads.visit_file(&syn::parse_file(source).expect("parse Rust source for claim reads"));
+        reads.0
+    }
+
+    #[test]
+    fn test_known_claims_scanner_recognizes_both_lookup_methods() {
+        let source = r#"
+            fn parse(payload: Claims) {
+                payload.extra.get("one");
+                payload.extra.contains_key("two");
+                payload
+                    .extra
+                    .get("three");
+                payload.extra
+                    .contains_key(
+                        "four",
+                    );
+                payload.extra.get("one").unwrap().get("nested");
+                payload.extra.insert("write_only", value);
+                // payload.extra.get("comment");
+            }
+            #[cfg(test)]
+            mod fixtures { fn probe(p: Claims) { p.extra.get("test_only"); } }
+        "#;
+        let claims = parsed_extra_claims(source);
+        assert_eq!(
+            claims.into_iter().collect::<Vec<_>>(),
+            ["four", "one", "three", "two"]
+        );
+    }
+
+    /// Check that every detected read has an entry in [`KNOWN_CLAIMS`].
+    /// The allowlist also covers registered claims accessed through typed fields.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source cannot be parsed, no reads match, or an entry is
+    /// missing. An empty scan can signal that the parser changed its access
+    /// pattern and the visitor needs updating.
+    fn assert_known_claim_reads(source: &str) {
+        let claims = parsed_extra_claims(source);
+        assert!(
+            !claims.is_empty(),
+            "no production extra claim reads found in lib.rs"
+        );
+        let missing: Vec<_> = claims
+            .iter()
+            .filter(|name| !KNOWN_CLAIMS.contains(&name.as_str()))
+            .collect();
         assert!(
             missing.is_empty(),
-            "every claim name parsed in lib.rs must be in KNOWN_CLAIMS; missing: {missing:?}"
+            "claim reads missing from KNOWN_CLAIMS: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn test_known_claims_covers_every_parse_site() {
+        assert_known_claim_reads(include_str!("lib.rs"));
+    }
+
+    #[test]
+    #[should_panic(expected = "no production extra claim reads")]
+    fn test_known_claims_rejects_empty_scan() {
+        assert_known_claim_reads(r#"fn parse(payload: Claims) { payload.claim("metadata"); }"#);
+    }
+
+    #[test]
+    #[should_panic(expected = "unlisted_claim")]
+    fn test_known_claims_reports_an_unlisted_read() {
+        assert_known_claim_reads(
+            r#"fn parse(payload: Claims) { payload.extra.contains_key("unlisted_claim"); }"#,
         );
     }
 
