@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import hashlib
 from typing import Any, Optional
 
@@ -44,10 +44,10 @@ def add_trustmark(
     sub_data = dict(additional_claims or {})
     sub_data["iss"] = settings.TRUSTMARK_PROVIDER
     sub_data["sub"] = entity
-    now = datetime.now()
+    now = datetime.now(UTC)
     exp = now + timedelta(hours=expiry)
-    sub_data["iat"] = now.timestamp()
-    sub_data["exp"] = exp.timestamp()
+    sub_data["iat"] = now
+    sub_data["exp"] = exp
     sub_data["trust_mark_type"] = trustmarktype
 
     key = settings.SIGNING_PRIVATE_KEY

@@ -1,11 +1,10 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "pyjosers>=0.4.0",
+#     "pyjosers>=0.4.1",
 # ]
 # ///
 import os
-import sys
 
 from pyjosers import jwk
 
@@ -40,7 +39,7 @@ for config in key_configs:
         key = jwk.JWK.generate(kty=kty, crv=config["crv"], use=config["use"], alg=alg)
 
     # Set KID as thumbprint
-    key["kid"] = key.thumbprint()
+    key.kid = key.thumbprint()
     kid = key.kid
 
     # Export public key

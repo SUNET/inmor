@@ -420,7 +420,7 @@ dependencies = [
 requires-dist = [
     { name = "httpx" },
     { name = "port-for" },
-    { name = "pyjosers", specifier = ">=0.4.0" },
+    { name = "pyjosers", specifier = ">=0.4.1" },
     { name = "pytest" },
     { name = "pytest-dotenv" },
     { name = "pytest-redis" },
@@ -432,15 +432,15 @@ requires-dist = [
 
 [[package]]
 name = "pyjosers"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5f/fe/fffb11026c309cfd4c227198a3bb95791391b150f6925188ade7b75f7f40/pyjosers-0.4.0.tar.gz", hash = "sha256:535084ecec285db820b105b9aaf62d6313d3a9a23ca0eb433fa5e0c7f832cebc", size = 93722, upload-time = "2026-11-18T07:44:27.032Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/66/91059c570413bfb5060cab1627fafd15cbd2d65e93582b8e13790b8bc45d/pyjosers-0.4.1.tar.gz", hash = "sha256:918cf3437feaa06face1924573da248f6d346c77f0fbdcd40e58b91f5396543f", size = 95612, upload-time = "2026-11-18T13:36:10.433Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/46/aac8eabe86b78b7546166a0baa272c80a8281c13a599b41549e3f68adbdf/pyjosers-0.4.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:3572f0add52b9053f03edabbd8e13f1baf5381328bac8d26fafd33a24a307c44", size = 2003847, upload-time = "2026-11-18T07:44:18.901Z" },
-    { url = "https://files.pythonhosted.org/packages/17/49/4c3002dc19f684729eaf5069693ebc3c9f0fdef8312c66e56686176bccec/pyjosers-0.4.0-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:d142eb4bba80de6df8f3e528bbe66fee50a087c08cb1e3f5b0a12f447f5533be", size = 2160496, upload-time = "2026-11-18T07:44:20.462Z" },
-    { url = "https://files.pythonhosted.org/packages/44/50/4463924804b9145f0194bfe6bbe0857b7d3a05bc20fcbe4c5f2157da7f5b/pyjosers-0.4.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:ba2c2faf1a3aee3bec68ce3a9bdcd7a4bd98ded909b467d6aed9c0a8bf60cc23", size = 2211698, upload-time = "2026-11-18T07:44:22.103Z" },
-    { url = "https://files.pythonhosted.org/packages/31/48/7047d49cda9b7b3afa74ad0acdcd453a83386fc9929f002d9aa566f2cf36/pyjosers-0.4.0-cp310-abi3-win_amd64.whl", hash = "sha256:e6693efc932643a50d4e98195edb2c8c53a56e090abffdb2bb178cee89d591d9", size = 2149877, upload-time = "2026-11-18T07:44:23.719Z" },
-    { url = "https://files.pythonhosted.org/packages/f0/21/df2279a9020550b64b834abf1a243a098e6d861d707960837a40623f712f/pyjosers-0.4.0-cp310-abi3-win_arm64.whl", hash = "sha256:16458e51f1e74519871e1b9300890d649b12539475f525093fdf692c336bd39b", size = 2060133, upload-time = "2026-11-18T07:44:25.692Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/5c/abe55f0a084688bbfe7bf84194c90dce70c7d89fedf263ae0b850fe18433/pyjosers-0.4.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:0dc879bb4a955bac14a65b598b2748ec16e55e5965946b7142110291691fa767", size = 2004878, upload-time = "2026-11-18T13:36:02.187Z" },
+    { url = "https://files.pythonhosted.org/packages/49/5d/13a8998215ac2d624d5c16c2c98d5c40c832b95508cda7458a47e86c61fd/pyjosers-0.4.1-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:52ab567081270fc1262fa3839c6cbfeb96325e26342fbb920e343363cf67d9c3", size = 2160459, upload-time = "2026-11-18T13:36:04.039Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/75/94c30a160e0061184dde739a6e0c8ac2007a57a181817827d8d6d7cab93f/pyjosers-0.4.1-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:fae2068af67a0c6b811a03e7bd05758a0b5753cde5db9b5c4fc9fb6727a50acc", size = 2213352, upload-time = "2026-11-18T13:36:05.493Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/d8/d07727c6a40136cff0fd597bcdc3917166dd3bdee12706645eb11e4169b7/pyjosers-0.4.1-cp310-abi3-win_amd64.whl", hash = "sha256:2ca4e6e7a33a037bc1958770a50092ae622437a0ae39cbdef4bae2ad583a5095", size = 2149870, upload-time = "2026-11-18T13:36:07.252Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/85/060013030f0ce12054c6e7885934fd1b46d1f13fc5ef59795ec22283eadb/pyjosers-0.4.1-cp310-abi3-win_arm64.whl", hash = "sha256:3150c721a38c713eb3a2627f229ab92217bdefcc935d71106e1a3dbb8ca6899d", size = 2061090, upload-time = "2026-11-18T13:36:08.907Z" },
 ]
 
 [[package]]

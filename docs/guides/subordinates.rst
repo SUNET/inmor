@@ -77,16 +77,19 @@ Fetch the entity's configuration and register it:
    # Step 1: Fetch entity configuration
    ENTITY_JWT=$(curl -s https://example-rp.com/.well-known/openid-federation)
 
-   # Step 2: Extract metadata and JWKS (using Python)
-   python3 << 'EOF'
-   import json
-   from pyjosers import jwt
+   # Step 2: Verify the signed configuration using its advertised public keys
+   ENTITY_JWT="$ENTITY_JWT" python3 << 'EOF'
+   import os
+   from pyjosers import JWKSet, jwt
 
-   entity_jwt = "..."  # paste the JWT
-   jose = jwt.JWT.from_jose_token(entity_jwt)
-   payload = json.loads(jose.token.objects["payload"])
+   entity_jwt = os.environ["ENTITY_JWT"]
+   payload = jwt.decode_self_signed(
+       entity_jwt,
+       lambda claims: JWKSet.from_json(jwt.dumps(claims["jwks"])),
+   ).value
+   # Confirm the entity ID and metadata before approving registration.
 
-   print(json.dumps({
+   print(jwt.dumps({
        "entityid": payload["sub"],
        "metadata": payload["metadata"],
        "jwks": payload["jwks"],

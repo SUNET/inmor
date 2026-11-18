@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import socket
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from typing import Any, cast
 from urllib.parse import SplitResult, urlparse, urlsplit, urlunsplit
@@ -10,8 +10,7 @@ from urllib.parse import SplitResult, urlparse, urlsplit, urlunsplit
 import httpx
 from django.conf import settings
 from pyjosers import jwk, jwt
-from pyjosers.jwk import JWK, JWKSet
-from pyjosers.jws import JWS
+from pyjosers.jwk import JWKSet
 from pyjosers.jwt import JWT
 from oidfpolicy import apply_policy, merge_policies
 from pydantic import BaseModel
@@ -243,12 +242,12 @@ def create_server_statement() -> str:
         sub_data["trust_mark_owners"] = owners
 
     # Set creation and expiry time
-    now = datetime.now()
+    now = datetime.now(UTC)
     exp = now + timedelta(hours=settings.SERVER_EXPIRY)
     # creation time
-    sub_data["iat"] = now.timestamp()
+    sub_data["iat"] = now
     # Expiry time of the server's entity statement
-    sub_data["exp"] = exp.timestamp()
+    sub_data["exp"] = exp
 
     # The is the server's public keyset
     keyset = JWKSet()
@@ -341,9 +340,9 @@ def create_subordinate_statement(
         sub_data["metadata_policy"] = settings.POLICY_DOCUMENT.get("metadata_policy")
 
     # creation time
-    sub_data["iat"] = now.timestamp()
+    sub_data["iat"] = now
     # Expiry time of the subordinate statement
-    sub_data["exp"] = exp.timestamp()
+    sub_data["exp"] = exp
     # The is the subordinate's keyset
     sub_data["jwks"] = keyset.export(private_keys=False, as_dict=True)
 
@@ -407,47 +406,29 @@ def fetch_jwks_from_uri(uri: str) -> JWKSet:
     return JWKSet.from_json(resp.text)
 
 
-def self_validate(token: jwt.JWT) -> dict[str, Any]:
-    """Self validates a JWT with JWKS from it.
+def self_validate(token: str) -> dict[str, Any]:
+    """Verify the compact entity statement with its inline or remotely advertised keys."""
+    claims = jwt.UnverifiedJwt(token).claims
+    if claims.get("jwks") is not None:
+        keyset = JWKSet.from_json(jwt.dumps(claims["jwks"]))
+    elif claims.get("jwks_uri"):
+        keyset = fetch_jwks_from_uri(claims["jwks_uri"])
+    else:
+        raise ValueError("No jwks or jwks_uri found in payload")
 
-    Tries inline jwks first, falls back to jwks_uri if available.
-    """
-    try:
-        signed = token.token
-        if not isinstance(signed, JWS):
-            raise ValueError("Expected a signed JWT")
-        # Untrusted until `token.validate()` below succeeds.
-        payload = json.loads(signed.objects["payload"])
-        jwks_data = payload.get("jwks")
-        if jwks_data is not None:
-            # Inline JWKS — standard path
-            jwks_set = JWKSet()
-            for key in jwks_data.get("keys", []):
-                jwks_set.add(JWK(**key))
-            token.validate(jwks_set)
-        elif payload.get("jwks_uri"):
-            # Fallback: fetch keys from jwks_uri
-            logger.info("No inline jwks, fetching from jwks_uri: %s", payload["jwks_uri"])
-            jwks_set = fetch_jwks_from_uri(payload["jwks_uri"])
-            token.validate(jwks_set)
-        else:
-            raise ValueError("No jwks or jwks_uri found in payload")
-        return payload
-    except Exception as e:
-        raise Exception(str(e))
+    # Keep the Admin's existing time and key-selection policy. Downstream Django
+    # views expect ordinary JSON types, including for numbers in nested metadata.
+    verified = jwt.JWT(jwt=token, key=keyset)
+    return json.loads(verified.claims)
 
 
 def fetch_payload(entity_id: str):
-    """Fetches entity and validates and returns payload and JWT token as string"""
+    """Fetch and self-verify the entity configuration, retaining its original compact JWT."""
     resp = _federation_get(_entity_configuration_url(entity_id))
     if resp.status_code != 200:
         raise Exception(f"Fetching payload returns {resp.status_code} for {entity_id}")
     text = resp.text
-    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(text)
-    # FIXME: In future we will need the proper key to verify the signature and use only
-    # validated contain.
-    payload = self_validate(jwt_net)
-    return payload, text
+    return self_validate(text), text
 
 
 def fetch_subordinate_statements(authority_hints: list[str], entity_id: str, r: Redis):

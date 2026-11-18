@@ -912,8 +912,7 @@ def test_create_server_entity(auth_client: Client, loadredis):
     assert response.status_code == 201
     entity_statement = response.json().get("entity_statement")
     assert entity_statement is not None
-    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(entity_statement)
-    payload = self_validate(jwt_net)
+    payload = self_validate(entity_statement)
 
     # Verify sub and iss claims
     base_url = "https://localhost:8080"
@@ -1156,8 +1155,7 @@ def test_self_validate_with_inline_jwks():
     token.make_signed_token(key)
     serialized = token.serialize()
 
-    parsed = jwt.JWT.from_jose_token(serialized)
-    payload = self_validate(parsed)
+    payload = self_validate(serialized)
     assert payload["iss"] == "https://example.com"
     assert payload["sub"] == "https://example.com"
     assert "jwks" in payload
@@ -1182,9 +1180,8 @@ def test_self_validate_no_jwks_or_uri():
     token.make_signed_token(key)
     serialized = token.serialize()
 
-    parsed = jwt.JWT.from_jose_token(serialized)
     with pytest.raises(Exception, match="No jwks or jwks_uri"):
-        self_validate(parsed)
+        self_validate(serialized)
 
 
 def test_self_validate_with_jwks_uri(monkeypatch):
@@ -1218,7 +1215,6 @@ def test_self_validate_with_jwks_uri(monkeypatch):
     token.make_signed_token(key)
     serialized = token.serialize()
 
-    parsed = jwt.JWT.from_jose_token(serialized)
-    payload = self_validate(parsed)
+    payload = self_validate(serialized)
     assert payload["iss"] == "https://example.com"
     assert payload["jwks_uri"] == jwks_url

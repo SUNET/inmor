@@ -116,7 +116,7 @@ Inmor generates multiple key types for signing operations, following `RFC 9864 S
 Each key is stored as a JWK JSON file with the key ID (kid) as the thumbprint.
 
 Signature algorithms and JOSE libraries
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All JOSE operations (JWK, JWS and JWT handling) use
 `jose-rs <https://crates.io/crates/jose-rs>`_ in the Trust Anchor and
@@ -124,6 +124,8 @@ All JOSE operations (JWK, JWS and JWT handling) use
 scripts and the test suites. Both are backed by the same Rust implementation,
 so the two components accept and reject the same tokens.
 
+* The Admin requires pyjosers 0.4.1 or later. It signs timezone-aware UTC
+  datetimes as NumericDate values, retaining fractional seconds when present.
 * Statements are signed with the ``alg`` stored on the signing key. Edwards
   curve keys are stored with the fully specified names ``Ed25519`` and
   ``Ed448``, and are signed with the ``EdDSA`` header value, which is the

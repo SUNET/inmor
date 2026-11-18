@@ -1,11 +1,10 @@
-import json
 import os
 import sys
 from pprint import pprint
 from typing import Any
 
 import httpx
-from pyjosers import jwt
+from pyjosers import JWKSet, jwt
 
 api_key = os.environ.get("INMOR_API_KEY")
 if not api_key:
@@ -74,7 +73,10 @@ print("Now we will add the subordinates.")
 for tm in subs:
     well_known = f"{tm}/.well-known/openid-federation"
     resp = httpx.get(well_known)
-    _header, payload = jwt.decode_unverified(resp.text)
+    resp.raise_for_status()
+    payload = jwt.decode_self_signed(
+        resp.text, lambda claims: JWKSet.from_json(jwt.dumps(claims["jwks"]))
+    ).value
 
     metadata = payload.get("metadata")
     if tm == "https://fakeop0.labb.sunet.se":
@@ -92,12 +94,14 @@ for tm in subs:
 
     resp = httpx.post(
         "http://localhost:8000/api/v1/subordinates",
-        json={
-            "entityid": tm,
-            "metadata": payload["metadata"],
-            "forced_metadata": forced_metadata,
-            "jwks": payload["jwks"],
-        },
+        content=jwt.dumps(
+            {
+                "entityid": tm,
+                "metadata": payload["metadata"],
+                "forced_metadata": forced_metadata,
+                "jwks": payload["jwks"],
+            }
+        ),
         headers={**auth_headers, "Content-Type": "application/json", "accept": "application/json"},
     )
     print("--" * 30)

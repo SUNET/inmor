@@ -2,7 +2,7 @@
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from django.conf import settings
@@ -32,14 +32,14 @@ class TestGenericSigning:
     @pytest.fixture
     def sample_claims(self):
         """Sample JWT claims for testing."""
-        now = datetime.now()
+        now = datetime.now(UTC)
         exp = now + timedelta(hours=1)
 
         return {
             "iss": "http://localhost:8080",
             "sub": "http://example.com",
-            "iat": now.timestamp(),
-            "exp": exp.timestamp(),
+            "iat": now,
+            "exp": exp,
             "test_claim": "test_value",
         }
 
@@ -116,14 +116,14 @@ class TestGenericSigning:
             kid = private_key.kid
 
             # Create entity statement claims
-            now = datetime.now()
+            now = datetime.now(UTC)
             exp = now + timedelta(hours=24)
 
             sub_data = {
                 "iss": settings.TA_DOMAIN,
                 "sub": settings.TA_DOMAIN,
-                "iat": now.timestamp(),
-                "exp": exp.timestamp(),
+                "iat": now,
+                "exp": exp,
                 "metadata": {
                     "federation_entity": {
                         "federation_fetch_endpoint": f"{settings.TA_DOMAIN}/fetch",
