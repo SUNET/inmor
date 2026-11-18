@@ -427,8 +427,8 @@ pub fn get_ta_jwks_public_keyset() -> JwkSet {
 
 /// Convert a `SystemTime` into a whole-second JWT NumericDate.
 ///
-/// Federation statements carry integer `iat`/`exp` values, so sub-second
-/// precision is dropped on purpose.
+/// Used for locally generated timestamps. Expiries copied from signed
+/// statements or trust marks retain their original NumericDate precision.
 pub fn numeric_date(time: SystemTime) -> NumericDate {
     let secs = time
         .duration_since(UNIX_EPOCH)
@@ -2314,20 +2314,22 @@ fn create_resolve_response_jwt(
     // Per spec Section 8.3.2: exp "MUST be the minimum of the exp value of
     // the Trust Chain from which the resolve response was derived, as well as
     // any Trust Mark included in the response."
-    let fallback_exp = SystemTime::now() + Duration::from_secs(86400);
-    let chain_exp_iter = result.iter().filter_map(|v| expires_at(&v.payload));
+    let chain_exp_iter = result.iter().filter_map(|v| v.payload.exp);
     let trust_mark_exp_iter = trust_marks.as_ref().into_iter().flat_map(|tms| {
         tms.iter().filter_map(|tm| {
             let jwt_str = tm.get("trust_mark")?.as_str()?;
             let (tm_payload, _) = get_unverified_payload_header(jwt_str).ok()?;
-            expires_at(&tm_payload)
+            tm_payload.exp
         })
     });
-    let min_exp = chain_exp_iter
-        .chain(trust_mark_exp_iter)
-        .min()
-        .unwrap_or(fallback_exp);
-    payload.exp = Some(numeric_date(min_exp));
+    // Compare the signed NumericDates directly so the response stays valid
+    // through the fractional part of the earliest expiry.
+    payload.exp = Some(
+        chain_exp_iter
+            .chain(trust_mark_exp_iter)
+            .min()
+            .unwrap_or_else(|| numeric_date(SystemTime::now() + Duration::from_secs(86400))),
+    );
 
     if let Some(metadata_val) = metadata {
         payload
@@ -4358,6 +4360,45 @@ mod tests {
             }
         }
         panic!("no private keys in ./privatekeys");
+    }
+
+    #[test]
+    fn resolve_preserves_fractional_expiry_from_chain_or_trust_mark() {
+        let key = jwk_from_bytes(&PRIVATE_KEY).expect("read TA signing key");
+        let state = web::Data::new(AppState {
+            entity_id: "https://ta.example".to_string(),
+            public_keyset: JwkSet {
+                keys: vec![key.to_public_jwk()],
+            },
+        });
+        let earlier = NumericDate::new(2_000_000_000, 900_000_001).unwrap();
+        let later = NumericDate::new(2_000_000_000, 900_000_002).unwrap();
+        for (chain_exp, mark_exp) in [(earlier, later), (later, earlier)] {
+            let statement = Claims {
+                exp: Some(chain_exp),
+                ..Claims::default()
+            };
+            let wire = create_signed_jwt(&statement, &key, Some("entity-statement+jwt")).unwrap();
+            let chain = [VerifiedJWT::new(wire, &statement, false, false)];
+            let mark = Claims {
+                exp: Some(mark_exp),
+                ..Claims::default()
+            };
+            let mark_wire = create_signed_jwt(&mark, &key, Some("trust-mark+jwt")).unwrap();
+
+            let response = create_resolve_response_jwt(
+                &state,
+                "https://subject.example",
+                &chain,
+                None,
+                Some(vec![json!({ "trust_mark": mark_wire })]),
+            )
+            .unwrap();
+            let (claims, _) =
+                verify_jwt_signature_with_jwks(&response, Some(state.public_keyset.clone()))
+                    .unwrap();
+            assert_eq!(claims.exp, Some(earlier));
+        }
     }
 
     /// Load the private key from ./privatekeys whose `alg` matches.
