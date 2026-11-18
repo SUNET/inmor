@@ -7,7 +7,7 @@ license = { file="LICENSE" }
 requires-python = '>=3.14'
 
 dependencies = [
-	"jwcrypto",
+	"pyjosers>=0.4.0",
 	"httpx",
 	"redis",
 	"port-for",
@@ -29,6 +29,9 @@ Home = "https://github.com/SUNET/inmor"
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
 exclude-newer = "2026-11-01T00:00:00Z"
+# pyjosers 0.4.0 (released 2026-11-18) is needed for Ed448 and the
+# EdDSA/Ed25519 JWK pin alias. Drop this once the cutoff above moves past it.
+exclude-newer-package = { pyjosers = "2026-11-19T00:00:00Z" }
 
 [tool.pyright]
 stubPath = "typings"

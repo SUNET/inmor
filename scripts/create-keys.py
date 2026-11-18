@@ -1,13 +1,13 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "jwcrypto",
+#     "pyjosers>=0.4.0",
 # ]
 # ///
 import os
 import sys
 
-from jwcrypto import jwk
+from pyjosers import jwk
 
 # Ensure directories exist
 os.makedirs("publickeys", exist_ok=True)
@@ -40,7 +40,7 @@ for config in key_configs:
         key = jwk.JWK.generate(kty=kty, crv=config["crv"], use=config["use"], alg=alg)
 
     # Set KID as thumbprint
-    key.kid = key.thumbprint()
+    key["kid"] = key.thumbprint()
     kid = key.kid
 
     # Export public key

@@ -6,8 +6,7 @@ from typing import Any
 
 import pytest
 from django.test import Client
-from jwcrypto import jwt
-from jwcrypto.common import json_decode
+from pyjosers import jwt
 
 from entities.lib import self_validate
 
@@ -60,17 +59,12 @@ def test_fetch_config_blocks_private_destination(
 
 def get_payload(token_str: str):
     "Helper method to get payload"
-    jose = jwt.JWT.from_jose_token(token_str)
-    return json_decode(jose.token.objects.get("payload", ""))
+    return jwt.decode_unverified(token_str)[1]
 
 
 def get_header(token_str: str):
     "Helper method to get JWT header"
-    jose = jwt.JWT.from_jose_token(token_str)
-    protected = jose.token.objects.get("protected", "")
-    if isinstance(protected, bytes):
-        protected = protected.decode("utf-8")
-    return json.loads(protected)
+    return jwt.decode_unverified(token_str)[0]
 
 
 def test_trustmarktypes_list(auth_client: Client):
@@ -1142,8 +1136,8 @@ def test_unauthenticated_server_entity(db):
 
 def test_self_validate_with_inline_jwks():
     """self_validate works with inline JWKS (standard path)."""
-    from jwcrypto.jwk import JWK, JWKSet
-    from jwcrypto.jwt import JWT
+    from pyjosers.jwk import JWK, JWKSet
+    from pyjosers.jwt import JWT
 
     key = JWK.generate(kty="EC", crv="P-256", kid="test-key-1")
     keyset = JWKSet()
@@ -1171,8 +1165,8 @@ def test_self_validate_with_inline_jwks():
 
 def test_self_validate_no_jwks_or_uri():
     """self_validate raises when no jwks, jwks_uri, or signed_jwks_uri."""
-    from jwcrypto.jwk import JWK
-    from jwcrypto.jwt import JWT
+    from pyjosers.jwk import JWK
+    from pyjosers.jwt import JWT
 
     key = JWK.generate(kty="EC", crv="P-256", kid="test-key-2")
     claims = {
@@ -1195,8 +1189,8 @@ def test_self_validate_no_jwks_or_uri():
 
 def test_self_validate_with_jwks_uri(monkeypatch):
     """self_validate falls back to jwks_uri when inline jwks is missing."""
-    from jwcrypto.jwk import JWK, JWKSet
-    from jwcrypto.jwt import JWT
+    from pyjosers.jwk import JWK, JWKSet
+    from pyjosers.jwt import JWT
 
     key = JWK.generate(kty="EC", crv="P-256", kid="test-key-3")
     keyset = JWKSet()

@@ -11,11 +11,10 @@ use std::sync::{Arc, atomic::AtomicBool};
 use actix_web::{HttpRequest, HttpResponse, Responder, error, get, post, web};
 use actix_web_lab::extract::Query;
 use base64::Engine;
-use josekit::{
-    JoseError,
-    jwk::{Jwk, JwkSet},
-    jws::{ES256, ES384, ES512, EdDSA, JwsHeader, JwsSigner, JwsVerifier, PS256, RS256},
-    jwt::{self, JwtPayload, JwtPayloadValidator},
+use jose_rs::{
+    JoseError, JoseHeader, JwsAlgorithm,
+    jwk::{Jwk, JwkSet, selection::SelectionPolicy},
+    jwt::{self, Claims, NumericDate, UnverifiedJwt, Validation},
 };
 use oidfed_metadata_policy::*;
 use serde::Deserialize;
@@ -25,7 +24,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error as StdError;
 use std::ops::Deref;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 lazy_static! {
@@ -79,7 +78,7 @@ pub const WELL_KNOWN: &str = ".well-known/openid-federation";
 /// Per OpenID Federation §3.1.1, an issuer can set `crit` on a statement to
 /// require recipients to reject it if they don't understand a listed claim
 /// name. `verify_jwt_with_jwks` enforces that rule by checking every entry of
-/// `crit` against this list. Every new claim that gets a `.claim("…")` parse
+/// `crit` against this list. Every new claim that gets a `.extra.get("…")` parse
 /// site MUST be appended here, otherwise an issuer that marks the new claim
 /// critical will see its (correctly-formed) statements rejected.
 ///
@@ -334,13 +333,13 @@ impl EntityCollectionResponse {
 #[derive(Debug)]
 pub struct VerifiedJWT {
     jwt: String,
-    payload: JwtPayload,
+    payload: Claims,
     substatement: bool,
     taresult: bool,
 }
 
 impl VerifiedJWT {
-    pub fn new(jwt: String, payload: &JwtPayload, subs: bool, taresult: bool) -> Self {
+    pub fn new(jwt: String, payload: &Claims, subs: bool, taresult: bool) -> Self {
         VerifiedJWT {
             jwt,
             payload: payload.clone(),
@@ -419,19 +418,54 @@ impl ServerConfiguration {
 
 /// Creates a JWK Set from the public keys stored in the ./publickeys directory
 pub fn get_ta_jwks_public_keyset() -> JwkSet {
-    let mut keymap = Map::new();
-    let mut keys: Vec<Value> = Vec::new();
+    let keys = PUBLIC_KEYS
+        .iter()
+        .filter_map(|public_keydata| serde_json::from_slice::<Jwk>(public_keydata).ok())
+        .collect();
+    JwkSet { keys }
+}
 
-    for public_keydata in PUBLIC_KEYS.iter() {
-        if let Ok(publickey) = Jwk::from_bytes(public_keydata) {
-            let map: Map<String, Value> = publickey.as_ref().clone();
-            keys.push(json!(map));
-        }
-    }
-    // Now outer map
-    keymap.insert("keys".to_string(), json!(keys));
+/// Convert a `SystemTime` into a whole-second JWT NumericDate.
+///
+/// Federation statements carry integer `iat`/`exp` values, so sub-second
+/// precision is dropped on purpose.
+pub fn numeric_date(time: SystemTime) -> NumericDate {
+    let secs = time
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    NumericDate::from(secs)
+}
 
-    JwkSet::from_map(keymap).expect("Failed to create JwkSet from public keys")
+/// The `exp` claim of a payload as a `SystemTime`, if present.
+pub fn expires_at(payload: &Claims) -> Option<SystemTime> {
+    payload
+        .exp
+        .map(|exp| UNIX_EPOCH + Duration::new(exp.as_secs(), exp.subsec_nanos()))
+}
+
+/// Parse a private or public JWK from its JSON bytes.
+pub fn jwk_from_bytes(data: &[u8]) -> Result<Jwk, JoseError> {
+    Ok(serde_json::from_slice::<Jwk>(data)?)
+}
+
+/// Build a `JwkSet` from the JSON value of a JWKS `keys` member.
+///
+/// Any entry that does not parse as a JWK fails the whole set. Keys of an
+/// unsupported type still parse and are retained; they only fail when used.
+pub fn jwkset_from_keys(keys: &Value) -> Result<JwkSet> {
+    let entries = keys
+        .as_array()
+        .ok_or_else(|| anyhow!("JWKS `keys` must be a JSON array"))?;
+    let keys = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            serde_json::from_value::<Jwk>(entry.clone())
+                .map_err(|e| anyhow!("JWKS key at index {index} is not a valid JWK: {e}"))
+        })
+        .collect::<Result<Vec<Jwk>>>()?;
+    Ok(JwkSet { keys })
 }
 
 /// Generic function to create a signed JWT with the given payload, key, and optional token type.
@@ -440,14 +474,14 @@ pub fn get_ta_jwks_public_keyset() -> JwkSet {
 /// algorithms (RS256, PS256, ES256, ES384, ES512, EdDSA for Ed25519/Ed448).
 ///
 /// # Arguments
-/// * `payload` - JwtPayload containing the JWT claims
+/// * `payload` - Claims containing the JWT claims
 /// * `key` - Jwk private key to sign with
 /// * `token_type` - Optional JWT type (e.g., "resolve-response+jwt", "trust-mark-status-response+jwt")
 ///
 /// # Returns
 /// * `Result<String, JoseError>` - Serialized signed JWT string or error
 pub fn create_signed_jwt(
-    payload: &JwtPayload,
+    payload: &Claims,
     key: &Jwk,
     token_type: Option<&str>,
 ) -> Result<String, JoseError> {
@@ -465,68 +499,45 @@ pub fn create_signed_jwt(
 /// `trust_chain` claim or this header). Subordinate Statements deliberately
 /// omit it — the consumer of a subordinate statement walks the chain itself.
 pub fn create_signed_jwt_with_header(
-    payload: &JwtPayload,
+    payload: &Claims,
     key: &Jwk,
     token_type: Option<&str>,
     header_trust_chain: Option<&[String]>,
 ) -> Result<String, JoseError> {
-    let mut header = JwsHeader::new();
-    header.set_token_type("JWT");
+    // Get the algorithm from the key, falling back to RS256 when unset.
+    let alg = key.alg.as_deref().unwrap_or("RS256");
 
-    // Set custom token type if provided
-    if let Some(typ) = token_type {
-        header.set_claim("typ", Some(json!(typ)))?;
-    }
-
-    // Spec §4.3 — embed the trust chain in the JWS header when requested.
-    if let Some(chain) = header_trust_chain {
-        header.set_claim("trust_chain", Some(json!(chain)))?;
-    }
-
-    // Get the algorithm from the key
-    let alg = key.algorithm().unwrap_or("RS256");
-
-    // Normalize algorithm name for josekit
-    // josekit uses "EdDSA" for both Ed25519 and Ed448
-    let normalized_alg = match alg {
+    // Keys are stored with the fully specified RFC 9864 names, but the wire
+    // header keeps the widely deployed `EdDSA` identifier. jose-rs accepts
+    // `EdDSA` for a key pinned to the matching Edwards curve.
+    let header_alg = match alg {
         "Ed25519" | "Ed448" => "EdDSA",
         _ => alg,
     };
 
-    header.set_claim("alg", Some(json!(normalized_alg)))?;
+    let mut header = JoseHeader::new(header_alg);
+    header.typ = Some(token_type.unwrap_or("JWT").to_string());
+
+    // Spec §4.3 — embed the trust chain in the JWS header when requested.
+    if let Some(chain) = header_trust_chain {
+        header.extra.insert("trust_chain".to_string(), json!(chain));
+    }
 
     // Set kid from the key — spec requires kid in all signed JWTs
-    let kid = key.key_id().ok_or_else(|| {
-        JoseError::InvalidKeyFormat(anyhow::anyhow!("Signing key must have a 'kid' field"))
-    })?;
-    header.set_key_id(kid);
+    let kid = key
+        .kid
+        .as_deref()
+        .ok_or_else(|| JoseError::Key("Signing key must have a 'kid' field".into()))?;
+    header.kid = Some(kid.to_string());
 
-    // For EdDSA keys, we need to create a modified key with alg="EdDSA"
-    // because josekit's signer_from_jwk checks the alg field
-    let signing_key = if alg == "Ed25519" || alg == "Ed448" {
-        let mut key_map = key.as_ref().clone();
-        key_map.insert("alg".to_string(), json!("EdDSA"));
-        Jwk::from_map(key_map)?
-    } else {
-        key.clone()
-    };
-
-    // Create the appropriate signer based on the normalized algorithm
-    let signer: Box<dyn JwsSigner> = match normalized_alg {
-        "RS256" => Box::new(RS256.signer_from_jwk(&signing_key)?),
-        "PS256" => Box::new(PS256.signer_from_jwk(&signing_key)?),
-        "ES256" => Box::new(ES256.signer_from_jwk(&signing_key)?),
-        "ES384" => Box::new(ES384.signer_from_jwk(&signing_key)?),
-        "ES512" => Box::new(ES512.signer_from_jwk(&signing_key)?),
-        "EdDSA" => Box::new(EdDSA.signer_from_jwk(&signing_key)?),
-        _ => {
-            // Default to RS256 if algorithm is not recognized
-            Box::new(RS256.signer_from_jwk(&signing_key)?)
-        }
-    };
-
-    let jwt = jwt::encode_with_signer(payload, &header, &*signer)?;
-    Ok(jwt)
+    // jose-rs signs with the algorithm pinned on the JWK, so pin the default
+    // on a copy when the stored key carries no `alg`.
+    if key.alg.is_none() {
+        let mut signing_key = key.clone();
+        signing_key.alg = Some(alg.to_string());
+        return jwt::encode_with_jwk(&signing_key, &header, payload);
+    }
+    jwt::encode_with_jwk(key, &header, payload)
 }
 
 /// Default page size for `/collection` when `limit` is omitted.
@@ -961,11 +972,11 @@ async fn list_subordinates(
                     continue; // Skip invalid JWTs instead of panicking
                 }
             };
-            let Some(metadata) = payload.claim("metadata") else {
+            let Some(metadata) = payload.extra.get("metadata") else {
                 warn!("Missing metadata claim for entity: {}", key);
                 continue; // Skip if no metadata
             };
-            let trustmarks = payload.claim("trust_marks");
+            let trustmarks = payload.extra.get("trust_marks");
             let Some(x) = metadata.as_object() else {
                 warn!("Metadata is not an object for entity: {}", key);
                 continue; // Skip if metadata is not an object
@@ -1322,8 +1333,8 @@ pub async fn fetch_subordinates(
 }
 
 /// Get JWK Set from the given payload
-pub fn get_jwks_from_payload(payload: &JwtPayload) -> Result<JwkSet> {
-    let jwks_data = match payload.claim("jwks") {
+pub fn get_jwks_from_payload(payload: &Claims) -> Result<JwkSet> {
+    let jwks_data = match payload.extra.get("jwks") {
         Some(data) => data,
         None => {
             debug!("No jwks claim found in payload");
@@ -1339,10 +1350,7 @@ pub fn get_jwks_from_payload(payload: &JwtPayload) -> Result<JwkSet> {
             ));
         }
     };
-    let mut internal_map: Map<String, Value> = Map::new();
-    internal_map.insert("keys".to_string(), keys.clone());
-
-    Ok(JwkSet::from_map(internal_map)?)
+    jwkset_from_keys(keys)
 }
 
 /// Fetch a JWKS from a remote `jwks_uri` endpoint.
@@ -1432,9 +1440,7 @@ fn parse_jwks_json(json_str: &str) -> Result<JwkSet> {
     let keys = parsed
         .get("keys")
         .ok_or_else(|| anyhow!("No 'keys' field in JWKS"))?;
-    let mut internal_map: Map<String, Value> = Map::new();
-    internal_map.insert("keys".to_string(), keys.clone());
-    Ok(JwkSet::from_map(internal_map)?)
+    jwkset_from_keys(keys)
 }
 
 /// Try to get JWKS from the payload's `jwks` claim, falling back to
@@ -1451,7 +1457,7 @@ fn parse_jwks_json(json_str: &str) -> Result<JwkSet> {
 /// the downgrade. Operators who do not want this should not configure a
 /// plain `jwks_uri` alongside `signed_jwks_uri`.
 pub async fn get_jwks_from_payload_or_uri(
-    payload: &JwtPayload,
+    payload: &Claims,
     conn: &mut redis::aio::ConnectionManager,
 ) -> Result<JwkSet> {
     // Try inline jwks first.
@@ -1460,7 +1466,7 @@ pub async fn get_jwks_from_payload_or_uri(
     }
 
     // Then signed_jwks_uri — stronger guarantee, so preferred over plain.
-    if let Some(uri_value) = payload.claim("signed_jwks_uri")
+    if let Some(uri_value) = payload.extra.get("signed_jwks_uri")
         && let Some(uri) = uri_value.as_str()
     {
         debug!("No inline jwks, fetching from signed_jwks_uri: {}", uri);
@@ -1474,7 +1480,7 @@ pub async fn get_jwks_from_payload_or_uri(
     }
 
     // Fall back to plain jwks_uri.
-    if let Some(uri_value) = payload.claim("jwks_uri")
+    if let Some(uri_value) = payload.extra.get("jwks_uri")
         && let Some(uri) = uri_value.as_str()
     {
         debug!("Fetching from jwks_uri: {}", uri);
@@ -1487,43 +1493,30 @@ pub async fn get_jwks_from_payload_or_uri(
 }
 
 /// Gets the payload and header without any cryptographic verification.
-#[allow(clippy::explicit_counter_loop)]
-pub fn get_unverified_payload_header(data: &str) -> Result<(JwtPayload, JwsHeader)> {
-    let mut indexies: Vec<usize> = Vec::new();
-    let mut i: usize = 0;
-    for d in data.as_bytes().iter() {
-        if *d == b'.' {
-            indexies.push(i);
-        }
-        i += 1;
-    }
-
-    let input = data.as_bytes();
-    if indexies.len() != 2 {
-        return Err(anyhow::Error::msg(
-            "The compact serialization form of JWS must be three parts separated by colon.",
-        ));
-    }
-
-    let header = &input[0..indexies[0]];
-    let payload = &input[(indexies[0] + 1)..(indexies[1])];
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(header)
-        .map_err(|e| anyhow::Error::msg(format!("Failed to decode header: {}", e)))?;
-    let header: Map<String, Value> = serde_json::from_slice(&header)
-        .map_err(|e| anyhow::Error::msg(format!("Failed to parse header JSON: {}", e)))?;
-    let header = JwsHeader::from_map(header)
-        .map_err(|e| anyhow::Error::msg(format!("Failed to create JwsHeader: {}", e)))?;
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|e| anyhow::Error::msg(format!("Failed to decode payload: {}", e)))?;
-    let map: Map<String, Value> = serde_json::from_slice(&payload)
-        .map_err(|e| anyhow::Error::msg(format!("Failed to parse payload JSON: {}", e)))?;
-    let payload = JwtPayload::from_map(map)
-        .map_err(|e| anyhow::Error::msg(format!("Failed to create JwtPayload: {}", e)))?;
-    // End of stupid unverified code
-    Ok((payload, header))
+///
+/// The result is **untrusted** and is only meant for key discovery (reading
+/// an embedded `jwks`, `jwks_uri` or `kid` before verification) and for
+/// re-reading statements that were already verified earlier.
+pub fn get_unverified_payload_header(data: &str) -> Result<(Claims, JoseHeader)> {
+    let unverified =
+        UnverifiedJwt::parse(data).map_err(|e| anyhow!("Failed to parse compact JWT: {e}"))?;
+    Ok((unverified.claims().clone(), unverified.header().clone()))
 }
+
+/// JWS algorithms accepted on federation statements and trust marks.
+///
+/// `EdDSA` covers both Ed25519 and Ed448 keys; `Ed25519` and `Ed448` are the
+/// fully specified RFC 9864 names for the same signatures.
+const ACCEPTED_JWS_ALGORITHMS: [JwsAlgorithm; 8] = [
+    JwsAlgorithm::RS256,
+    JwsAlgorithm::PS256,
+    JwsAlgorithm::ES256,
+    JwsAlgorithm::ES384,
+    JwsAlgorithm::ES512,
+    JwsAlgorithm::EdDSA,
+    JwsAlgorithm::Ed25519,
+    JwsAlgorithm::Ed448,
+];
 
 /// Verify JWT *signature only* against the given JWKS (or the JWT's own inline
 /// `jwks` claim if `keys` is `None`). Does NOT validate temporal claims
@@ -1536,44 +1529,37 @@ pub fn get_unverified_payload_header(data: &str) -> Result<(JwtPayload, JwsHeade
 pub fn verify_jwt_signature_with_jwks(
     data: &str,
     keys: Option<JwkSet>,
-) -> Result<(JwtPayload, JwsHeader)> {
-    let (payload, header) = get_unverified_payload_header(data)?;
+) -> Result<(Claims, JoseHeader)> {
+    let unverified =
+        UnverifiedJwt::parse(data).map_err(|e| anyhow!("Failed to parse compact JWT: {e}"))?;
     let jwks = match keys {
         Some(d) => d,
-        None => get_jwks_from_payload(&payload)?,
+        None => get_jwks_from_payload(unverified.claims())?,
     };
+    let header = unverified.header();
     let kid = header
-        .key_id()
+        .kid
+        .as_deref()
         .ok_or_else(|| anyhow::Error::msg("Missing key ID in JWT header"))?;
-    let keys = jwks.get(kid);
-    if keys.is_empty() {
+    if jwks.find_by_kid(kid).is_none() {
         return Err(anyhow::Error::msg("Can not find kid used to sign."));
     }
-    let key = keys[0];
-    let algorithm = header
-        .algorithm()
-        .ok_or_else(|| anyhow::Error::msg("Missing algorithm in JWT header"))?;
     // Per spec Section 7.3: alg MUST NOT be "none"
-    if algorithm == "none" {
+    if header.alg == "none" {
         return Err(anyhow::Error::msg("Algorithm 'none' is not permitted"));
     }
-    let boxed_verifier: Box<dyn JwsVerifier> = match algorithm {
-        "RS256" => Box::new(RS256.verifier_from_jwk(key)?),
-        "PS256" => Box::new(PS256.verifier_from_jwk(key)?),
-        "ES256" => Box::new(ES256.verifier_from_jwk(key)?),
-        "ES384" => Box::new(ES384.verifier_from_jwk(key)?),
-        "ES512" => Box::new(ES512.verifier_from_jwk(key)?),
-        "EdDSA" => Box::new(EdDSA.verifier_from_jwk(key)?),
-        _ => {
-            return Err(anyhow::Error::msg(format!(
-                "Unsupported algorithm: {}",
-                algorithm
-            )));
-        }
-    };
-    let verifier = &*boxed_verifier;
-    let (payload, header) = jwt::decode_with_verifier(data, verifier)?;
-    Ok((payload, header))
+    if !JwsAlgorithm::from_str(&header.alg).is_ok_and(|alg| ACCEPTED_JWS_ALGORITHMS.contains(&alg))
+    {
+        return Err(anyhow::Error::msg(format!(
+            "Unsupported algorithm: {}",
+            header.alg
+        )));
+    }
+    // Signature only: the key is the unique `kid` match, never a fallback.
+    let validation =
+        Validation::signature_only().with_allowed_algorithms(ACCEPTED_JWS_ALGORITHMS.to_vec());
+    let verified = unverified.verify_with_policy(&jwks, &validation, &SelectionPolicy::strict())?;
+    Ok((verified.value, verified.protected))
 }
 
 /// Verify JWT against given JWKS (signature + temporal claims + `crit`).
@@ -1582,12 +1568,16 @@ pub fn verify_jwt_signature_with_jwks(
 /// recipients MUST understand. We reject anything whose `crit` contains a
 /// name not in `KNOWN_CLAIMS`. The chain walker treats this as a normal
 /// verification failure and skips the offending authority via `continue`.
-pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayload, JwsHeader)> {
+pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(Claims, JoseHeader)> {
     let (payload, header) = verify_jwt_signature_with_jwks(data, keys)?;
     // See more https://github.com/SUNET/inmor/issues/79
-    let mut validator = JwtPayloadValidator::new();
-    validator.set_base_time(SystemTime::now());
-    validator.validate(&payload)?;
+    // Same temporal rules as before the jose-rs migration: `exp` and `nbf`
+    // are checked against the current time with no leeway, and `iat` is not
+    // compared with the local clock.
+    Validation::new()
+        .with_leeway(0)
+        .without_iat_future_check()
+        .validate(&payload)?;
     enforce_crit_claim(&payload)?;
     Ok((payload, header))
 }
@@ -1599,8 +1589,8 @@ pub fn verify_jwt_with_jwks(data: &str, keys: Option<JwkSet>) -> Result<(JwtPayl
 /// any unknown entry means we cannot safely process this statement and MUST
 /// reject it. A missing `crit` claim is fine — issuers aren't required to
 /// set one.
-fn enforce_crit_claim(payload: &JwtPayload) -> Result<()> {
-    let Some(crit_value) = payload.claim("crit") else {
+fn enforce_crit_claim(payload: &Claims) -> Result<()> {
+    let Some(crit_value) = payload.extra.get("crit") else {
         return Ok(());
     };
     let Some(entries) = crit_value.as_array() else {
@@ -1627,15 +1617,15 @@ fn enforce_crit_claim(payload: &JwtPayload) -> Result<()> {
 /// Callers MUST only pass entity configurations to this function. Subordinate
 /// statements and trust marks have different signing semantics and require the
 /// authority's JWKS (see `verify_jwt_with_jwks`).
-pub fn self_verify_jwt(data: &str) -> Result<(JwtPayload, JwsHeader)> {
+pub fn self_verify_jwt(data: &str) -> Result<(Claims, JoseHeader)> {
     let (payload, _header) = get_unverified_payload_header(data)?;
     let jwks = get_jwks_from_payload(&payload)?;
     let (payload, header) = verify_jwt_with_jwks(data, Some(jwks))?;
 
     // Spec §3.1: Entity Configuration MUST have iss == sub. Reject anything
     // else so a forged sub can never ride through on a valid signature.
-    let iss = payload.issuer().unwrap_or("");
-    let sub = payload.subject().unwrap_or("");
+    let iss = payload.iss.as_deref().unwrap_or("");
+    let sub = payload.sub.as_deref().unwrap_or("");
     if iss.is_empty() || sub.is_empty() || iss != sub {
         bail!("self_verify_jwt: entity configuration iss ({iss:?}) != sub ({sub:?}) (spec §3.1)");
     }
@@ -1681,8 +1671,8 @@ impl Constraints {
     ///   verification failure and skips the offending authority, so a
     ///   constraint issuer cannot disable enforcement by sending a broken
     ///   `constraints` object.
-    pub fn from_payload(payload: &JwtPayload) -> Result<Self> {
-        let Some(c) = payload.claim("constraints") else {
+    pub fn from_payload(payload: &Claims) -> Result<Self> {
+        let Some(c) = payload.extra.get("constraints") else {
             return Ok(Self::default());
         };
         let Some(obj) = c.as_object() else {
@@ -1893,8 +1883,8 @@ impl TrustMarkOwners {
     ///   without delegation validation. A malformed `trust_mark_owners`
     ///   in the TA's own EC is an operator bug; the safe reaction is to
     ///   refuse trust marks until the EC is regenerated cleanly.
-    pub fn from_ta_payload(payload: &JwtPayload) -> Result<Self> {
-        let Some(claim) = payload.claim("trust_mark_owners") else {
+    pub fn from_ta_payload(payload: &Claims) -> Result<Self> {
+        let Some(claim) = payload.extra.get("trust_mark_owners") else {
             return Ok(Self::default());
         };
         let Some(obj) = claim.as_object() else {
@@ -1924,9 +1914,7 @@ impl TrustMarkOwners {
             if keys.as_array().is_none_or(|a| a.is_empty()) {
                 bail!("trust_mark_owners[{tm_type}].jwks.keys must be a non-empty array");
             }
-            let mut internal_map: Map<String, Value> = Map::new();
-            internal_map.insert("keys".to_string(), keys.clone());
-            let jwks = JwkSet::from_map(internal_map).map_err(|e| {
+            let jwks = jwkset_from_keys(keys).map_err(|e| {
                 anyhow!("trust_mark_owners[{tm_type}].jwks failed to parse as JWKS: {e}")
             })?;
             out.insert(
@@ -1971,9 +1959,10 @@ impl WalkContext {
     /// Configuration payload. Entity types are read from `metadata`'s keys
     /// (each top-level key in `metadata` is an entity-type identifier per
     /// §5.1). The fetch deadline is set to now + `CHAIN_FETCH_BUDGET_SECS`.
-    pub fn from_subject_payload(subject: &str, payload: &JwtPayload) -> Self {
+    pub fn from_subject_payload(subject: &str, payload: &Claims) -> Self {
         let entity_types = payload
-            .claim("metadata")
+            .extra
+            .get("metadata")
             .and_then(|m| m.as_object())
             .map(|m| m.keys().cloned().collect())
             .unwrap_or_default();
@@ -2105,7 +2094,7 @@ pub async fn resolve_entity_to_trustanchor(
     };
 
     // Now find the authority_hints
-    let authority_hints = match opayload.claim("authority_hints") {
+    let authority_hints = match opayload.extra.get("authority_hints") {
         Some(v) => v,
         // Means we are at one Trust anchor (most probably)
         None => &eal,
@@ -2161,7 +2150,7 @@ pub async fn resolve_entity_to_trustanchor(
         }
 
         let (ah_payload, _) = jwt_result.expect("This can not be error here.");
-        let Some(ah_metadata) = ah_payload.claim("metadata") else {
+        let Some(ah_metadata) = ah_payload.extra.get("metadata") else {
             warn!("Missing metadata in authority payload for: {}", ah_entity);
             continue;
         };
@@ -2316,45 +2305,49 @@ fn create_resolve_response_jwt(
     metadata: Option<Map<String, Value>>,
     trust_marks: Option<Vec<Value>>,
 ) -> Result<String, JoseError> {
-    let mut payload = JwtPayload::new();
+    let mut payload = Claims::default();
     let iss = state.entity_id.clone();
-    payload.set_issuer(iss);
-    payload.set_subject(sub);
-    payload.set_issued_at(&SystemTime::now());
+    payload.iss = Some(iss.to_string());
+    payload.sub = Some(sub.to_string());
+    payload.iat = Some(numeric_date(SystemTime::now()));
 
     // Per spec Section 8.3.2: exp "MUST be the minimum of the exp value of
     // the Trust Chain from which the resolve response was derived, as well as
     // any Trust Mark included in the response."
     let fallback_exp = SystemTime::now() + Duration::from_secs(86400);
-    let chain_exp_iter = result.iter().filter_map(|v| v.payload.expires_at());
+    let chain_exp_iter = result.iter().filter_map(|v| expires_at(&v.payload));
     let trust_mark_exp_iter = trust_marks.as_ref().into_iter().flat_map(|tms| {
         tms.iter().filter_map(|tm| {
             let jwt_str = tm.get("trust_mark")?.as_str()?;
             let (tm_payload, _) = get_unverified_payload_header(jwt_str).ok()?;
-            tm_payload.expires_at()
+            expires_at(&tm_payload)
         })
     });
     let min_exp = chain_exp_iter
         .chain(trust_mark_exp_iter)
         .min()
         .unwrap_or(fallback_exp);
-    payload.set_expires_at(&min_exp);
+    payload.exp = Some(numeric_date(min_exp));
 
     if let Some(metadata_val) = metadata {
-        let _ = payload.set_claim("metadata", Some(json!(metadata_val)));
+        payload
+            .extra
+            .insert("metadata".to_string(), json!(metadata_val));
     }
     let trust_chain: Vec<String> = result.iter().map(|x| x.jwt.clone()).collect();
-    let _ = payload.set_claim("trust_chain", Some(json!(trust_chain.clone())));
+    payload
+        .extra
+        .insert("trust_chain".to_string(), json!(trust_chain.clone()));
 
     if let Some(tms) = trust_marks
         && !tms.is_empty()
     {
-        let _ = payload.set_claim("trust_marks", Some(json!(tms)));
+        payload.extra.insert("trust_marks".to_string(), json!(tms));
     }
 
     // Signing JWT
     let keydata = &*PRIVATE_KEY.clone();
-    let key = Jwk::from_bytes(keydata)?;
+    let key = jwk_from_bytes(keydata)?;
 
     // Spec §4.3 — also embed the chain in the JWS header. The payload claim
     // is retained for clients that read the chain from the payload; the
@@ -2421,9 +2414,10 @@ async fn verify_ta_issued_trust_mark(
     }
 
     // 3. Revocation lookup.
-    let sub = payload.subject().unwrap_or("");
+    let sub = payload.sub.as_deref().unwrap_or("");
     let trust_mark_type_claim = payload
-        .claim("trust_mark_type")
+        .extra
+        .get("trust_mark_type")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if validate_redis_key_input(sub).is_err()
@@ -2453,12 +2447,12 @@ async fn verify_ta_issued_trust_mark(
 /// owner; a TA-issued mark of a type owned by someone else needs a valid
 /// delegation just like an external-issuer mark would.
 fn delegation_gate_for_ta_issued(
-    mark_payload: &JwtPayload,
+    mark_payload: &Claims,
     ta_entity_id: &str,
     trust_mark_type: &str,
     trust_mark_owners: &TrustMarkOwners,
 ) -> bool {
-    let delegation_present = mark_payload.claim("delegation").is_some();
+    let delegation_present = mark_payload.extra.contains_key("delegation");
     match (trust_mark_owners.get(trust_mark_type), delegation_present) {
         (Some(owner), true) => {
             if let Err(e) =
@@ -2557,7 +2551,8 @@ async fn resolve_external_issuer(
 
     // 4. Find the issuer's trust mark status endpoint.
     let status_endpoint = match ec_payload
-        .claim("metadata")
+        .extra
+        .get("metadata")
         .and_then(|m| m.get("federation_entity"))
         .and_then(|fe| fe.get("federation_trust_mark_status_endpoint"))
         .and_then(|e| e.as_str())
@@ -2613,13 +2608,14 @@ async fn resolve_external_issuer(
 ///   * `delegation.trust_mark_id` equals the mark's `trust_mark_type` --
 ///     the delegation is scoped to this trust mark type
 fn verify_delegation_against_owner(
-    mark_payload: &JwtPayload,
+    mark_payload: &Claims,
     owner: &OwnerInfo,
     mark_iss: &str,
     mark_trust_mark_type: &str,
 ) -> Result<()> {
     let delegation_jwt = mark_payload
-        .claim("delegation")
+        .extra
+        .get("delegation")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("delegation claim missing or not a string"))?;
     let (deleg_payload, deleg_header) =
@@ -2630,23 +2626,24 @@ fn verify_delegation_against_owner(
     // cross-JWT confusion -- another owner-signed JWT (an entity
     // statement, a trust mark) whose iss/sub/trust_mark_id happen to line
     // up MUST NOT ride through as a delegation.
-    let deleg_typ = deleg_header.token_type().unwrap_or("");
+    let deleg_typ = deleg_header.typ.as_deref().unwrap_or("");
     if deleg_typ != "trust-mark-delegation+jwt" {
         bail!("delegation JWT typ ({deleg_typ}) is not trust-mark-delegation+jwt");
     }
-    let deleg_iss = deleg_payload.issuer().unwrap_or("");
+    let deleg_iss = deleg_payload.iss.as_deref().unwrap_or("");
     if deleg_iss != owner.sub {
         bail!(
             "delegation.iss ({deleg_iss}) does not equal pinned owner ({})",
             owner.sub
         );
     }
-    let deleg_sub = deleg_payload.subject().unwrap_or("");
+    let deleg_sub = deleg_payload.sub.as_deref().unwrap_or("");
     if deleg_sub != mark_iss {
         bail!("delegation.sub ({deleg_sub}) does not equal mark.iss ({mark_iss})");
     }
     let deleg_tm_id = deleg_payload
-        .claim("trust_mark_id")
+        .extra
+        .get("trust_mark_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if deleg_tm_id != mark_trust_mark_type {
@@ -2725,7 +2722,7 @@ async fn verify_single_trust_mark(
     //       owner not pinned + delegation present -> log warning, fall through (the
     //          existing trust_mark_issuers gate is the only authority we have)
     //       owner not pinned + no delegation -> existing path, accept
-    let delegation_present = mark_payload.claim("delegation").is_some();
+    let delegation_present = mark_payload.extra.contains_key("delegation");
     match (trust_mark_owners.get(trust_mark_type), delegation_present) {
         (Some(owner), true) => {
             if let Err(e) =
@@ -2790,7 +2787,8 @@ async fn verify_single_trust_mark(
     //    return a cached "active" response for a *different* mark, or a JWT
     //    whose `iss` doesn't match the issuer whose keys we just trusted.
     let echoed_trust_mark = status_payload
-        .claim("trust_mark")
+        .extra
+        .get("trust_mark")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if echoed_trust_mark != trust_mark_jwt {
@@ -2799,17 +2797,18 @@ async fn verify_single_trust_mark(
         );
         return false;
     }
-    if status_payload.issuer() != Some(issuer) {
+    if status_payload.iss.as_deref() != Some(issuer) {
         warn!(
             "trust mark: status response `iss` ({:?}) does not match queried issuer {issuer}; skipping",
-            status_payload.issuer()
+            status_payload.iss.as_deref()
         );
         return false;
     }
 
     // 6. Inspect the `status` claim. Anything other than "active" → skip.
     let status = status_payload
-        .claim("status")
+        .extra
+        .get("status")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if status != "active" {
@@ -2866,7 +2865,8 @@ pub async fn load_inmor_recognition_maps(
         }
     };
     let issuers = ta_payload
-        .claim("trust_mark_issuers")
+        .extra
+        .get("trust_mark_issuers")
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default();
@@ -2889,7 +2889,7 @@ pub async fn load_inmor_recognition_maps(
 /// recognition maps from inmor's own published Entity Configuration. Used by
 /// `/resolve`.
 async fn verify_trust_marks_for_resolve(
-    subject_payload: &JwtPayload,
+    subject_payload: &Claims,
     ta_entity_id: &str,
     ta_public_keyset: &JwkSet,
     conn: &mut redis::aio::ConnectionManager,
@@ -2912,7 +2912,7 @@ async fn verify_trust_marks_for_resolve(
 /// `inmor-collection` walker so marks are verified against the same Trust
 /// Anchor used to build the trust chain / collection (spec sec 3.3.1-2.4.1).
 pub async fn verify_trust_marks(
-    subject_payload: &JwtPayload,
+    subject_payload: &Claims,
     ta_entity_id: &str,
     ta_public_keyset: &JwkSet,
     trust_mark_issuers: &Map<String, Value>,
@@ -2921,7 +2921,8 @@ pub async fn verify_trust_marks(
 ) -> Vec<Value> {
     // Subject's trust marks.
     let trust_marks = match subject_payload
-        .claim("trust_marks")
+        .extra
+        .get("trust_marks")
         .and_then(|v| v.as_array())
     {
         Some(arr) if !arr.is_empty() => arr.clone(),
@@ -2932,7 +2933,7 @@ pub async fn verify_trust_marks(
     // is the entity the mark is issued to). Without this, an entity could
     // republish another's mark in its own `trust_marks` array and have it
     // accepted as its own.
-    let resolve_sub = subject_payload.subject().unwrap_or("");
+    let resolve_sub = subject_payload.sub.as_deref().unwrap_or("");
 
     // A mark is *recognised* if either:
     //   * its trust_mark_type appears in trust_mark_issuers (federation-pinned
@@ -3003,7 +3004,8 @@ pub async fn verify_trust_marks(
         // signed payload, so any divergence between this value and what
         // `verify_single_trust_mark` would later see is impossible.
         let inner_tm_type = unverified_payload
-            .claim("trust_mark_type")
+            .extra
+            .get("trust_mark_type")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         if inner_tm_type != tm_type {
@@ -3016,7 +3018,7 @@ pub async fn verify_trust_marks(
         // Spec §7.4: the trust mark's `sub` is the entity to which the mark
         // is issued. A mark whose inner `sub` doesn't match the entity we're
         // resolving belongs to someone else and must not appear here.
-        let mark_sub = unverified_payload.subject().unwrap_or("");
+        let mark_sub = unverified_payload.sub.as_deref().unwrap_or("");
         if mark_sub != resolve_sub {
             warn!(
                 "trust mark resolve: trust mark sub {mark_sub} != resolved subject {resolve_sub}; skipping"
@@ -3024,7 +3026,7 @@ pub async fn verify_trust_marks(
             continue;
         }
 
-        let issuer = unverified_payload.issuer().unwrap_or("").to_string();
+        let issuer = unverified_payload.iss.as_deref().unwrap_or("").to_string();
         if issuer.is_empty() {
             warn!("trust mark resolve: trust mark JWT has empty `iss`");
             continue;
@@ -3185,7 +3187,7 @@ pub async fn resolve_entity(
             Some(val) => {
                 // But we should only apply claim from subordinate statements
                 if res.substatement {
-                    let new_policy = res.payload.claim("metadata_policy");
+                    let new_policy = res.payload.extra.get("metadata_policy");
                     match new_policy {
                         Some(p) => {
                             let temp_val = json!(val);
@@ -3209,7 +3211,7 @@ pub async fn resolve_entity(
                 } else {
                     // Means the final entity statement
                     // We should now apply the merged policy at val to the metadata claim
-                    let Some(metadata) = res.payload.claim("metadata").cloned() else {
+                    let Some(metadata) = res.payload.extra.get("metadata").cloned() else {
                         return error_response_400(
                             "invalid_trust_chain",
                             "missing metadata in entity statement",
@@ -3220,7 +3222,7 @@ pub async fn resolve_entity(
                     // Let us see if we have any subordinate statement's metadata to apply first
                     if i > 0 {
                         let last_sub_statement = reversed[i - 1];
-                        forced_metadata = last_sub_statement.payload.claim("metadata");
+                        forced_metadata = last_sub_statement.payload.extra.get("metadata");
                     }
                     let Some(metadata_obj) = metadata.as_object() else {
                         return error_response_400(
@@ -3264,7 +3266,7 @@ pub async fn resolve_entity(
             None => {
                 // We should only get it from a subordinate statement
                 if res.substatement {
-                    let new_policy = res.payload.claim("metadata_policy");
+                    let new_policy = res.payload.extra.get("metadata_policy");
                     match new_policy {
                         Some(p) => {
                             if let Some(data) = p.as_object() {
@@ -3285,7 +3287,8 @@ pub async fn resolve_entity(
                     //None
                     //Some(Map::new())
                     res.payload
-                        .claim("metadata")
+                        .extra
+                        .get("metadata")
                         .and_then(|m| m.as_object())
                         .cloned()
                 }
@@ -3349,20 +3352,22 @@ fn create_trustmark_status_response_jwt(
     trust_mark: &str,
     status: &str,
 ) -> Result<String, JoseError> {
-    let mut payload = JwtPayload::new();
+    let mut payload = Claims::default();
     let iss = state.entity_id.clone();
-    payload.set_issuer(iss);
-    payload.set_issued_at(&SystemTime::now());
+    payload.iss = Some(iss.to_string());
+    payload.iat = Some(numeric_date(SystemTime::now()));
 
     // Set expiry after 24 hours
     let exp = SystemTime::now() + Duration::from_secs(86400);
-    payload.set_expires_at(&exp);
-    payload.set_claim("trust_mark", Some(json!(trust_mark)))?;
-    payload.set_claim("status", Some(json!(status)))?;
+    payload.exp = Some(numeric_date(exp));
+    payload
+        .extra
+        .insert("trust_mark".to_string(), json!(trust_mark));
+    payload.extra.insert("status".to_string(), json!(status));
 
     // Signing JWT
     let keydata = &*PRIVATE_KEY.clone();
-    let key = Jwk::from_bytes(keydata)?;
+    let key = jwk_from_bytes(keydata)?;
 
     create_signed_jwt(&payload, &key, Some("trust-mark-status-response+jwt"))
 }
@@ -3419,17 +3424,16 @@ pub async fn trust_mark_status(
         // classified as "expired".
         Ok((payload, _)) if enforce_crit_claim(&payload).is_err() => "invalid",
         Ok((payload, _)) => {
-            let expired = payload
-                .expires_at()
+            let expired = expires_at(&payload)
                 .map(|exp| exp <= SystemTime::now())
                 .unwrap_or(false);
             if expired {
                 "expired"
             } else {
                 let v = json!("");
-                let sub = payload.subject().unwrap_or("");
-                let claims = payload.claims_set();
-                let trustmarktype = claims
+                let sub = payload.sub.as_deref().unwrap_or("");
+                let trustmarktype = payload
+                    .extra
                     .get("trust_mark_type")
                     .unwrap_or(&v)
                     .as_str()
@@ -4183,7 +4187,7 @@ mod tests {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "json") {
                 let key_data = fs::read(&path).expect("Failed to read key file");
-                let key = Jwk::from_bytes(&key_data).expect("Failed to parse JWK");
+                let key = jwk_from_bytes(&key_data).expect("Failed to parse JWK");
                 keys.push(key);
             }
         }
@@ -4192,20 +4196,20 @@ mod tests {
 
         // Test signing with each key type
         for key in keys.iter() {
-            let alg = key.algorithm().unwrap_or("RS256");
-            let kid = key.key_id().unwrap_or("unknown");
+            let alg = key.alg.as_deref().unwrap_or("RS256");
+            let kid = key.kid.as_deref().unwrap_or("unknown");
 
             // Create test payload
-            let mut payload = JwtPayload::new();
-            payload.set_issuer("http://localhost:8080");
-            payload.set_subject("http://example.com");
-            payload.set_issued_at(&SystemTime::now());
+            let mut payload = Claims::default();
+            payload.iss = Some("http://localhost:8080".to_string());
+            payload.sub = Some("http://example.com".to_string());
+            payload.iat = Some(numeric_date(SystemTime::now()));
 
             let exp = SystemTime::now() + Duration::from_secs(3600);
-            payload.set_expires_at(&exp);
+            payload.exp = Some(numeric_date(exp));
             payload
-                .set_claim("test_claim", Some(json!("test_value")))
-                .expect("Failed to set test claim in test_create_signed_jwt_with_all_key_types");
+                .extra
+                .insert("test_claim".to_string(), json!("test_value"));
 
             // Sign the JWT
             let token_str = create_signed_jwt(&payload, &key, Some("test+jwt"))
@@ -4235,56 +4239,48 @@ mod tests {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "json") {
                 let key_data = fs::read(&path).expect("Failed to read key file");
-                let key = Jwk::from_bytes(&key_data).expect("Failed to parse JWK");
+                let key = jwk_from_bytes(&key_data).expect("Failed to parse JWK");
                 keys.push(key);
             }
         }
 
         // Test signing and verifying with each key type
         for key in keys.iter() {
-            let alg = key.algorithm().unwrap_or("RS256");
-            let kid = key.key_id().unwrap_or("unknown");
+            let alg = key.alg.as_deref().unwrap_or("RS256");
+            let kid = key.kid.as_deref().unwrap_or("unknown");
 
             // Create test payload
-            let mut payload = JwtPayload::new();
-            payload.set_issuer("http://localhost:8080");
-            payload.set_subject("http://example.com");
-            payload.set_issued_at(&SystemTime::now());
+            let mut payload = Claims::default();
+            payload.iss = Some("http://localhost:8080".to_string());
+            payload.sub = Some("http://example.com".to_string());
+            payload.iat = Some(numeric_date(SystemTime::now()));
 
             let exp = SystemTime::now() + Duration::from_secs(3600);
-            payload.set_expires_at(&exp);
+            payload.exp = Some(numeric_date(exp));
             payload
-                .set_claim("test_claim", Some(json!("test_value")))
-                .unwrap();
+                .extra
+                .insert("test_claim".to_string(), json!("test_value"));
 
             // Sign the JWT
             let token_str = create_signed_jwt(&payload, &key, None)
                 .expect(&format!("Failed to sign with {} (kid: {})", alg, kid));
 
-            // Get public key for verification and set the kid
-            let mut public_key_json = key
-                .to_public_key()
-                .expect(&format!("Failed to get public key for {} ({})", alg, kid));
-
-            // Manually set the kid on the public key since to_public_key doesn't preserve it
-            if let Some(kid_value) = key.key_id() {
-                let mut pub_key_map = public_key_json.as_ref().clone();
-                pub_key_map.insert("kid".to_string(), json!(kid_value));
-                public_key_json =
-                    Jwk::from_map(pub_key_map).expect("Failed to create public key JWK with kid");
-            }
-
-            // Verify the JWT using the existing verify_jwt_with_jwks function
-            let mut keymap = Map::new();
-            keymap.insert("keys".to_string(), json!([public_key_json.as_ref()]));
-            let keyset =
-                JwkSet::from_map(keymap).expect("Failed to create JwkSet for verification");
+            // Public half of the key (`to_public_jwk` keeps `kid` and `alg`).
+            let keyset = JwkSet {
+                keys: vec![key.to_public_jwk()],
+            };
 
             let result = verify_jwt_with_jwks(&token_str, Some(keyset));
             match &result {
                 Ok((verified_payload, _)) => {
-                    assert_eq!(verified_payload.issuer().unwrap(), "http://localhost:8080");
-                    assert_eq!(verified_payload.subject().unwrap(), "http://example.com");
+                    assert_eq!(
+                        verified_payload.iss.as_deref().unwrap(),
+                        "http://localhost:8080"
+                    );
+                    assert_eq!(
+                        verified_payload.sub.as_deref().unwrap(),
+                        "http://example.com"
+                    );
                     println!(
                         "✓ Successfully verified JWT signed with {} (kid: {})",
                         alg, kid
@@ -4311,8 +4307,8 @@ mod tests {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "json") {
                 let key_data = fs::read(&path).expect("Failed to read key file");
-                let key = Jwk::from_bytes(&key_data).expect("Failed to parse JWK");
-                if let Some(alg) = key.algorithm() {
+                let key = jwk_from_bytes(&key_data).expect("Failed to parse JWK");
+                if let Some(alg) = key.alg.as_deref() {
                     algorithms.insert(alg.to_string());
                 }
             }
@@ -4340,22 +4336,15 @@ mod tests {
     /// `self_verify_jwt` can verify it end-to-end. Used by the iss/sub tests
     /// below.
     fn build_ec_jwt(key: &Jwk, iss: &str, sub: &str) -> String {
-        let mut public_key = key.to_public_key().expect("to_public_key");
-        if let Some(kid) = key.key_id() {
-            let mut pub_map = public_key.as_ref().clone();
-            pub_map.insert("kid".to_string(), json!(kid));
-            public_key = Jwk::from_map(pub_map).expect("from_map");
-        }
-        let jwks_value = json!({"keys": [public_key.as_ref()]});
+        let public_key = key.to_public_jwk();
+        let jwks_value = json!({"keys": [public_key]});
 
-        let mut payload = JwtPayload::new();
-        payload.set_issuer(iss);
-        payload.set_subject(sub);
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
-        payload
-            .set_claim("jwks", Some(jwks_value))
-            .expect("set jwks");
+        let mut payload = Claims::default();
+        payload.iss = Some(iss.to_string());
+        payload.sub = Some(sub.to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
+        payload.extra.insert("jwks".to_string(), jwks_value);
         create_signed_jwt(&payload, key, Some("entity-statement+jwt")).expect("sign")
     }
 
@@ -4365,10 +4354,172 @@ mod tests {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "json") {
                 let data = fs::read(&path).expect("read key");
-                return Jwk::from_bytes(&data).expect("parse JWK");
+                return jwk_from_bytes(&data).expect("parse JWK");
             }
         }
         panic!("no private keys in ./privatekeys");
+    }
+
+    /// Load the private key from ./privatekeys whose `alg` matches.
+    fn private_key_with_alg(alg: &str) -> Jwk {
+        let entries = fs::read_dir("./privatekeys").expect("read privatekeys");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "json") {
+                let data = fs::read(&path).expect("read key");
+                let key = jwk_from_bytes(&data).expect("parse JWK");
+                if key.alg.as_deref() == Some(alg) {
+                    return key;
+                }
+            }
+        }
+        panic!("no private key with alg {alg} in ./privatekeys");
+    }
+
+    /// Sign `payload` with an explicit JWS header `alg`, bypassing
+    /// `create_signed_jwt`'s own header choice.
+    fn sign_with_header_alg(key: &Jwk, header_alg: &str, payload: &Claims) -> String {
+        let mut header = JoseHeader::new(header_alg);
+        header.kid = key.kid.clone();
+        let mut signing_key = key.clone();
+        signing_key.alg = Some(header_alg.to_string());
+        jwt::encode_with_jwk(&signing_key, &header, payload).expect("sign")
+    }
+
+    fn payload_valid_for_an_hour() -> Claims {
+        let mut payload = Claims::default();
+        payload.iss = Some("https://entity.example".to_string());
+        payload.sub = Some("https://entity.example".to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
+        payload
+    }
+
+    /// Edwards keys are stored with the RFC 9864 names (`Ed25519`, `Ed448`)
+    /// but signed with the `EdDSA` wire identifier. A JWKS that pins the
+    /// curve-specific name must still verify those statements, and the
+    /// fully specified header names must be accepted as well.
+    #[test]
+    fn test_edwards_keys_verify_with_eddsa_and_curve_specific_header() {
+        for alg in ["Ed25519", "Ed448"] {
+            let key = private_key_with_alg(alg);
+            let public = key.to_public_jwk();
+            assert_eq!(public.alg.as_deref(), Some(alg), "published JWK pin");
+            let payload = payload_valid_for_an_hour();
+
+            let token = create_signed_jwt(&payload, &key, None).expect("sign");
+            let keyset = JwkSet {
+                keys: vec![public.clone()],
+            };
+            let (_, header) = verify_jwt_with_jwks(&token, Some(keyset.clone()))
+                .unwrap_or_else(|e| panic!("{alg}: EdDSA header must verify: {e}"));
+            assert_eq!(header.alg, "EdDSA", "{alg}: wire header");
+
+            let token = sign_with_header_alg(&key, alg, &payload);
+            let (_, header) = verify_jwt_with_jwks(&token, Some(keyset))
+                .unwrap_or_else(|e| panic!("{alg}: {alg} header must verify: {e}"));
+            assert_eq!(header.alg, alg, "{alg}: fully specified header");
+        }
+    }
+
+    /// An Ed448 key must never verify a statement signed by an Ed25519 key
+    /// that reuses its `kid`.
+    #[test]
+    fn test_edwards_curves_do_not_cross_verify() {
+        let signer = private_key_with_alg("Ed25519");
+        let mut other = private_key_with_alg("Ed448").to_public_jwk();
+        other.kid = signer.kid.clone();
+        let token = create_signed_jwt(&payload_valid_for_an_hour(), &signer, None).expect("sign");
+        let keyset = JwkSet { keys: vec![other] };
+        assert!(verify_jwt_with_jwks(&token, Some(keyset)).is_err());
+    }
+
+    /// Algorithms outside the accepted set are refused even when the key
+    /// could produce a valid signature for them.
+    #[test]
+    fn test_verify_rejects_algorithm_outside_accepted_set() {
+        let mut key = private_key_with_alg("RS256");
+        key.alg = None;
+        let token = sign_with_header_alg(&key, "RS384", &payload_valid_for_an_hour());
+        let keyset = JwkSet {
+            keys: vec![key.to_public_jwk()],
+        };
+        let err = verify_jwt_signature_with_jwks(&token, Some(keyset)).expect_err("RS384");
+        assert!(
+            err.to_string().contains("Unsupported algorithm"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A header `kid` that names no key in the JWKS is refused; there is no
+    /// fallback to trying the other keys.
+    #[test]
+    fn test_verify_rejects_kid_not_in_jwks() {
+        let key = private_key_with_alg("ES256");
+        let mut public = key.to_public_jwk();
+        public.kid = Some("some-other-kid".to_string());
+        let token = create_signed_jwt(&payload_valid_for_an_hour(), &key, None).expect("sign");
+        let keyset = JwkSet { keys: vec![public] };
+        assert!(verify_jwt_signature_with_jwks(&token, Some(keyset)).is_err());
+    }
+
+    /// Temporal rules are unchanged by the jose-rs migration: an expired
+    /// statement fails full verification with no leeway but still passes
+    /// the signature-only check, and `iat` is not compared with the clock.
+    #[test]
+    fn test_temporal_validation_has_no_leeway_and_ignores_future_iat() {
+        let key = private_key_with_alg("ES256");
+        let keyset = JwkSet {
+            keys: vec![key.to_public_jwk()],
+        };
+
+        let mut expired = payload_valid_for_an_hour();
+        expired.exp = Some(numeric_date(SystemTime::now() - Duration::from_secs(5)));
+        let token = create_signed_jwt(&expired, &key, None).expect("sign");
+        assert!(verify_jwt_signature_with_jwks(&token, Some(keyset.clone())).is_ok());
+        assert!(verify_jwt_with_jwks(&token, Some(keyset.clone())).is_err());
+
+        let mut future_iat = payload_valid_for_an_hour();
+        future_iat.iat = Some(numeric_date(SystemTime::now() + Duration::from_secs(600)));
+        let token = create_signed_jwt(&future_iat, &key, None).expect("sign");
+        assert!(verify_jwt_with_jwks(&token, Some(keyset)).is_ok());
+    }
+
+    /// An entry that is not a valid JWK fails the whole set, while keys of
+    /// an unsupported type are kept rather than rejected.
+    #[test]
+    fn test_jwkset_from_keys_rejects_unparseable_entries() {
+        let good = private_key_with_alg("ES256").to_public_jwk();
+        let unsupported =
+            json!({"kty": "EC", "crv": "secp256k1", "x": "AA", "y": "AA", "kid": "k1-unsupported"});
+
+        let set = jwkset_from_keys(&json!([unsupported, good])).expect("parse");
+        assert_eq!(set.keys.len(), 2);
+        assert!(set.find_by_kid("k1-unsupported").is_some());
+        assert!(set.find_by_kid(good.kid.as_deref().unwrap()).is_some());
+
+        for bad in [json!({"kid": "no-kty"}), json!("not-an-object")] {
+            let err = jwkset_from_keys(&json!([good, bad])).expect_err("must fail");
+            assert!(
+                err.to_string().contains("index 1"),
+                "unexpected error: {err}"
+            );
+        }
+        assert!(jwkset_from_keys(&json!({"keys": []})).is_err());
+    }
+
+    /// Key discovery refuses a payload with duplicate members, so the keys
+    /// read before verification cannot differ from the ones verified.
+    #[test]
+    fn test_unverified_parse_rejects_duplicate_payload_members() {
+        let b64 = |v: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+        let token = format!(
+            "{}.{}.{}",
+            b64(r#"{"alg":"ES256","kid":"k"}"#),
+            b64(r#"{"iss":"https://a.example","iss":"https://b.example"}"#),
+            b64("sig")
+        );
+        assert!(get_unverified_payload_header(&token).is_err());
     }
 
     #[test]
@@ -4386,8 +4537,14 @@ mod tests {
             result.err()
         );
         let (payload, _) = result.unwrap();
-        assert_eq!(payload.issuer().unwrap(), "https://entity.example.com");
-        assert_eq!(payload.subject().unwrap(), "https://entity.example.com");
+        assert_eq!(
+            payload.iss.as_deref().unwrap(),
+            "https://entity.example.com"
+        );
+        assert_eq!(
+            payload.sub.as_deref().unwrap(),
+            "https://entity.example.com"
+        );
     }
 
     #[test]
@@ -4418,23 +4575,16 @@ mod tests {
     /// Spec §3.1.1 lets an issuer list critical claim names; the recipient
     /// MUST reject the statement if it doesn't understand any of them.
     fn build_ec_jwt_with_crit(key: &Jwk, iss_sub: &str, crit: Value) -> String {
-        let mut public_key = key.to_public_key().expect("to_public_key");
-        if let Some(kid) = key.key_id() {
-            let mut pub_map = public_key.as_ref().clone();
-            pub_map.insert("kid".to_string(), json!(kid));
-            public_key = Jwk::from_map(pub_map).expect("from_map");
-        }
-        let jwks_value = json!({"keys": [public_key.as_ref()]});
+        let public_key = key.to_public_jwk();
+        let jwks_value = json!({"keys": [public_key]});
 
-        let mut payload = JwtPayload::new();
-        payload.set_issuer(iss_sub);
-        payload.set_subject(iss_sub);
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
-        payload
-            .set_claim("jwks", Some(jwks_value))
-            .expect("set jwks");
-        payload.set_claim("crit", Some(crit)).expect("set crit");
+        let mut payload = Claims::default();
+        payload.iss = Some(iss_sub.to_string());
+        payload.sub = Some(iss_sub.to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
+        payload.extra.insert("jwks".to_string(), jwks_value);
+        payload.extra.insert("crit".to_string(), crit);
         create_signed_jwt(&payload, key, Some("entity-statement+jwt")).expect("sign")
     }
 
@@ -4572,15 +4722,15 @@ mod tests {
         ));
     }
 
-    fn make_payload_with_constraints(c: Value) -> JwtPayload {
-        let mut p = JwtPayload::new();
-        p.set_claim("constraints", Some(c)).expect("set claim");
+    fn make_payload_with_constraints(c: Value) -> Claims {
+        let mut p = Claims::default();
+        p.extra.insert("constraints".to_string(), c);
         p
     }
 
     #[test]
     fn test_constraints_from_payload_empty_when_missing() {
-        let p = JwtPayload::new();
+        let p = Claims::default();
         let c = Constraints::from_payload(&p).expect("absent constraints is fine");
         assert!(c.max_path_length.is_none());
         assert!(c.permitted_subtrees.is_empty());
@@ -4782,15 +4932,14 @@ mod tests {
 
     #[test]
     fn test_walk_context_extracts_entity_types_from_metadata() {
-        let mut p = JwtPayload::new();
-        p.set_claim(
-            "metadata",
-            Some(json!({
+        let mut p = Claims::default();
+        p.extra.insert(
+            "metadata".to_string(),
+            json!({
                 "openid_relying_party": {"redirect_uris": []},
                 "federation_entity": {}
-            })),
-        )
-        .expect("set metadata");
+            }),
+        );
         let ctx = WalkContext::from_subject_payload("https://leaf.example", &p);
         assert_eq!(ctx.original_subject, "https://leaf.example");
         assert!(
@@ -4807,11 +4956,11 @@ mod tests {
     fn test_create_signed_jwt_with_header_sets_trust_chain() {
         // Spec §4.3 — the trust chain may ride along in the JWS header.
         let key = first_private_key();
-        let mut payload = JwtPayload::new();
-        payload.set_issuer("https://issuer.example");
-        payload.set_subject("https://subject.example");
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
+        let mut payload = Claims::default();
+        payload.iss = Some("https://issuer.example".to_string());
+        payload.sub = Some("https://subject.example".to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
         let chain = vec![
             "jwt-a".to_string(),
             "jwt-b".to_string(),
@@ -4845,11 +4994,11 @@ mod tests {
         // `trust_chain` header — that header is reserved for explicit
         // produce-on-resolve callers.
         let key = first_private_key();
-        let mut payload = JwtPayload::new();
-        payload.set_issuer("https://issuer.example");
-        payload.set_subject("https://issuer.example");
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
+        let mut payload = Claims::default();
+        payload.iss = Some("https://issuer.example".to_string());
+        payload.sub = Some("https://issuer.example".to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
         let token = create_signed_jwt(&payload, &key, Some("entity-statement+jwt")).expect("sign");
         let parts: Vec<&str> = token.split('.').collect();
         let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -4865,21 +5014,14 @@ mod tests {
     /// Build a signed-JWKS JWT whose payload contains the (single-key)
     /// JWKS that signs it — the self-signing pattern §5.2.1 mandates.
     fn build_signed_jwks_body(key: &Jwk) -> String {
-        let mut public_key = key.to_public_key().expect("to_public_key");
-        if let Some(kid) = key.key_id() {
-            let mut pub_map = public_key.as_ref().clone();
-            pub_map.insert("kid".to_string(), json!(kid));
-            public_key = Jwk::from_map(pub_map).expect("from_map");
-        }
-        let jwks_value = json!({"keys": [public_key.as_ref()]});
-        let mut payload = JwtPayload::new();
-        payload.set_issuer("https://entity.example");
-        payload.set_subject("https://entity.example");
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
-        payload
-            .set_claim("jwks", Some(jwks_value))
-            .expect("set jwks");
+        let public_key = key.to_public_jwk();
+        let jwks_value = json!({"keys": [public_key]});
+        let mut payload = Claims::default();
+        payload.iss = Some("https://entity.example".to_string());
+        payload.sub = Some("https://entity.example".to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
+        payload.extra.insert("jwks".to_string(), jwks_value);
         create_signed_jwt(&payload, key, Some("jwk-set+jwt")).expect("sign")
     }
 
@@ -4888,9 +5030,9 @@ mod tests {
         let key = first_private_key();
         let body = build_signed_jwks_body(&key);
         let jwks = verify_signed_jwks_body(&body).expect("verify");
-        let expected_kid = key.key_id().expect("kid").to_string();
+        let expected_kid = key.kid.as_deref().expect("kid").to_string();
         assert!(
-            !jwks.get(&expected_kid).is_empty(),
+            jwks.find_by_kid(&expected_kid).is_some(),
             "verified JWKS must contain the signing key (kid={expected_kid})"
         );
     }
@@ -4918,11 +5060,11 @@ mod tests {
     fn test_verify_signed_jwks_body_rejects_missing_inner_jwks() {
         // A JWT whose payload has no inner `jwks` cannot self-verify.
         let key = first_private_key();
-        let mut payload = JwtPayload::new();
-        payload.set_issuer("https://entity.example");
-        payload.set_subject("https://entity.example");
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
+        let mut payload = Claims::default();
+        payload.iss = Some("https://entity.example".to_string());
+        payload.sub = Some("https://entity.example".to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
         let body = create_signed_jwt(&payload, &key, Some("jwk-set+jwt")).expect("sign");
         let err = verify_signed_jwks_body(&body).unwrap_err().to_string();
         assert!(
@@ -4941,19 +5083,15 @@ mod tests {
         // re-signing with the right key but pointing the kid elsewhere; a
         // simpler proxy is to confirm an inner JWKS that lists a key whose
         // kid doesn't match the JWT header is rejected.
-        let mut public_key = signing_key.to_public_key().expect("to_public_key");
-        let mut pub_map = public_key.as_ref().clone();
-        pub_map.insert("kid".to_string(), json!("different-kid"));
-        public_key = Jwk::from_map(pub_map).expect("from_map");
-        let jwks_value = json!({"keys": [public_key.as_ref()]});
-        let mut payload = JwtPayload::new();
-        payload.set_issuer("https://entity.example");
-        payload.set_subject("https://entity.example");
-        payload.set_issued_at(&SystemTime::now());
-        payload.set_expires_at(&(SystemTime::now() + Duration::from_secs(3600)));
-        payload
-            .set_claim("jwks", Some(jwks_value))
-            .expect("set jwks");
+        let mut public_key = signing_key.to_public_jwk();
+        public_key.kid = Some("different-kid".to_string());
+        let jwks_value = json!({"keys": [public_key]});
+        let mut payload = Claims::default();
+        payload.iss = Some("https://entity.example".to_string());
+        payload.sub = Some("https://entity.example".to_string());
+        payload.iat = Some(numeric_date(SystemTime::now()));
+        payload.exp = Some(numeric_date(SystemTime::now() + Duration::from_secs(3600)));
+        payload.extra.insert("jwks".to_string(), jwks_value);
         let body = create_signed_jwt(&payload, &signing_key, Some("jwk-set+jwt")).expect("sign");
         assert!(
             verify_signed_jwks_body(&body).is_err(),
@@ -5018,7 +5156,7 @@ mod tests {
     #[test]
     fn test_known_claims_covers_every_parse_site() {
         // Reflection-style guardrail: every claim name referenced by a
-        // `.claim("…")` call in this file must appear in `KNOWN_CLAIMS`. If
+        // `.extra.get("…")` call in this file must appear in `KNOWN_CLAIMS`. If
         // someone adds a parser for a new claim and forgets to append it
         // here, an issuer that lists the new claim in `crit` would see its
         // (correctly-formed) statement rejected.
@@ -5060,22 +5198,16 @@ mod tests {
     // -----------------------------------------------------------------
 
     /// Build a TA-EC-shaped payload carrying the supplied trust_mark_owners.
-    fn ta_payload_with_owners(owners: Value) -> JwtPayload {
-        let mut p = JwtPayload::new();
-        p.set_claim("trust_mark_owners", Some(owners))
-            .expect("set trust_mark_owners");
+    fn ta_payload_with_owners(owners: Value) -> Claims {
+        let mut p = Claims::default();
+        p.extra.insert("trust_mark_owners".to_string(), owners);
         p
     }
 
     /// Public JWKS shape for a given owner key (kid stamped in).
     fn owner_public_jwks(key: &Jwk) -> Value {
-        let mut public_key = key.to_public_key().expect("to_public_key");
-        if let Some(kid) = key.key_id() {
-            let mut pub_map = public_key.as_ref().clone();
-            pub_map.insert("kid".to_string(), json!(kid));
-            public_key = Jwk::from_map(pub_map).expect("from_map");
-        }
-        json!({"keys": [public_key.as_ref()]})
+        let public_key = key.to_public_jwk();
+        json!({"keys": [public_key]})
     }
 
     #[test]
@@ -5096,7 +5228,7 @@ mod tests {
 
     #[test]
     fn test_trust_mark_owners_absent_claim_is_default() {
-        let p = JwtPayload::new();
+        let p = Claims::default();
         let owners = TrustMarkOwners::from_ta_payload(&p).expect("ok");
         assert!(owners.is_empty());
     }
@@ -5140,33 +5272,31 @@ mod tests {
         trust_mark_id: &str,
         ttl_secs: u64,
     ) -> String {
-        let mut payload = JwtPayload::new();
-        payload.set_issuer(owner_id);
-        payload.set_subject(tmi_id);
+        let mut payload = Claims::default();
+        payload.iss = Some(owner_id.to_string());
+        payload.sub = Some(tmi_id.to_string());
         payload
-            .set_claim("trust_mark_id", Some(json!(trust_mark_id)))
-            .expect("set trust_mark_id");
+            .extra
+            .insert("trust_mark_id".to_string(), json!(trust_mark_id));
         let now = SystemTime::now();
-        payload.set_issued_at(&now);
-        payload.set_expires_at(&(now + Duration::from_secs(ttl_secs)));
+        payload.iat = Some(numeric_date(now));
+        payload.exp = Some(numeric_date(now + Duration::from_secs(ttl_secs)));
         create_signed_jwt(&payload, owner_key, Some("trust-mark-delegation+jwt"))
             .expect("sign delegation")
     }
 
-    fn make_mark_payload_with_delegation(delegation_jwt: &str) -> JwtPayload {
-        let mut p = JwtPayload::new();
-        p.set_claim("delegation", Some(json!(delegation_jwt)))
-            .expect("set delegation");
+    fn make_mark_payload_with_delegation(delegation_jwt: &str) -> Claims {
+        let mut p = Claims::default();
+        p.extra
+            .insert("delegation".to_string(), json!(delegation_jwt));
         p
     }
 
     fn owner_info_from(key: &Jwk, owner_id: &str) -> OwnerInfo {
         let jwks_value = owner_public_jwks(key);
-        let mut internal: Map<String, Value> = Map::new();
-        internal.insert("keys".to_string(), jwks_value.get("keys").unwrap().clone());
         OwnerInfo {
             sub: owner_id.to_string(),
-            jwks: JwkSet::from_map(internal).expect("JwkSet"),
+            jwks: jwkset_from_keys(jwks_value.get("keys").unwrap()).expect("JwkSet"),
         }
     }
 
@@ -5193,15 +5323,15 @@ mod tests {
         let owner_id = "https://owner.example";
         let tmi_id = "https://tmi.example";
         let tm_id = "https://refeds.org/sirtfi";
-        let mut payload = JwtPayload::new();
-        payload.set_issuer(owner_id);
-        payload.set_subject(tmi_id);
+        let mut payload = Claims::default();
+        payload.iss = Some(owner_id.to_string());
+        payload.sub = Some(tmi_id.to_string());
         payload
-            .set_claim("trust_mark_id", Some(json!(tm_id)))
-            .expect("set trust_mark_id");
+            .extra
+            .insert("trust_mark_id".to_string(), json!(tm_id));
         let now = SystemTime::now();
-        payload.set_issued_at(&now);
-        payload.set_expires_at(&(now + Duration::from_secs(3600)));
+        payload.iat = Some(numeric_date(now));
+        payload.exp = Some(numeric_date(now + Duration::from_secs(3600)));
         // Signed as a trust-mark+jwt, not a delegation.
         let not_a_delegation =
             create_signed_jwt(&payload, &owner_key, Some("trust-mark+jwt")).expect("sign");
@@ -5289,17 +5419,17 @@ mod tests {
         let tmi_id = "https://tmi.example";
         let tm_id = "https://refeds.org/sirtfi";
         // Build a delegation that is already expired by setting a negative
-        // ttl via JwtPayload directly (build_delegation_jwt uses
+        // ttl via Claims directly (build_delegation_jwt uses
         // saturating add on SystemTime).
-        let mut payload = JwtPayload::new();
-        payload.set_issuer(owner_id);
-        payload.set_subject(tmi_id);
+        let mut payload = Claims::default();
+        payload.iss = Some(owner_id.to_string());
+        payload.sub = Some(tmi_id.to_string());
         payload
-            .set_claim("trust_mark_id", Some(json!(tm_id)))
-            .expect("set trust_mark_id");
+            .extra
+            .insert("trust_mark_id".to_string(), json!(tm_id));
         let then = SystemTime::now() - Duration::from_secs(3600);
-        payload.set_issued_at(&then);
-        payload.set_expires_at(&(then + Duration::from_secs(60)));
+        payload.iat = Some(numeric_date(then));
+        payload.exp = Some(numeric_date(then + Duration::from_secs(60)));
         let delegation = create_signed_jwt(&payload, &owner_key, Some("trust-mark-delegation+jwt"))
             .expect("sign");
         let mark = make_mark_payload_with_delegation(&delegation);
@@ -5310,7 +5440,7 @@ mod tests {
     #[test]
     fn test_verify_delegation_against_owner_rejects_missing_delegation_claim() {
         let owner_key = first_private_key();
-        let mark = JwtPayload::new();
+        let mark = Claims::default();
         let owner = owner_info_from(&owner_key, "https://owner.example");
         assert!(
             verify_delegation_against_owner(
@@ -5554,7 +5684,7 @@ mod ssrf_tests {
         let result = parse_jwks_json(json);
         assert!(result.is_ok());
         let keyset = result.unwrap();
-        assert!(!keyset.get("k1").is_empty());
+        assert!(keyset.find_by_kid("k1").is_some());
     }
 
     #[test]
@@ -5573,7 +5703,7 @@ mod ssrf_tests {
 
     #[test]
     fn test_get_jwks_from_payload_missing_jwks() {
-        let payload = JwtPayload::new();
+        let payload = Claims::default();
         let result = get_jwks_from_payload(&payload);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No jwks"));
@@ -5581,13 +5711,11 @@ mod ssrf_tests {
 
     #[test]
     fn test_get_jwks_from_payload_with_jwks() {
-        let mut payload = JwtPayload::new();
-        payload
-            .set_claim(
-                "jwks",
-                Some(json!({"keys":[{"kty":"RSA","n":"test","e":"AQAB","kid":"k1"}]})),
-            )
-            .unwrap();
+        let mut payload = Claims::default();
+        payload.extra.insert(
+            "jwks".to_string(),
+            json!({"keys":[{"kty":"RSA","n":"test","e":"AQAB","kid":"k1"}]}),
+        );
         let result = get_jwks_from_payload(&payload);
         assert!(result.is_ok());
     }

@@ -4,8 +4,7 @@ from typing import Any, Optional
 
 import redis
 from django.conf import settings
-from jwcrypto import jwt
-from jwcrypto.common import json_decode
+from pyjosers import jwt
 from pydantic import BaseModel
 
 from common.claims import validate_trust_mark_additional_claims
@@ -84,6 +83,5 @@ def get_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str | None
 
 def get_expiry(token_str: str) -> float:
     """Extracts the expiry time as timestamp from JWT."""
-    jose = jwt.JWT.from_jose_token(token_str)
-    data = json_decode(jose.token.objects.get("payload", ""))
-    return data.get("exp")
+    _header, data = jwt.decode_unverified(token_str)
+    return float(data["exp"])

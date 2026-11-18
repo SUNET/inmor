@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 import pytest
 from django.conf import settings
-from jwcrypto import jwt
-from jwcrypto.jwk import JWK
+from pyjosers import jwt
+from pyjosers.jwk import JWK
 
 from common.signing import create_signed_jwt
 
@@ -72,7 +72,7 @@ class TestGenericSigning:
             # Get the corresponding public key
             public_key = JWK.from_json(private_key.export_public())
 
-            # Verify the JWT using jwcrypto
+            # Verify the JWT using pyjosers
             token = jwt.JWT(jwt=token_str, key=public_key)
 
             # Decode and verify claims
@@ -102,7 +102,7 @@ class TestGenericSigning:
             header = json.loads(base64.urlsafe_b64decode(header_part))
 
             assert header["typ"] == "entity-statement+jwt"
-            # jwcrypto uses EdDSA for both Ed25519 and Ed448
+            # Ed25519 and Ed448 keys are signed with the EdDSA header
             expected_alg = "EdDSA" if alg in ("Ed25519", "Ed448") else alg
             assert header["alg"] == expected_alg
             assert "kid" in header

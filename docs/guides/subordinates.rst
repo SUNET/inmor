@@ -80,7 +80,7 @@ Fetch the entity's configuration and register it:
    # Step 2: Extract metadata and JWKS (using Python)
    python3 << 'EOF'
    import json
-   from jwcrypto import jwt
+   from pyjosers import jwt
 
    entity_jwt = "..."  # paste the JWT
    jose = jwt.JWT.from_jose_token(entity_jwt)

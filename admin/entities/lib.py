@@ -9,9 +9,10 @@ from urllib.parse import SplitResult, urlparse, urlsplit, urlunsplit
 
 import httpx
 from django.conf import settings
-from jwcrypto import jwk, jwt
-from jwcrypto.jwk import JWK, JWKSet
-from jwcrypto.jwt import JWT
+from pyjosers import jwk, jwt
+from pyjosers.jwk import JWK, JWKSet
+from pyjosers.jws import JWS
+from pyjosers.jwt import JWT
 from oidfpolicy import apply_policy, merge_policies
 from pydantic import BaseModel
 from redis import Redis
@@ -412,7 +413,11 @@ def self_validate(token: jwt.JWT) -> dict[str, Any]:
     Tries inline jwks first, falls back to jwks_uri if available.
     """
     try:
-        payload = json.loads(token.token.objects.get("payload").decode("utf-8"))
+        signed = token.token
+        if not isinstance(signed, JWS):
+            raise ValueError("Expected a signed JWT")
+        # Untrusted until `token.validate()` below succeeds.
+        payload = json.loads(signed.objects["payload"])
         jwks_data = payload.get("jwks")
         if jwks_data is not None:
             # Inline JWKS — standard path
@@ -553,8 +558,6 @@ def tree_walking(entity_id: str, r: Redis, visited: set[str] | None = None):
     # return the already visited set
     return visited
 
-
-# jwcrypto.jws.InvalidJWSSignature
 
 if __name__ == "__main__":
     r = Redis("redis")

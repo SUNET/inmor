@@ -6,8 +6,7 @@ from typing import Any
 import httpx
 import pytest
 from django.test import TestCase
-from jwcrypto import jwt
-from jwcrypto.common import json_decode
+from pyjosers import jwt
 
 from entities import lib
 
@@ -16,8 +15,7 @@ data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 def get_payload(token_str: str):
     "Helper method to get payload"
-    jose = jwt.JWT.from_jose_token(token_str)
-    return json_decode(jose.token.objects.get("payload", ""))
+    return jwt.decode_unverified(token_str)[1]
 
 
 def test_fetch_entity_configuration_with_keys():

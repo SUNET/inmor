@@ -5,7 +5,7 @@ import os
 import time
 
 from httpx import Client
-from jwcrypto import jwk, jwt
+from pyjosers import jwk, jwt
 from redis.client import Redis
 
 file_dir = os.path.dirname(os.path.abspath(__file__))
@@ -131,7 +131,7 @@ def _build_subject(
     """
     subject_id = fake_subject.entity_id
     subject_key = jwk.JWK.generate(kty="RSA", size=2048, alg="RS256", use="sig")
-    subject_key.kid = subject_key.thumbprint()
+    subject_key["kid"] = subject_key.thumbprint()
     subject_jwks = {"keys": [json.loads(subject_key.export(private_key=False))]}
     now = int(time.time())
     exp = now + 3600
@@ -1116,7 +1116,7 @@ _OWNER_ENTITY_ID = "https://owner.example.test"
 def _make_owner_keypair() -> jwk.JWK:
     "Fresh RSA keypair acting as a Trust Mark Owner."
     k = jwk.JWK.generate(kty="RSA", size=2048, alg="RS256", use="sig")
-    k.kid = k.thumbprint()
+    k["kid"] = k.thumbprint()
     return k
 
 

@@ -5,7 +5,7 @@ from pprint import pprint
 from typing import Any
 
 import httpx
-from jwcrypto import jwt
+from pyjosers import jwt
 
 api_key = os.environ.get("INMOR_API_KEY")
 if not api_key:
@@ -74,8 +74,7 @@ print("Now we will add the subordinates.")
 for tm in subs:
     well_known = f"{tm}/.well-known/openid-federation"
     resp = httpx.get(well_known)
-    jwt_net: jwt.JWT = jwt.JWT.from_jose_token(resp.text)
-    payload = json.loads(jwt_net.token.objects.get("payload").decode("utf-8"))
+    _header, payload = jwt.decode_unverified(resp.text)
 
     metadata = payload.get("metadata")
     if tm == "https://fakeop0.labb.sunet.se":

@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from jwcrypto import jwt
-from jwcrypto.jwk import JWK
+from pyjosers import jwt
+from pyjosers.jwk import JWK
 
 
 def create_signed_jwt(
@@ -27,8 +27,9 @@ def create_signed_jwt(
         # Fallback to RS256 if no algorithm is specified
         alg = "RS256"
 
-    # jwcrypto uses "EdDSA" as the algorithm name for both Ed25519 and Ed448
-    # Map the RFC 9864 fully-specified algorithm names to jwcrypto's EdDSA
+    # Keys are stored with the RFC 9864 fully specified names, but the JWS
+    # header keeps the widely deployed "EdDSA" identifier. pyjosers accepts
+    # "EdDSA" for a key pinned to the matching Edwards curve.
     if alg in ("Ed25519", "Ed448"):
         alg = "EdDSA"
 

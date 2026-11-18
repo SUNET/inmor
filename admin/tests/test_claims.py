@@ -5,8 +5,7 @@ from unittest.mock import Mock
 import pytest
 from django.contrib import admin
 from django.test import RequestFactory
-from jwcrypto import jwk, jwt
-from jwcrypto.common import json_decode
+from pyjosers import jwk, jwt
 
 from entities.lib import create_subordinate_statement
 from entities.models import Subordinate
@@ -33,8 +32,7 @@ ADMIN_PROTECTED_CLAIMS = (
 
 def get_payload(token: str) -> dict:
     """Decode a JWT payload without verifying it."""
-    parsed = jwt.JWT.from_jose_token(token)
-    return json_decode(parsed.token.objects["payload"])
+    return jwt.decode_unverified(token)[1]
 
 
 def public_keyset() -> jwk.JWKSet:

@@ -7,8 +7,7 @@ from typing import Any
 import cmd2
 import httpx
 from cmd2 import Cmd, Fg
-from jwcrypto import jwt
-from jwcrypto.common import json_decode
+from pyjosers import jwt
 
 data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 api_base_url = "http://localhost:8000"
@@ -39,8 +38,7 @@ def s_g(line: str | int):
 
 def get_payload(token_str: str):
     "Helper method to get payload"
-    jose = jwt.JWT.from_jose_token(token_str)
-    return json_decode(jose.token.objects.get("payload", ""))
+    return jwt.decode_unverified(token_str)[1]
 
 
 def get_url(url: str):
