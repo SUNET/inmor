@@ -272,6 +272,11 @@ Inmor uses JWK-formatted keys for signing:
    └── admin/
        └── private.json       # Admin signing key
 
+For post-quantum signing, use an ``AKP`` JWK. Its ``alg``, ``kty`` and
+``pub`` fields determine the SHA-256 thumbprint used as ``kid``.
+The private key also contains ``priv``. Publish only the public JWK.
+See :ref:`pqc-signing-keys` for generation, deployment and rotation.
+
 **private.json Example:**
 
 .. code-block:: json

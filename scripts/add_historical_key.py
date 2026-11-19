@@ -82,6 +82,7 @@ Revocation reasons:
         print("Error: JWK must have a 'kid' field", file=sys.stderr)
         sys.exit(1)
 
+    jwk_data.pop("priv", None)
     kid = jwk_data["kid"]
     current_time = int(time.time())
 

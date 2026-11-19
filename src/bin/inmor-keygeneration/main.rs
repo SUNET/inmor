@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use jose_rs::jwk::{self, Jwk};
+use kryptering::{CompositeMlDsaVariant, MlDsaVariant};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -52,20 +53,33 @@ enum KeyType {
     Ed25519,
     #[value(name = "Ed448")]
     Ed448,
+    #[value(name = "ML-DSA-44")]
+    MlDsa44,
+    #[value(name = "ML-DSA-65")]
+    MlDsa65,
+    #[value(name = "ML-DSA-87")]
+    MlDsa87,
+    #[value(name = "ML-DSA-44-ES256")]
+    MlDsa44Es256,
+    #[value(name = "ML-DSA-65-ES256")]
+    MlDsa65Es256,
+    #[value(name = "ML-DSA-87-ES384")]
+    MlDsa87Es384,
+    #[value(name = "ML-DSA-44-Ed25519")]
+    MlDsa44Ed25519,
+    #[value(name = "ML-DSA-65-Ed25519")]
+    MlDsa65Ed25519,
+    #[value(name = "ML-DSA-87-Ed448")]
+    MlDsa87Ed448,
 }
 
 impl KeyType {
     /// The JWK `alg` value stamped onto the generated key.
-    fn alg(self) -> &'static str {
-        match self {
-            KeyType::Rs256 => "RS256",
-            KeyType::Ps256 => "PS256",
-            KeyType::Es256 => "ES256",
-            KeyType::Es384 => "ES384",
-            KeyType::Es512 => "ES512",
-            KeyType::Ed25519 => "Ed25519",
-            KeyType::Ed448 => "Ed448",
-        }
+    fn alg(self) -> String {
+        self.to_possible_value()
+            .expect("all key types are named")
+            .get_name()
+            .to_owned()
     }
 }
 
@@ -85,6 +99,27 @@ fn generate_keypair(key_type: KeyType) -> Result<(Jwk, Jwk)> {
         KeyType::Es512 => jwk::generate_ec("P-521").context("EC P-521 key generation failed")?,
         KeyType::Ed25519 => jwk::generate_ed25519().context("Ed25519 key generation failed")?,
         KeyType::Ed448 => jwk::generate_ed448().context("Ed448 key generation failed")?,
+        KeyType::MlDsa44 => jwk::generate_mldsa(MlDsaVariant::MlDsa44)?,
+        KeyType::MlDsa65 => jwk::generate_mldsa(MlDsaVariant::MlDsa65)?,
+        KeyType::MlDsa87 => jwk::generate_mldsa(MlDsaVariant::MlDsa87)?,
+        KeyType::MlDsa44Es256 => {
+            jwk::generate_composite_mldsa(CompositeMlDsaVariant::MlDsa44Es256)?
+        }
+        KeyType::MlDsa65Es256 => {
+            jwk::generate_composite_mldsa(CompositeMlDsaVariant::MlDsa65Es256)?
+        }
+        KeyType::MlDsa87Es384 => {
+            jwk::generate_composite_mldsa(CompositeMlDsaVariant::MlDsa87Es384)?
+        }
+        KeyType::MlDsa44Ed25519 => {
+            jwk::generate_composite_mldsa(CompositeMlDsaVariant::MlDsa44Ed25519)?
+        }
+        KeyType::MlDsa65Ed25519 => {
+            jwk::generate_composite_mldsa(CompositeMlDsaVariant::MlDsa65Ed25519)?
+        }
+        KeyType::MlDsa87Ed448 => {
+            jwk::generate_composite_mldsa(CompositeMlDsaVariant::MlDsa87Ed448)?
+        }
     };
     let public = private.to_public_jwk();
     Ok((private, public))
@@ -105,8 +140,8 @@ fn jwk_to_json(jwk: &Jwk) -> Result<String> {
 /// The error shown when `private.json` already exists and `--force` was not given.
 fn already_exists_error(path: &Path) -> anyhow::Error {
     anyhow::anyhow!(
-        "{} already exists.\n  Re-run with --force to overwrite (this invalidates all \
-         entity statements and trust marks already signed by the Trust Anchor).",
+        "{} already exists.\n  Re-run with --force to overwrite (retain the old public key while \
+         outstanding statements and trust marks still rely on it).",
         path.display()
     )
 }
@@ -252,31 +287,23 @@ mod tests {
         let kid = jwk_thumbprint(&public_jwk).expect("thumbprint");
         for jwk in [&mut private_jwk, &mut public_jwk] {
             jwk.use_ = Some("sig".to_string());
-            jwk.alg = Some(key_type.alg().to_string());
+            jwk.alg = Some(key_type.alg());
             jwk.kid = Some(kid.clone());
         }
         (private_jwk, public_jwk, kid)
     }
 
-    fn all_types() -> [KeyType; 7] {
-        [
-            KeyType::Rs256,
-            KeyType::Ps256,
-            KeyType::Es256,
-            KeyType::Es384,
-            KeyType::Es512,
-            KeyType::Ed25519,
-            KeyType::Ed448,
-        ]
-    }
-
     #[test]
     fn generated_keys_have_expected_fields() {
-        for key_type in all_types() {
+        for &key_type in KeyType::value_variants() {
             let (private_jwk, public_jwk, kid) = generate_stamped(key_type);
 
             for jwk in [&private_jwk, &public_jwk] {
-                assert_eq!(jwk.alg.as_deref(), Some(key_type.alg()), "{key_type:?} alg");
+                assert_eq!(
+                    jwk.alg.as_deref(),
+                    Some(key_type.alg().as_str()),
+                    "{key_type:?} alg"
+                );
                 assert_eq!(jwk.use_.as_deref(), Some("sig"), "{key_type:?} use");
                 assert_eq!(jwk.kid.as_deref(), Some(kid.as_str()), "{key_type:?} kid");
             }
@@ -288,12 +315,18 @@ mod tests {
                 "{key_type:?} kid"
             );
 
-            // Private material is present in the private JWK only.
-            assert!(
-                private_jwk.d.is_some(),
-                "{key_type:?} private key missing 'd'"
-            );
             assert!(public_jwk.d.is_none(), "{key_type:?} public key leaked 'd'");
+            assert!(
+                public_jwk.priv_.is_none(),
+                "{key_type:?} public key leaked 'priv'"
+            );
+            if key_type.alg().starts_with("ML-DSA-") {
+                assert_eq!(private_jwk.kty, "AKP");
+                assert!(private_jwk.priv_.is_some(), "{key_type:?} missing 'priv'");
+                assert!(public_jwk.pub_.is_some(), "{key_type:?} missing 'pub'");
+            } else {
+                assert!(private_jwk.d.is_some(), "{key_type:?} missing 'd'");
+            }
 
             // The private JWK is a complete superset of the public JWK.
             assert_eq!(private_jwk.kty, public_jwk.kty, "{key_type:?} kty");
@@ -304,6 +337,7 @@ mod tests {
                     jwk.crv.clone(),
                     jwk.x.clone(),
                     jwk.y.clone(),
+                    jwk.pub_.clone(),
                 ]
             };
             assert_eq!(
@@ -312,7 +346,7 @@ mod tests {
                 "{key_type:?} private key does not carry the public members"
             );
             assert!(
-                public_jwk.n.is_some() || public_jwk.x.is_some(),
+                public_jwk.n.is_some() || public_jwk.x.is_some() || public_jwk.pub_.is_some(),
                 "{key_type:?} public key has no public material"
             );
         }
@@ -321,9 +355,9 @@ mod tests {
     /// The JWS header `alg` the Trust Anchor emits for a key type. Mirrors
     /// `create_signed_jwt` in src/lib.rs: Ed keys are stored with `alg`
     /// "Ed25519"/"Ed448" but signed with the `EdDSA` wire identifier.
-    fn header_alg(key_type: KeyType) -> &'static str {
+    fn header_alg(key_type: KeyType) -> String {
         match key_type {
-            KeyType::Ed25519 | KeyType::Ed448 => "EdDSA",
+            KeyType::Ed25519 | KeyType::Ed448 => "EdDSA".to_owned(),
             other => other.alg(),
         }
     }
@@ -333,9 +367,9 @@ mod tests {
     #[test]
     fn generated_keys_sign_and_verify() {
         let payload = b"inmor-keygeneration round-trip";
-        for key_type in all_types() {
+        for &key_type in KeyType::value_variants() {
             let (private_jwk, public_jwk, _) = generate_stamped(key_type);
-            let header = JoseHeader::new(header_alg(key_type));
+            let header = JoseHeader::new(&header_alg(key_type));
             let token = compact::sign_with_jwk(&private_jwk, payload, &header)
                 .unwrap_or_else(|e| panic!("{key_type:?} sign failed: {e}"));
             let out = compact::verify_with_jwk(&public_jwk, &token)

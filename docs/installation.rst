@@ -99,21 +99,16 @@ Key Generation
 The repository includes development signing keys that are ready to use.
 These keys are sufficient for development and testing.
 
-For production deployments, you should generate your own keys::
+For development, generate additional thumbprint-named pairs under
+``privatekeys/`` and ``publickeys/``. Each command adds files to these
+directories. The active ``private.json`` is selected separately::
 
-   # Remove existing development keys
-   just clean
+   just dev                          # seven classical signing keys
+   just dev --pqc ML-DSA-65          # one post-quantum signing key
+   just dev --pqc all                # all nine post-quantum signing keys
 
-   # Generate new keys for production
-   just dev
-
-Inmor generates multiple key types for signing operations, following `RFC 9864 Section 2 <https://www.rfc-editor.org/rfc/rfc9864.html#section-2>`_:
-
-* RSA keys (RS256, PS256) - 2048 bit
-* EC keys (ES256, ES384, ES512) - P-256, P-384, P-521 curves
-* Edwards curve keys (Ed25519, Ed448)
-
-Each key is stored as a JWK JSON file with the key ID (kid) as the thumbprint.
+For production, generate a dedicated key with the bundled
+:ref:`inmor-keygeneration tool <generating-the-signing-key>`.
 
 Signature algorithms and JOSE libraries
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -122,7 +117,7 @@ All JOSE operations (JWK, JWS and JWT handling) use
 `jose-rs <https://crates.io/crates/jose-rs>`_ in the Trust Anchor and
 `pyjosers <https://pypi.org/project/pyjosers/>`_ in the Admin, the helper
 scripts and the test suites. The Admin and Trust Anchor share the Rust
-cryptographic implementation and configure their verification policies separately.
+cryptographic implementation and the same federation signature algorithm allowlist.
 When the Admin self-verifies an entity configuration, it allows 60 seconds of
 leeway for ``exp`` and ``nbf``. The Trust Anchor checks those claims with zero leeway.
 
@@ -137,7 +132,8 @@ The Trust Anchor applies the following rules during verification.
 
 * When verifying entity statements, trust marks and signed JWK Sets, the
   Trust Anchor accepts the header algorithms ``RS256``, ``PS256``, ``ES256``,
-  ``ES384``, ``ES512``, ``EdDSA``, ``Ed25519`` and ``Ed448``. Any other
+  ``ES384``, ``ES512``, ``EdDSA``, ``Ed25519`` and ``Ed448``, plus the nine algorithms in
+  :ref:`pqc-signing-keys`. Any other
   algorithm, including ``none``, is rejected.
 * A key published with ``alg`` set to ``Ed25519`` or ``Ed448`` verifies
   statements whose header says ``EdDSA``, and the reverse. Keys of different
@@ -150,10 +146,10 @@ The Trust Anchor applies the following rules during verification.
   Keys of an unsupported type are kept and only fail when a statement is
   signed with them.
 
-.. warning::
-
-   Regenerating keys will invalidate all existing entity statements and trust marks.
-   Make sure to backup and properly rotate keys in production.
+The Admin applies this allowlist to onboarding, self-verification and renewal.
+Before upgrading, check peers that previously used other pyjosers algorithms,
+including ``RS384``, ``RS512``, ``PS384`` and ``PS512``. They must select an
+accepted signature algorithm for these operations to succeed.
 
 For a production server that only has the Docker image and not this source
 tree, generate the signing key with the bundled ``inmor-keygeneration``

@@ -4,6 +4,7 @@ import json
 import os
 import time
 
+import pytest
 from httpx import Client
 from pyjosers import jwk, jwt
 from redis.client import Redis
@@ -120,19 +121,23 @@ def _build_subject(
     rdb: Redis,
     fake_subject,
     trust_marks: list[dict] | None,
+    subject_key: jwk.JWK | None = None,
 ) -> str:
     """Spin up a fake subject EC reachable by the TA, register a subordinate
     statement for it in Redis, and return the subject's entity_id.
 
-    The subject signs its EC with a fresh ephemeral RSA key; the TA verifies
+    The subject signs its EC with the supplied key or a fresh RSA key; the TA verifies
     the subordinate statement using the inline `jwks` claim (which carries
     that key). Trust marks (if any) are signed by the TA and embedded in the
     subject's EC.
     """
     subject_id = fake_subject.entity_id
-    subject_key = jwk.JWK.generate(kty="RSA", size=2048, alg="RS256", use="sig")
+    if subject_key is None:
+        subject_key = jwk.JWK.generate(kty="RSA", size=2048, alg="RS256", use="sig")
     subject_key.kid = subject_key.thumbprint()
     subject_jwks = {"keys": [json.loads(subject_key.export(private_key=False))]}
+    if subject_key["kty"] == "AKP":
+        subject_jwks["keys"].append(_ta_signing_key().export_public(as_dict=True))
     now = int(time.time())
     exp = now + 3600
 
@@ -150,7 +155,11 @@ def _build_subject(
     if trust_marks is not None:
         subject_ec_payload["trust_marks"] = trust_marks
 
-    subject_header = {"alg": "RS256", "kid": subject_key.kid, "typ": "entity-statement+jwt"}
+    subject_header = {
+        "alg": subject_key["alg"],
+        "kid": subject_key.kid,
+        "typ": "entity-statement+jwt",
+    }
     subject_ec_token = jwt.JWT(header=subject_header, claims=subject_ec_payload)
     subject_ec_token.make_signed_token(subject_key)
     fake_subject.set_entity_configuration(subject_ec_token.serialize())
@@ -1146,7 +1155,7 @@ def _build_delegation_jwt(
         "trust_mark_id": trust_mark_id,
     }
     header = {
-        "alg": "RS256",
+        "alg": owner_key["alg"],
         "kid": owner_key.kid,
         "typ": "trust-mark-delegation+jwt",
     }
@@ -1177,18 +1186,25 @@ def _build_trust_mark_with_delegation(
     return {"trust_mark": jwt_str, "trust_mark_type": trust_mark_type}
 
 
+@pytest.mark.parametrize("pq", [False, True], ids=["classical", "mixed-pqc"])
 def test_resolve_accepts_mark_with_valid_delegation(
-    loaddata: Redis, start_server: int, http_client: Client, fake_subject
+    loaddata: Redis, start_server: int, http_client: Client, fake_subject, pq
 ):
     "Owner pinned + valid delegation -> mark passes (TA acts as delegated TMI)."
     rdb = loaddata
     port = start_server
     subject_id = fake_subject.entity_id
 
-    owner_key = _make_owner_keypair()
+    subject_key = None
+    if pq:
+        subject_key = jwk.JWK.generate(kty="AKP", alg="ML-DSA-65", use="sig")
+        owner_key = jwk.JWK.generate(kty="AKP", alg="ML-DSA-44-ES256", use="sig")
+        owner_key.kid = owner_key.thumbprint()
+    else:
+        owner_key = _make_owner_keypair()
     delegation = _build_delegation_jwt(owner_key, _OWNER_ENTITY_ID, _TA_ENTITY_ID, _TM_TYPE)
     tm_obj = _build_trust_mark_with_delegation(subject_id, delegation)
-    _build_subject(rdb, fake_subject, trust_marks=[tm_obj])
+    _build_subject(rdb, fake_subject, trust_marks=[tm_obj], subject_key=subject_key)
     _set_trust_mark_issuers(rdb, {_TM_TYPE: [_TA_ENTITY_ID]})
     _set_trust_mark_owners(
         rdb,

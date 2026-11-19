@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from redis import Redis
 
 from common.claims import validate_subordinate_additional_claims
-from common.signing import create_signed_jwt
+from common.signing import create_signed_jwt, verify_federation_jwt
 
 INSIDE_CONTAINER = os.environ.get("INSIDE_CONTAINER")
 
@@ -162,7 +162,7 @@ def fetch_entity_configuration(
         raise ValueError("Missing JWKS")
     resp = _federation_get(_entity_configuration_url(entityid))
     text = resp.text
-    jwt_net: JWT = jwt.JWT(jwt=text, key=keyset)
+    jwt_net: JWT = verify_federation_jwt(text, keyset)
     return jwt_net, keyset, text
 
 
@@ -310,6 +310,8 @@ def _validate_trust_mark_owners(raw: dict[Any, Any]) -> dict[str, dict[str, Any]
                 )
             if not isinstance(k.get("kty"), str) or not k["kty"]:
                 raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks.keys[{idx}].kty required")
+            if "priv" in k:
+                raise ValueError("Trust mark owner JWKS must contain only public keys")
             if not isinstance(k.get("kid"), str) or not k["kid"]:
                 raise ValueError(f"TA_TRUST_MARK_OWNERS[{tm_type!r}].jwks.keys[{idx}].kid required")
         out[tm_type] = {"sub": sub, "jwks": jwks}
@@ -418,7 +420,7 @@ def self_validate(token: str) -> dict[str, Any]:
 
     # Keep the Admin's existing time and key-selection policy. Downstream Django
     # views expect ordinary JSON types, including for numbers in nested metadata.
-    verified = jwt.JWT(jwt=token, key=keyset)
+    verified = verify_federation_jwt(token, keyset)
     return json.loads(verified.claims)
 
 

@@ -795,7 +795,7 @@ Mount them into the ``ta`` service read-only (see `Volume Mounts`_)::
      - ./keys/private.json:/app/private.json:ro
      - ./keys/publickeys:/app/publickeys:ro
 
-The ``--type`` option selects the key algorithm, following
+The classical ``--type`` options include algorithms described in
 `RFC 9864 Section 2 <https://www.rfc-editor.org/rfc/rfc9864.html#section-2>`_:
 
 .. list-table::
@@ -816,12 +816,6 @@ The ``--type`` option selects the key algorithm, following
 If ``private.json`` already exists, the command refuses to overwrite it; pass
 ``--force`` to replace it.
 
-.. warning::
-
-   Overwriting ``private.json`` invalidates every entity statement and trust
-   mark the Trust Anchor has already signed. Generate a new signing key only
-   for a fresh deployment or a deliberate key rotation.
-
 .. note::
 
    If you cannot ``chown`` a directory to uid 999 (for example on a host where
@@ -830,6 +824,69 @@ If ``private.json`` already exists, the command refuses to overwrite it; pass
    are then owned by your host uid, so you must also add a matching ``user:``
    entry to the ``ta`` service in the compose file so the TA container runs
    under the same uid and can read ``private.json``.
+
+.. _pqc-signing-keys:
+
+Post-quantum signing keys
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Both services accept the following case-sensitive JWS identifiers by default.
+One composite key produces one signature containing both components.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Family
+     - Values for ``--type`` and the protected ``alg`` header
+   * - Pure ML-DSA
+     - ``ML-DSA-44``, ``ML-DSA-65``, ``ML-DSA-87``
+   * - Composite with ECDSA
+     - ``ML-DSA-44-ES256``, ``ML-DSA-65-ES256``, ``ML-DSA-87-ES384``
+   * - Composite with Edwards curves
+     - ``ML-DSA-44-Ed25519``, ``ML-DSA-65-Ed25519``, ``ML-DSA-87-Ed448``
+
+Pure ML-DSA uses `RFC 9964 <https://www.rfc-editor.org/rfc/rfc9964.html>`_.
+For composites, confirm that peers implement
+`draft-ietf-jose-pq-composite-sigs-03 <https://datatracker.ietf.org/doc/html/draft-ietf-jose-pq-composite-sigs-03>`_.
+Later revisions can change the wire format.
+
+Generate a pure ML-DSA key from the source checkout::
+
+   cargo run --release --locked --bin inmor-keygeneration -- \
+     --type ML-DSA-65 --output ./keys/pure
+
+Generate a composite key with an image built from the same checkout::
+
+   docker build -t inmor:pqc .
+   sudo install -d -o 999 -g 999 -m 0750 ./keys/composite
+   docker run --rm -v "$PWD/keys/composite:/data" inmor:pqc \
+     /app/inmor-keygeneration --type ML-DSA-65-Ed25519 --output /data
+
+Inspect the public half of the first pair::
+
+   jq '{kty, alg, use, kid, has_private: has("priv")}' ./keys/pure/publickeys/*.json
+
+For rotation, upgrade verifiers and confirm peer support first. Add the new
+public key to the current ``publickeys/`` directory, reload both services and
+run ``python manage.py regenerate_entity`` in the Admin. Allow peers to
+refresh their cached JWKS. Mount the new ``private.json`` and the combined
+public directory into both services and recreate their containers so they
+read the new files. Regenerate the entity configuration again. Keep the old
+public key available through the expiry of outstanding statements and marks.
+See :doc:`guides/management-commands` for renewal and reissuance.
+
+To check the switch, fetch your deployed configuration and verify it against
+the public key you generated locally. Set ``TA_DOMAIN`` to your TA's HTTPS URL::
+
+   curl -fsS "${TA_DOMAIN}/.well-known/openid-federation" -o entity.jwt
+   uv run --locked python - <<'PYTHON'
+   from pathlib import Path
+   from pyjosers import JWK, jwt
+   key_file, = Path("keys/pure/publickeys").glob("*.json")
+   key = JWK.from_json(key_file.read_text())
+   token = jwt.JWT(jwt=Path("entity.jwt").read_text().strip(), key=key, algs=[key["alg"]])
+   print(token.header)
+   PYTHON
 
 Initialization Workflow
 -----------------------

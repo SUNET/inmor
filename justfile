@@ -14,8 +14,9 @@ venv:
   uv sync --locked
 
 # To create a development environment
-dev:
-  uv run scripts/create-keys.py
+[positional-arguments]
+dev *ARGS:
+  uv run scripts/create-keys.py "$@"
 
 # To run the frontend development server
 [working-directory: 'admin/frontend']

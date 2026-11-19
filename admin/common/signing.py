@@ -3,7 +3,36 @@
 from typing import Any
 
 from pyjosers import jwt
-from pyjosers.jwk import JWK
+from pyjosers.jwk import JWK, JWKSet
+
+
+PQC_ALGORITHMS = (
+    "ML-DSA-44",
+    "ML-DSA-65",
+    "ML-DSA-87",
+    "ML-DSA-44-ES256",
+    "ML-DSA-65-ES256",
+    "ML-DSA-87-ES384",
+    "ML-DSA-44-Ed25519",
+    "ML-DSA-65-Ed25519",
+    "ML-DSA-87-Ed448",
+)
+FEDERATION_ALGORITHMS = (
+    "RS256",
+    "PS256",
+    "ES256",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448",
+    *PQC_ALGORITHMS,
+)
+
+
+def verify_federation_jwt(token: str, keys: JWKSet) -> jwt.JWT:
+    """Verify a federation JWT under the Trust Anchor algorithm policy."""
+    return jwt.JWT(jwt=token, key=keys, algs=list(FEDERATION_ALGORITHMS))
 
 
 def create_signed_jwt(
@@ -13,8 +42,7 @@ def create_signed_jwt(
 ) -> str:
     """Create a signed JWT with the given claims and key.
 
-    This function supports signing with different key types (RSA, EC, OKP) and
-    algorithms (RS256, PS256, ES256, ES384, ES512, Ed25519, Ed448).
+    This function supports signing with RSA, EC, OKP and AKP federation keys.
 
     :param claims: Dictionary of JWT claims
     :param key: JWK private key to sign with
