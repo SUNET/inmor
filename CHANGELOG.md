@@ -5,6 +5,10 @@ See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verificat
 
 ## Breaking changes
 
+- The resolver now verifies each returned trust-chain link and both
+  anchor-issued statements against their expected keys. Deployments resolving
+  to external anchors must configure their public keys in `taconfig.toml`.
+
 - The Admin UI and protected management API now require the Django permission
   `entities.manage_federation`. Grant it to existing non-superuser operators
   and API key owners during rollout. Public signup is closed, and Django admin

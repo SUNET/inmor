@@ -1,12 +1,17 @@
 import http.server
+import json
 import os
 import subprocess
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
+from typing import cast
+from urllib.parse import unquote
 
 import httpx
 import pytest
+from pyjosers import jwk
 from pytest_redis import factories
 from redis.client import Redis
 
@@ -41,6 +46,10 @@ def loaddata(rdb: Redis) -> Redis:
     return redis
 
 
+class _DocumentServer(http.server.HTTPServer):
+    documents: dict[str, bytes]
+
+
 class _FakeSubject:
     """A dynamically-controllable fake federation subject.
 
@@ -50,13 +59,16 @@ class _FakeSubject:
     and we control the response.
     """
 
-    def __init__(self, port: int, server: http.server.HTTPServer):
+    def __init__(self, port: int, server: _DocumentServer):
         self.port = port
         self.entity_id = f"http://127.0.0.1:{port}"
         self._server = server
 
     def set_entity_configuration(self, jwt_body: str) -> None:
-        self._server.entity_config = jwt_body.encode()  # type: ignore[attr-defined]
+        self.set_document("/.well-known/openid-federation", jwt_body)
+
+    def set_document(self, path: str, body: str) -> None:
+        self._server.documents[path] = body.encode()
 
     def shutdown(self) -> None:
         self._server.shutdown()
@@ -65,12 +77,8 @@ class _FakeSubject:
 
 class _SubjectHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 — required by stdlib API
-        if self.path == "/.well-known/openid-federation":
-            body = getattr(self.server, "entity_config", None)
-            if not body:
-                self.send_response(503)
-                self.end_headers()
-                return
+        body = cast(_DocumentServer, self.server).documents.get(unquote(self.path))
+        if body is not None:
             self.send_response(200)
             self.send_header("Content-Type", "application/entity-statement+jwt")
             self.send_header("Content-Length", str(len(body)))
@@ -80,20 +88,20 @@ class _SubjectHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-    def log_message(self, *_):  # silence stderr spam
+    def log_message(self, format, *args):  # silence stderr spam
         return
 
 
-@pytest.fixture(scope="function")
-def fake_subject():
+@contextmanager
+def _subject_server():
     """A loopback HTTP server that the TA can `GET` as a federation subject.
 
     Binds to port 0 and reads back the OS-assigned port from `server_address`
     after bind — no race window between port discovery and listener creation.
     """
-    server = http.server.HTTPServer(("127.0.0.1", 0), _SubjectHandler)
+    server = _DocumentServer(("127.0.0.1", 0), _SubjectHandler)
     port = server.server_address[1]
-    server.entity_config = None  # type: ignore[attr-defined]
+    server.documents = {}
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     fs = _FakeSubject(port, server)
@@ -104,8 +112,22 @@ def fake_subject():
         thread.join(timeout=2)
 
 
+@pytest.fixture
+def fake_subject():
+    with _subject_server() as subject:
+        yield subject
+
+
 @pytest.fixture(scope="session")
-def start_server(trdb):
+def pinned_peer():
+    key = jwk.JWK.generate(kty="EC", crv="P-256", alg="ES256")
+    key.kid = key.thumbprint()
+    with _subject_server() as peer:
+        yield peer, key
+
+
+@pytest.fixture(scope="session")
+def start_server(trdb, pinned_peer):
     """Starts the inmor rust application on a port and returns it."""
     # port = port_for.get_port(None)
     # Comment the line below and uncomment the above to run the test server
@@ -119,6 +141,11 @@ def start_server(trdb):
             f.write('tls_cert = "dev/localhost+2.pem"\n')
             f.write('tls_key = "dev/localhost+2-key.pem"\n')
             f.write("allow_http = true\n")
+            peer, key = pinned_peer
+            for path in ("/anchor", "/intermediate"):
+                f.write(f'[[trusted_anchors."{peer.entity_id}{path}".keys]]\n')
+                for field, value in key.export_public(as_dict=True).items():
+                    f.write(f"{field} = {json.dumps(value)}\n")
         # Now start a process
         inmor_proc = subprocess.Popen([inmor_path, "-p", str(port), "-c", tconfig])
         assert not inmor_proc.poll()
