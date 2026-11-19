@@ -2,6 +2,8 @@ Docker Compose Deployment
 =========================
 
 This guide covers deploying Inmor using Docker Compose for production environments.
+For an existing deployment, follow :doc:`upgrades/0.6.0` before starting the
+new images.
 
 .. danger::
 
@@ -53,7 +55,7 @@ The Docker Compose setup includes 5 services:
 
    services:
      ta:
-       image: docker.sunet.se/inmor:0.5.1
+       image: docker.sunet.se/inmor:0.6.0
        ports:
          - "8080:8080"
        depends_on:
@@ -61,7 +63,7 @@ The Docker Compose setup includes 5 services:
            condition: service_healthy
 
      admin:
-       image: docker.sunet.se/inmor-admin:0.5.1
+       image: docker.sunet.se/inmor-admin:0.6.0
        ports:
          - "8000:8000"
        depends_on:
@@ -80,7 +82,7 @@ The Docker Compose setup includes 5 services:
        image: redis:7-alpine
 
      frontend:
-       image: docker.sunet.se/inmor-frontend:0.5.1
+       image: docker.sunet.se/inmor-frontend:0.6.0
        depends_on:
          - admin
        ports:
@@ -781,7 +783,7 @@ to, then run the generator::
    mkdir -p keys
    sudo chown 999:999 keys
 
-   docker run --rm -v ./keys:/data docker.sunet.se/inmor:0.5.1 \
+   docker run --rm -v ./keys:/data docker.sunet.se/inmor:0.6.0 \
      /app/inmor-keygeneration --type=RS256 --output=/data
 
 This writes two files into the ``keys`` directory:

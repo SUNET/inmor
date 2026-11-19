@@ -1,7 +1,14 @@
 """Tests for authentication and MFA integration."""
 
+import time
+from urllib.parse import urlsplit
+
 import pytest
+from allauth.mfa.totp.internal.auth import TOTP, format_hotp_value, generate_totp_secret, hotp_value
+from django.contrib.auth import SESSION_KEY
+from django.contrib.auth.models import Group, Permission, User
 from django.test import Client, RequestFactory
+from django.urls import reverse
 
 from apikeys.models import APIKey
 from inmoradmin.auth import (
@@ -9,6 +16,7 @@ from inmoradmin.auth import (
     AuthResult,
     SessionAuthBackend,
 )
+from trustmarks.models import TrustMark, TrustMarkType
 
 
 class TestAllauthIntegration:
@@ -40,17 +48,56 @@ class TestAllauthIntegration:
         assert response.status_code == 200
 
     @pytest.mark.django_db
-    def test_signup_disabled(self, db):
-        """Test that public signup is disabled."""
-        client = Client()
-        response = client.get("/accounts/signup/")
-        # Should return 200 but the form should indicate signup is closed
-        # or redirect, depending on allauth configuration
-        assert response.status_code in [200, 302, 403]
+    def test_signup_disabled(self, db, client):
+        signup = reverse("account_signup")
+        assert client.get(signup).template_name == "account/signup_closed.html"
+        count = User.objects.count()
+        response = client.post(
+            signup,
+            {
+                "username": "new-user",
+                "email": "new-user@example.org",
+                "password1": "a-long-signup-password",
+                "password2": "a-long-signup-password",
+            },
+        )
+        assert response.template_name == "account/signup_closed.html"
+        assert User.objects.count() == count
+        assert SESSION_KEY not in client.session
 
 
 class TestMFAIntegration:
     """Tests for MFA integration."""
+
+    def test_admin_password_login_requires_enrolled_totp(self, user, client, loadredis):
+        secret = generate_totp_secret()
+        TOTP.activate(user, secret)
+        admin_url = reverse("admin:index")
+        response = client.post(
+            reverse("admin:login"),
+            {"username": user.username, "password": "testpass123"},
+            query_params={"next": admin_url},
+        )
+        assert response.status_code == 302
+        assert urlsplit(response.url).path == reverse("account_login")
+        assert SESSION_KEY not in client.session
+
+        response = client.post(response.url, {"login": user.username, "password": "testpass123"})
+        assert response.status_code == 302
+        assert urlsplit(response.url).path == reverse("mfa_authenticate")
+        assert SESSION_KEY not in client.session
+        assert client.get(admin_url).status_code == 302
+
+        code = format_hotp_value(hotp_value(secret, int(time.time()) // 30))
+        response = client.post(response.url, {"code": code}, follow=True)
+        assert response.wsgi_request.path == admin_url
+        assert response.status_code == 200
+        assert client.session[SESSION_KEY] == str(user.pk)
+
+    def test_staff_session_cannot_submit_django_password_form(self, auth_client, user):
+        response = auth_client.post(reverse("admin:login"))
+        assert response.status_code == 405
+        assert auth_client.session[SESSION_KEY] == str(user.pk)
 
     @pytest.mark.django_db
     def test_mfa_index_requires_login(self, db):
@@ -229,6 +276,57 @@ class TestSessionAuthBackend:
         assert result.auth_method == "session"
         assert result.api_key_name is None
         assert result.tenant == "default"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("auth_method", ["session", "api_key"])
+def test_operator_permission_controls_trust_mark_issuance(db, rdb, auth_method):
+    client = Client(enforce_csrf_checks=True)
+    user = User.objects.create_user(username="operator")
+    api_key = None
+    if auth_method == "session":
+        client.force_login(user)
+        client.get("/api/v1/auth/csrf")
+        client.defaults["HTTP_X_CSRFTOKEN"] = client.cookies["csrftoken"].value
+    else:
+        api_key, plaintext = APIKey.create_key(name="automation", user=user)
+        client.defaults["HTTP_X_API_KEY"] = plaintext
+
+    mark_type = TrustMarkType.objects.create(tmtype="https://issuer.example/mark")
+    url = "/api/v1/trustmarks"
+
+    def issue(domain):
+        return client.post(
+            url, {"tmt": mark_type.pk, "domain": domain}, content_type="application/json"
+        )
+
+    denied = "https://denied.example"
+    assert issue(denied).status_code == 403
+    assert not TrustMark.objects.filter(domain=denied).exists()
+    assert not rdb.exists(f"inmor:tm:{denied}")
+    if api_key:
+        api_key.refresh_from_db()
+        assert api_key.last_used_at is None
+
+    operators = Group.objects.create(name="Federation Operators")
+    operators.permissions.add(
+        Permission.objects.get(content_type__app_label="entities", codename="manage_federation")
+    )
+    user.groups.add(operators)
+    allowed = "https://allowed.example"
+    assert issue(allowed).status_code == 201
+    issued = TrustMark.objects.get(domain=allowed)
+    assert issued.mark
+    assert rdb.hget(f"inmor:tm:{allowed}", mark_type.tmtype) == issued.mark.encode()
+    if api_key:
+        api_key.refresh_from_db()
+        assert api_key.last_used_at is not None
+
+    user.groups.remove(operators)
+    assert client.get("/api/v1/auditlog").status_code == 403
+    assert issue(denied).status_code == 403
+    assert not TrustMark.objects.filter(domain=denied).exists()
+    assert not rdb.exists(f"inmor:tm:{denied}")
 
 
 class TestCombinedAuthSetsAuthResult:

@@ -110,6 +110,8 @@ directories. The active ``private.json`` is selected separately::
 For production, generate a dedicated key with the bundled
 :ref:`inmor-keygeneration tool <generating-the-signing-key>`.
 
+.. _signature-algorithms:
+
 Signature algorithms and JOSE libraries
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

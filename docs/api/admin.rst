@@ -20,6 +20,22 @@ django-allauth at ``/accounts/login/``. This ensures that all configured login
 stages, including MFA, complete before a session is created. Browser session
 cookies are not an authentication mechanism for direct API clients.
 
+Public signup is closed. Both browser sessions and API keys require an active
+user with the Django permission ``entities.manage_federation`` to access
+protected endpoints. Active superusers already have this permission. Other
+authenticated accounts receive HTTP 403.
+
+When upgrading, run ``python manage.py migrate`` to create the permission.
+In Django admin, assign **Can manage the federation** to a group such as
+**Federation Operators** and add the intended operators and API key owners.
+Existing keys use their owner's current permissions on each request.
+Service accounts can use the API without staff status.
+
+Django admin login also goes through allauth, including any enrolled MFA
+challenge. Sessions established before the upgrade keep their existing
+expiry. To require a fresh MFA login immediately, invalidate existing staff
+sessions during rollout.
+
 Authentication metadata
 ^^^^^^^^^^^^^^^^^^^^^^^
 

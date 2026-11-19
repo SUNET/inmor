@@ -57,8 +57,14 @@ Documentation Contents
 
    installation
    deployment
-   postgresql-upgrade
    reverse-proxy
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Upgrades
+
+   upgrades/0.6.0
+   postgresql-upgrade
 
 .. toctree::
    :maxdepth: 2
