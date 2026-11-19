@@ -44,6 +44,33 @@ The Trust Anchor reads its configuration from ``taconfig.toml``.
    * - ``allow_http``
      - No
      - Allow HTTP scheme and private/loopback IPs in outbound federation requests. **Development only.** Defaults to ``false``. When disabled (production), all outbound requests enforce HTTPS and reject targets that resolve to private IP ranges (SSRF protection).
+   * - ``trusted_anchors``
+     - No
+     - Additional trust anchors accepted by ``/resolve``, keyed by exact
+       entity ID. Each value is a public JWK Set.
+
+.. _resolver-trust-anchors:
+
+Resolver trust anchors
+^^^^^^^^^^^^^^^^^^^^^^
+
+By default, ``/resolve`` trusts the configured ``domain`` and its keys in
+``./publickeys/``. To resolve to another anchor, obtain its public keys
+through an authenticated channel independent of federation discovery. Add
+them to ``taconfig.toml`` and restart the Trust Anchor. For example, for an
+Ed25519 key, replace the entity ID, key ID and public coordinate below::
+
+   [[trusted_anchors."https://partner.example.org".keys]]
+   kty = "OKP"
+   crv = "Ed25519"
+   kid = "partner-key-id"
+   x = "base64url-public-coordinate"
+
+Add one table entry per public key. During rollover, provision the new key
+before the anchor starts signing with it. Keep the old verification key
+while statements signed with it should still be accepted. The anchor's
+entity configuration and its subordinate statement must each verify with
+a provisioned key.
 
 Admin Portal Configuration (settings.py)
 -----------------------------------------

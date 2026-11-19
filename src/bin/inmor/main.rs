@@ -185,6 +185,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(AppState {
                 entity_id: server_config.domain.to_string(),
                 public_keyset: jwks,
+                trusted_anchors: server_config.trusted_anchors.clone(),
             }))
             .app_data(web::Data::new(redis.clone()))
             .app_data(fed_app_data.clone())

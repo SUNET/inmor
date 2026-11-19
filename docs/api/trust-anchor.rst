@@ -222,10 +222,16 @@ tree-walking and policy application.
      - **Required.** Subject entity ID to resolve
    * - ``trust_anchor``
      - string
-     - Trust anchor(s) to resolve against (can be repeated)
+     - Requested trust anchor entity ID (can be repeated). The resolver
+       selects among its :ref:`configured anchors <resolver-trust-anchors>`.
    * - ``entity_type``
      - string
      - Filter to specific entity types (can be repeated)
+
+If none of the requested anchors is configured, the resolver returns
+HTTP 404 (``invalid_trust_anchor``). If the statements do not establish a
+valid chain to a requested, configured anchor, it returns HTTP 400
+(``invalid_trust_chain``).
 
 **Response (200 OK):**
 
@@ -260,10 +266,9 @@ The ``trust_chain`` array contains:
 2. Subordinate statement from the TA (or intermediate)
 3. TA's entity configuration
 
-Per OpenID Federation §4.3, the same chain also rides in the JWS header
-of the resolve response as the ``trust_chain`` header parameter. Clients
-may read either form; the header lets them short-circuit chain resolution
-without parsing the payload.
+Read the subject's chain from the signed payload. Section 8.3.2 reserves
+the optional JWS header parameter for the resolver's own chain. Inmor omits
+that header.
 
 **Examples:**
 

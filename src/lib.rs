@@ -201,6 +201,17 @@ pub static ALLOW_HTTP: AtomicBool = AtomicBool::new(false);
 pub struct AppState {
     pub entity_id: String,
     pub public_keyset: JwkSet,
+    pub trusted_anchors: HashMap<String, JwkSet>,
+}
+
+impl AppState {
+    fn anchor_keys(&self, id: &str) -> Option<&JwkSet> {
+        if id == self.entity_id {
+            Some(&self.public_keyset)
+        } else {
+            self.trusted_anchors.get(id)
+        }
+    }
 }
 
 // To represent the entities in the federation.
@@ -335,16 +346,14 @@ pub struct VerifiedJWT {
     jwt: String,
     payload: Claims,
     substatement: bool,
-    taresult: bool,
 }
 
 impl VerifiedJWT {
-    pub fn new(jwt: String, payload: &Claims, subs: bool, taresult: bool) -> Self {
+    pub fn new(jwt: String, payload: &Claims, subs: bool) -> Self {
         VerifiedJWT {
             jwt,
             payload: payload.clone(),
             substatement: subs,
-            taresult,
         }
     }
 }
@@ -378,6 +387,9 @@ pub struct ServerConfiguration {
     pub tls_key: Option<String>,
     /// Allow HTTP scheme and private IPs in outbound federation requests (development only).
     pub allow_http: Option<bool>,
+    /// Additional resolver anchors, indexed by exact entity ID and provisioned out of band.
+    #[serde(default)]
+    pub trusted_anchors: HashMap<String, JwkSet>,
 }
 
 impl ServerConfiguration {
@@ -394,6 +406,7 @@ impl ServerConfiguration {
             tls_cert,
             tls_key,
             allow_http,
+            trusted_anchors: HashMap::new(),
         }
     }
 
@@ -491,12 +504,7 @@ pub fn create_signed_jwt(
 /// parameter per OpenID Federation §4.3. When `header_trust_chain` is
 /// `Some(&[…])`, the header includes a `trust_chain` claim — an ordered
 /// array of compact-serialised JWTs comprising the chain from the issuer's
-/// subject up to a Trust Anchor.
-///
-/// Only inmor's `/resolve` response sets the header today (recipients of a
-/// resolve response who want the chain can read either the payload's
-/// `trust_chain` claim or this header). Subordinate Statements deliberately
-/// omit it — the consumer of a subordinate statement walks the chain itself.
+/// entity to a Trust Anchor. Callers must supply the issuer's own chain.
 pub fn create_signed_jwt_with_header(
     payload: &Claims,
     key: &Jwk,
@@ -1990,10 +1998,8 @@ const MAX_RESOLVE_DEPTH: u8 = 10;
 /// Return `Err(FetchError::transient)` if the walk context's deadline has
 /// passed. Called immediately before every outbound fetch inside the
 /// walker so a single frame can't busy-loop past the §10.5 budget.
-fn check_chain_fetch_budget(ctx: Option<&WalkContext>, sub: &str) -> Result<()> {
-    if let Some(c) = ctx
-        && SystemTime::now() > c.fetch_deadline
-    {
+fn check_chain_fetch_budget(ctx: &WalkContext, sub: &str) -> Result<()> {
+    if SystemTime::now() > ctx.fetch_deadline {
         return Err(anyhow::Error::new(FetchError::transient(
             None,
             format!("chain-fetch budget of {CHAIN_FETCH_BUDGET_SECS}s exceeded for {sub}"),
@@ -2015,292 +2021,172 @@ const MAX_TRUST_MARKS_PER_RESOLVE: usize = 32;
 /// (~20s) so a single slow issuer doesn't starve the rest.
 const TRUST_MARK_VERIFICATION_BUDGET_SECS: u64 = 30;
 
-/// Build the trust chain for `sub` up to one of `trust_anchors`.
-///
-/// **Return contract**: `Ok(vec)` does NOT mean the chain reached a trust
-/// anchor. On a fetch or verification failure mid-walk the function returns
-/// the partial chain accumulated so far (possibly an empty vec) so that
-/// callers can still try alternative authority hints. Callers MUST verify
-/// completeness before trusting the result:
-///
-/// 1. `!vec.is_empty()` — chain has at least one entry.
-/// 2. `vec.iter().any(|e| e.taresult)` — the chain actually terminates at a
-///    requested trust anchor.
-///
-/// `/resolve` (see `resolve_entity` below) enforces both checks and returns
-/// 400 `invalid_trust_chain` otherwise. The recursive caller inside this
-/// function continues to the next authority hint on a partial result via the
-/// `r_result.is_empty()` check below.
-pub async fn resolve_entity_to_trustanchor(
-    sub: &str,
-    trust_anchors: Vec<&str>,
-    start: bool,
-    visited: &mut HashSet<String>,
+/// Verify the wire JWT in the role for which it was fetched. A self-signature
+/// proves possession of a key, so even an EC must match the requested identity.
+fn verify_entity_statement(
+    jwt: String,
+    issuer: &str,
+    subject: &str,
+    keys: Option<JwkSet>,
+) -> Result<VerifiedJWT> {
+    let (payload, header) = verify_jwt_signature_with_jwks(&jwt, keys)?;
+    Validation::new()
+        .with_typ("entity-statement+jwt")
+        .with_issuer(issuer)
+        .with_subject(subject)
+        .require_exp()
+        .require_iat()
+        .with_leeway(0)
+        .validate_with_header(&payload, &header)?;
+    if header.kid.as_deref().is_none_or(str::is_empty) {
+        bail!("entity statement requires a nonempty kid");
+    }
+    enforce_crit_claim(&payload)?;
+    Ok(VerifiedJWT {
+        jwt,
+        payload,
+        substatement: issuer != subject,
+    })
+}
+
+async fn fetch_resolver_configuration(id: &str) -> Result<VerifiedJWT> {
+    // An endpoint may carry query parameters, but an entity ID may not (§1.2).
+    let url = url::Url::parse(id)?;
+    if url.query().is_some() || url.fragment().is_some() {
+        bail!("entity identifier contains a query or fragment");
+    }
+    verify_entity_statement(get_entity_configruation_as_jwt(id).await?, id, id, None)
+}
+
+/// Fetch one superior's EC and the statement it issued about the current entity.
+/// Discovery uses the EC's keys. Trust is established separately, by the next
+/// superior's endorsement or by the operator's independently provisioned keys.
+async fn fetch_chain_link(
+    authority: &str,
+    subject: &str,
+    ctx: &WalkContext,
+    child: &VerifiedJWT,
     depth: u8,
-    redis_conn: &mut redis::aio::ConnectionManager,
-    ctx: Option<&WalkContext>,
+) -> Result<(VerifiedJWT, VerifiedJWT)> {
+    check_chain_fetch_budget(ctx, subject)?;
+    let ec = fetch_resolver_configuration(authority).await?;
+    let endpoint = ec
+        .payload
+        .extra
+        .get("metadata")
+        .and_then(|m| m.get("federation_entity"))
+        .and_then(|m| m.get("federation_fetch_endpoint"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing federation_fetch_endpoint for {authority}"))?;
+    check_chain_fetch_budget(ctx, subject)?;
+    let statement = verify_entity_statement(
+        fetch_subordinate_statement(endpoint, subject).await?,
+        authority,
+        subject,
+        Some(get_jwks_from_payload(&ec.payload)?),
+    )?;
+    // Section 10.2 binds adjacent wire JWTs. For a leaf the child is its
+    // self-signed EC; for an intermediate it is the statement it issued,
+    // which may use a different key from its discovery EC during rollover.
+    let endorsed_keys = get_jwks_from_payload(&statement.payload)?;
+    verify_jwt_signature_with_jwks(&child.jwt, Some(endorsed_keys))?;
+    Constraints::from_payload(&statement.payload)?.check_subject(
+        &ctx.original_subject,
+        &ctx.original_subject_entity_types,
+        depth == 0,
+        depth,
+    )?;
+    Ok((ec, statement))
+}
+
+/// Append subordinate statements in leaf-to-anchor order. Only a complete,
+/// pinned path is returned. Failed branches leave the caller's path intact.
+async fn extend_trust_chain(
+    subject: &str,
+    config: &VerifiedJWT,
+    anchors: &HashMap<&str, &JwkSet>,
+    chain: &mut Vec<VerifiedJWT>,
+    visited: &mut HashSet<String>,
+    ctx: &WalkContext,
+) -> Result<bool> {
+    let depth = chain.len();
+    if depth > usize::from(MAX_RESOLVE_DEPTH) {
+        return Ok(false);
+    }
+    let hints = config
+        .payload
+        .extra
+        .get("authority_hints")
+        .and_then(Value::as_array);
+    let mut transient_error = None;
+    for authority in hints.into_iter().flatten().filter_map(Value::as_str) {
+        if visited.contains(authority) {
+            continue;
+        }
+        check_chain_fetch_budget(ctx, subject)?;
+        let pins = anchors.get(authority).copied();
+        let child = chain.last().unwrap_or(config);
+        let (superior, endorsement) =
+            match fetch_chain_link(authority, subject, ctx, child, depth as u8).await {
+                Ok(link) => link,
+                Err(err) => {
+                    warn!("Skipping authority {authority} for {subject}: {err}");
+                    if err
+                        .downcast_ref::<FetchError>()
+                        .is_some_and(|f| f.transient)
+                    {
+                        transient_error = Some(err);
+                    }
+                    continue;
+                }
+            };
+        // Both anchor-issued JWTs must verify with independently supplied keys
+        // (§4). A stale pin prevents terminating here, but this entity may
+        // still be an intermediate on a path to another requested anchor.
+        let trusted = pins.is_some_and(|keys| {
+            verify_jwt_signature_with_jwks(&superior.jwt, Some(keys.clone())).is_ok()
+                && verify_jwt_signature_with_jwks(&endorsement.jwt, Some(keys.clone())).is_ok()
+        });
+        if pins.is_some() && !trusted && anchors.len() == 1 {
+            continue;
+        }
+        chain.push(endorsement);
+        if trusted {
+            chain.push(superior);
+            return Ok(true);
+        }
+        visited.insert(authority.to_owned());
+        let found = Box::pin(extend_trust_chain(
+            authority, &superior, anchors, chain, visited, ctx,
+        ))
+        .await;
+        visited.remove(authority);
+        match found {
+            Ok(true) => return Ok(true),
+            Ok(false) => {}
+            Err(err) => transient_error = Some(err),
+        }
+        chain.pop();
+    }
+    match transient_error {
+        Some(err) => Err(err),
+        None => Ok(false),
+    }
+}
+
+async fn resolve_entity_to_trustanchor(
+    subject: &str,
+    anchors: &HashMap<&str, &JwkSet>,
 ) -> Result<Vec<VerifiedJWT>> {
-    if depth > MAX_RESOLVE_DEPTH {
-        bail!(
-            "Trust chain resolution exceeded maximum depth of {}",
-            MAX_RESOLVE_DEPTH
-        );
+    let leaf = fetch_resolver_configuration(subject).await?;
+    let ctx = WalkContext::from_subject_payload(subject, &leaf.payload);
+    let mut chain = Vec::new();
+    let mut visited = HashSet::from([subject.to_owned()]);
+    if !extend_trust_chain(subject, &leaf, anchors, &mut chain, &mut visited, &ctx).await? {
+        bail!("no validated path to a requested trust anchor");
     }
-    debug!("Received {sub} with trust anchors {trust_anchors:?}");
-
-    // Spec §10.5 — chain-fetch deadline. We check the deadline once per
-    // walker invocation AND immediately before each outbound fetch in this
-    // frame. Without the per-fetch checks, a single recursion-frame loop
-    // over many authority_hints could blow past the budget before the
-    // next recursion's entry check fires.
-    check_chain_fetch_budget(ctx, sub)?;
-
-    let empty_authority: Vec<String> = Vec::new();
-    let eal = json!(empty_authority);
-
-    // This will hold the list of trust chain
-    let mut result = Vec::new();
-
-    // to stop infinite loop
-    // First get the entity configuration and self verify
-    let original_ec = match get_entity_configruation_as_jwt(sub).await {
-        Ok(res) => res,
-        Err(e) => {
-            warn!("Failed to fetch entity configuration for {}: {}", sub, e);
-            // Transient fetch failures bubble up so /resolve can emit 503.
-            // Permanent failures keep the legacy partial-chain behaviour
-            // (callers inspect `found_ta`).
-            if e.downcast_ref::<FetchError>().is_some_and(|f| f.transient) {
-                return Err(e);
-            }
-            return Ok(result); // Read FOUND_TA section in code to find why it is okay to
-            // result a half done list back.
-        }
-    };
-    // Add it already visited
-    visited.insert(sub.to_string());
-
-    let (opayload, _oheader) = self_verify_jwt(&original_ec)?;
-
-    if start {
-        let vjwt = VerifiedJWT::new(original_ec.clone(), &opayload, false, false);
-        result.push(vjwt);
-    }
-
-    // Spec §6.2: constraints in a Subordinate Statement apply to entities
-    // below the SS subject. We check each SS independently against the
-    // resolve subject (chain leaf). The walk context carries the leaf's
-    // identity and declared entity types; built on the outermost call from
-    // the leaf's self-verified EC.
-    let owned_ctx;
-    let walk_ctx: &WalkContext = match ctx {
-        Some(c) => c,
-        None => {
-            owned_ctx = WalkContext::from_subject_payload(sub, &opayload);
-            &owned_ctx
-        }
-    };
-
-    // Now find the authority_hints
-    let authority_hints = match opayload.extra.get("authority_hints") {
-        Some(v) => v,
-        // Means we are at one Trust anchor (most probably)
-        None => &eal,
-    };
-    debug!("Authority hints: {authority_hints:?}");
-    // Loop over the authority hints
-    let Some(ah_array) = authority_hints.as_array() else {
-        return Ok(result); // Return if not an array
-    };
-    for ah in ah_array {
-        // Flag to mark if we found the trust anchor
-        let mut ta_flag = false;
-        // Get the str from the JSON value
-        let Some(ah_entity) = ah.as_str() else {
-            continue; // Skip if not a string
-        };
-        // If we already visited the authority then continue
-        if visited.contains(ah_entity) {
-            continue;
-        }
-        // If this is one of the trust anchor, then we are done
-        if trust_anchors.contains(&ah_entity) {
-            // Means we found our trust anchor
-            ta_flag = true;
-        }
-        // §10.5 — re-check budget before each outbound fetch in the loop.
-        check_chain_fetch_budget(Some(walk_ctx), sub)?;
-        // Fetch the authority's entity configuration
-        let ah_jwt = match get_entity_configruation_as_jwt(ah_entity).await {
-            Ok(res) => res,
-            Err(e) => {
-                warn!(
-                    "Failed to fetch authority entity configuration for {}: {}",
-                    ah_entity, e
-                );
-                if e.downcast_ref::<FetchError>().is_some_and(|f| f.transient) {
-                    return Err(e);
-                }
-                return Ok(result); // Read FOUND_TA section in code to find why it is okay to
-                // result a half done list back.
-            }
-        };
-
-        // Verify and get the payload
-        let jwt_result = self_verify_jwt(&ah_jwt);
-        if jwt_result.is_err() {
-            warn!(
-                "Failed to verify authority JWT for {}: {:?}",
-                ah_entity,
-                jwt_result.err()
-            );
-            continue;
-        }
-
-        let (ah_payload, _) = jwt_result.expect("This can not be error here.");
-        let Some(ah_metadata) = ah_payload.extra.get("metadata") else {
-            warn!("Missing metadata in authority payload for: {}", ah_entity);
-            continue;
-        };
-        let Some(federation_entity) = ah_metadata.get("federation_entity") else {
-            warn!("Missing federation_entity in metadata for: {}", ah_entity);
-            continue;
-        };
-        let Some(fetch_endpoint) = federation_entity.get("federation_fetch_endpoint") else {
-            warn!("Missing federation_fetch_endpoint for: {}", ah_entity);
-            continue;
-        };
-        let Some(fetch_endpoint_str) = fetch_endpoint.as_str() else {
-            warn!(
-                "federation_fetch_endpoint is not a string for: {}",
-                ah_entity
-            );
-            continue;
-        };
-        // §10.5 — re-check budget before each outbound fetch.
-        check_chain_fetch_budget(Some(walk_ctx), sub)?;
-        // Fetch the entity statement/ subordinate statement
-        let sub_statement = match fetch_subordinate_statement(fetch_endpoint_str, sub).await {
-            Ok(res) => res,
-            Err(e) => {
-                warn!(
-                    "Failed to fetch subordinate statement for {} from {}: {}",
-                    sub, ah_entity, e
-                );
-                if e.downcast_ref::<FetchError>().is_some_and(|f| f.transient) {
-                    return Err(e);
-                }
-                return Ok(result); // Read FOUND_TA section in code to find why it is okay to
-                // result a half done list back.
-            }
-        };
-        // Get the authority's JWKS (inline, or via jwks_uri fallback) and verify the subordinate statement.
-        let ah_jwks = match get_jwks_from_payload_or_uri(&ah_payload, redis_conn).await {
-            Ok(result) => result,
-            Err(e) => {
-                warn!(
-                    "Failed to get JWKS from authority payload for {}: {}",
-                    ah_entity, e
-                );
-                continue;
-            }
-        };
-        let (subs_payload, _) = match verify_jwt_with_jwks(&sub_statement, Some(ah_jwks)) {
-            Ok(value) => value,
-            Err(e) => {
-                warn!(
-                    "Failed to verify subordinate statement for {} from {}: {}",
-                    sub, ah_entity, e
-                );
-                continue;
-            }
-        };
-
-        // Spec §3.2: ES[j] MUST be signed by a key in ES[j+1].jwks. We bind by
-        // key material, not by `kid`: re-verify the subject's self-EC against
-        // the subordinate statement's authoritative `jwks`. A successful
-        // signature check proves the actual signing key is present in that
-        // JWKS. Matching on `kid` strings alone would let an authority list a
-        // different key under the same `kid` and bypass the chain-link check.
-        let ss_jwks = match get_jwks_from_payload(&subs_payload) {
-            Ok(j) => j,
-            Err(e) => {
-                warn!(
-                    "trust chain: subordinate statement from {ah_entity} for {sub} has no usable jwks ({e}); skipping authority"
-                );
-                continue;
-            }
-        };
-        if let Err(e) = verify_jwt_with_jwks(&original_ec, Some(ss_jwks)) {
-            warn!(
-                "trust chain: {sub} EC not signed by any key in subordinate statement jwks from {ah_entity} ({e}); skipping authority"
-            );
-            continue;
-        }
-
-        // Spec §6.2: enforce the Subordinate Statement's `constraints`
-        // (max_path_length, permitted/excluded_subtrees, allowed entity
-        // types) against the resolve subject. `depth` at this point is the
-        // number of entities below `sub` in the chain (depth=0 means `sub`
-        // is the leaf and the SS is directly about it).
-        let ss_constraints = match Constraints::from_payload(&subs_payload) {
-            Ok(c) => c,
-            Err(e) => {
-                // Malformed `constraints` is a verification failure for
-                // this SS — refuse to silently disable enforcement.
-                warn!(
-                    "trust chain: malformed constraints in subordinate statement from {ah_entity} ({e}); skipping authority"
-                );
-                continue;
-            }
-        };
-        let is_leaf = depth == 0;
-        if let Err(e) = ss_constraints.check_subject(
-            &walk_ctx.original_subject,
-            &walk_ctx.original_subject_entity_types,
-            is_leaf,
-            depth,
-        ) {
-            warn!(
-                "trust chain: constraints in subordinate statement from {ah_entity} reject {sub} ({e}); skipping authority"
-            );
-            continue;
-        }
-
-        if ta_flag {
-            // Means this is the end of resolving
-            let vjwt = VerifiedJWT::new(sub_statement, &subs_payload, true, false);
-            result.push(vjwt);
-            let ajwt = VerifiedJWT::new(ah_jwt.clone(), &ah_payload, false, true);
-            result.push(ajwt);
-            return Ok(result);
-        } else {
-            // §10.5 — budget check before descending one more level so a
-            // pathological intermediate can't burn the whole budget on
-            // recursive fetches before bailing out.
-            check_chain_fetch_budget(Some(walk_ctx), sub)?;
-            // Now do a recursive query
-            let r_result = Box::pin(resolve_entity_to_trustanchor(
-                ah_entity,
-                trust_anchors.clone(),
-                false,
-                visited,
-                depth + 1,
-                redis_conn,
-                Some(walk_ctx),
-            ))
-            .await?;
-            if r_result.is_empty() {
-                continue;
-            } else {
-                let vjwt = VerifiedJWT::new(sub_statement, &subs_payload, true, false);
-                result.push(vjwt);
-                result.extend(r_result);
-            }
-            return Ok(result);
-        }
-    }
-    Ok(vec![])
+    chain.insert(0, leaf);
+    Ok(chain)
 }
 
 /// To create the signed JWT for resolve response
@@ -2336,18 +2222,22 @@ fn create_resolve_response_jwt(
         chain_exp_iter
             .chain(trust_mark_exp_iter)
             .min()
-            .unwrap_or_else(|| numeric_date(SystemTime::now() + Duration::from_secs(86400))),
+            .ok_or_else(|| JoseError::InvalidClaims("missing resolution expiry".into()))?,
     );
+
+    // Trust-mark lookups can outlast the earliest statement. Recheck at
+    // issuance so a successfully signed response is still valid when issued.
+    Validation::new().with_leeway(0).validate(&payload)?;
 
     if let Some(metadata_val) = metadata {
         payload
             .extra
             .insert("metadata".to_string(), json!(metadata_val));
     }
-    let trust_chain: Vec<String> = result.iter().map(|x| x.jwt.clone()).collect();
+    let trust_chain: Vec<&str> = result.iter().map(|entry| entry.jwt.as_str()).collect();
     payload
         .extra
-        .insert("trust_chain".to_string(), json!(trust_chain.clone()));
+        .insert("trust_chain".to_string(), json!(trust_chain));
 
     if let Some(tms) = trust_marks
         && !tms.is_empty()
@@ -2355,20 +2245,11 @@ fn create_resolve_response_jwt(
         payload.extra.insert("trust_marks".to_string(), json!(tms));
     }
 
-    // Signing JWT
-    let keydata = &*PRIVATE_KEY.clone();
-    let key = jwk_from_bytes(keydata)?;
-
-    // Spec §4.3 — also embed the chain in the JWS header. The payload claim
-    // is retained for clients that read the chain from the payload; the
-    // header parameter lets recipients short-circuit chain resolution
-    // without parsing the payload.
-    create_signed_jwt_with_header(
-        &payload,
-        &key,
-        Some("resolve-response+jwt"),
-        Some(&trust_chain),
-    )
+    // Section 8.3.2 puts the subject's chain in the payload. The optional
+    // protected header would require a separately validated chain for this
+    // resolver as issuer, which this walk did not establish.
+    let key = jwk_from_bytes(&PRIVATE_KEY)?;
+    create_signed_jwt(&payload, &key, Some("resolve-response+jwt"))
 }
 
 /// Verify a trust mark JWT issued by *this* TA.
@@ -2829,22 +2710,6 @@ async fn verify_single_trust_mark(
     true
 }
 
-/// Verify every trust mark on a subject and return the subset that the federation
-/// recognises and which are currently active.
-///
-/// Reads the TA's own entity configuration from Redis (`inmor:entity_id`) to get
-/// the `trust_mark_issuers` claim — the federation-wide trusted issuer list (per
-/// spec §3.1.2). For each entry in the subject's `trust_marks` array:
-///
-/// * Skip if the mark's `trust_mark_type` is not a key in `trust_mark_issuers`.
-/// * If the allowed-issuer list for that type is empty, any issuer is acceptable
-///   (per spec §3.1.2: "anyone MAY issue Trust Marks with that identifier").
-/// * Otherwise, the unverified `iss` from the trust mark JWT must appear in the
-///   list.
-/// * Finally, `verify_single_trust_mark` must report `true`.
-///
-/// The original `{trust_mark, trust_mark_type}` objects are returned unchanged so
-/// they can be embedded verbatim in the resolve response (per spec §8.3.2).
 /// Loads the federation recognition maps (`trust_mark_issuers` /
 /// `trust_mark_owners`) from inmor's own published Entity Configuration
 /// (`inmor:entity_id`). Returns empty maps when the EC is missing or its
@@ -2874,6 +2739,10 @@ pub async fn load_inmor_recognition_maps(
             return (Map::new(), TrustMarkOwners::default());
         }
     };
+    recognition_maps(&ta_payload)
+}
+
+fn recognition_maps(ta_payload: &Claims) -> (Map<String, Value>, TrustMarkOwners) {
     let issuers = ta_payload
         .extra
         .get("trust_mark_issuers")
@@ -2883,7 +2752,7 @@ pub async fn load_inmor_recognition_maps(
     // FAIL-CLOSED on malformed `trust_mark_owners`: a broken owners claim in
     // the TA's own EC would otherwise silently disable delegation enforcement
     // for any owned type also listed in `trust_mark_issuers`.
-    let owners = match TrustMarkOwners::from_ta_payload(&ta_payload) {
+    let owners = match TrustMarkOwners::from_ta_payload(ta_payload) {
         Ok(o) => o,
         Err(e) => {
             warn!(
@@ -2893,27 +2762,6 @@ pub async fn load_inmor_recognition_maps(
         }
     };
     (issuers, owners)
-}
-
-/// Thin wrapper over `verify_trust_marks` that sources the federation
-/// recognition maps from inmor's own published Entity Configuration. Used by
-/// `/resolve`.
-async fn verify_trust_marks_for_resolve(
-    subject_payload: &Claims,
-    ta_entity_id: &str,
-    ta_public_keyset: &JwkSet,
-    conn: &mut redis::aio::ConnectionManager,
-) -> Vec<Value> {
-    let (trust_mark_issuers, trust_mark_owners) = load_inmor_recognition_maps(conn).await;
-    verify_trust_marks(
-        subject_payload,
-        ta_entity_id,
-        ta_public_keyset,
-        &trust_mark_issuers,
-        &trust_mark_owners,
-        conn,
-    )
-    .await
 }
 
 /// Core trust-mark verification: given the federation recognition maps
@@ -3088,70 +2936,52 @@ pub async fn resolve_entity(
     redis: web::Data<redis::Client>,
     state: web::Data<AppState>,
 ) -> actix_web::Result<HttpResponse> {
-    let mut found_ta = false;
     let ResolveParams {
         sub,
         trust_anchors,
         entity_type,
     } = info.into_inner();
-    let tas: Vec<&str> = trust_anchors.iter().map(|s| s as &str).collect();
-    let mut visisted: HashSet<String> = HashSet::new();
+    // Request parameters select from operator trust decisions. They cannot
+    // introduce a new anchor or supply verification keys.
+    let anchors: HashMap<_, _> = trust_anchors
+        .iter()
+        .filter_map(|id| state.anchor_keys(id).map(|keys| (id.as_str(), keys)))
+        .collect();
+    if anchors.is_empty() {
+        return error_response_404(
+            "invalid_trust_anchor",
+            "No requested trust anchor is configured",
+        );
+    }
     let mut conn = redis
         .get_connection_manager()
         .await
         .map_err(error::ErrorInternalServerError)?;
-    // Now loop over the trust_anchors
-    let result =
-        match resolve_entity_to_trustanchor(&sub, tas, true, &mut visisted, 0, &mut conn, None)
-            .await
-        {
-            Ok(res) => res,
-            Err(e) => {
-                warn!("Error resolving entity {} to trust anchors: {}", sub, e);
-                // Spec §10.5 — a transient fetch failure surfaces as
-                // HTTP 503 + `Retry-After` so the client can back off and
-                // retry. Permanent failures keep the existing 400
-                // `invalid_trust_chain` shape.
-                if let Some(fe) = e.downcast_ref::<FetchError>()
-                    && fe.transient
-                {
-                    let retry_after = fe.retry_after_seconds.unwrap_or(DEFAULT_RETRY_AFTER_SECS);
-                    return Ok(HttpResponse::ServiceUnavailable()
-                        .insert_header(("Retry-After", retry_after.to_string()))
-                        .json(json!({
-                            "error": "temporarily_unavailable",
-                            "error_description": fe.message,
-                        })));
-                }
-                // Surface the underlying error message. The early walker
-                // returns from this branch are dominated by leaf EC
-                // self-verification failures (bad signature, missing
-                // jwks, unknown critical claim per §3.1.1, iss != sub)
-                // -- exactly the cases where a precise reason helps the
-                // operator diagnose a federation misconfiguration. The
-                // messages come from internal verifier code, not user
-                // input, so echoing them is safe.
-                return error_response_400(
-                    "invalid_trust_chain",
-                    &format!("Failed to find trust chain: {e}"),
-                );
+    let result = match resolve_entity_to_trustanchor(&sub, &anchors).await {
+        Ok(res) => res,
+        Err(e) => {
+            warn!("Error resolving entity {} to trust anchors: {}", sub, e);
+            // Spec §10.5 — a transient fetch failure surfaces as
+            // HTTP 503 + `Retry-After` so the client can back off and
+            // retry. Permanent failures keep the existing 400
+            // `invalid_trust_chain` shape.
+            if let Some(fe) = e.downcast_ref::<FetchError>()
+                && fe.transient
+            {
+                let retry_after = fe.retry_after_seconds.unwrap_or(DEFAULT_RETRY_AFTER_SECS);
+                return Ok(HttpResponse::ServiceUnavailable()
+                    .insert_header(("Retry-After", retry_after.to_string()))
+                    .json(json!({
+                        "error": "temporarily_unavailable",
+                        "error_description": fe.message,
+                    })));
             }
-        };
-
-    // Verify that the result is not empty and we actually found a TA
-    if result.is_empty() {
-        warn!("Empty trust chain result for entity: {}", sub);
-        return error_response_400("invalid_trust_chain", "Failed to find trust chain");
-    }
-    if result.iter().any(|i| i.taresult) {
-        // Means we found our trust anchor
-        // FOUND_TA: Here if verify if we actually found any of the TA we wanted.
-        found_ta = true;
-    }
-    if !found_ta {
-        warn!("No trust anchor found in chain for entity: {}", sub);
-        return error_response_400("invalid_trust_chain", "Failed to find trust chain");
-    }
+            return error_response_400(
+                "invalid_trust_chain",
+                &format!("Failed to find trust chain: {e}"),
+            );
+        }
+    };
 
     // Per spec §8.3: "The resolver MUST verify that all present Trust Marks with
     // identifiers recognized within the Federation are active. The response set
@@ -3161,12 +2991,17 @@ pub async fn resolve_entity(
     // The whole phase runs under a wall-clock budget — combined with
     // MAX_TRUST_MARKS_PER_RESOLVE, this bounds the worst-case worker-thread
     // time a malicious subject EC can cause.
+    // Recognition policy belongs to the validated anchor at the end of THIS
+    // chain. Only this server's own issuer uses the local Redis status store.
+    let (issuers, owners) = recognition_maps(&result.last().expect("complete chain").payload);
     let verified_trust_marks = match tokio::time::timeout(
         Duration::from_secs(TRUST_MARK_VERIFICATION_BUDGET_SECS),
-        verify_trust_marks_for_resolve(
+        verify_trust_marks(
             &result[0].payload,
             &state.entity_id,
             &state.public_keyset,
+            &issuers,
+            &owners,
             &mut conn,
         ),
     )
@@ -3191,7 +3026,6 @@ pub async fn resolve_entity(
 
     // We need to skip the top one (the trust anchor's entity configuration)
     for (i, res) in reversed.iter().enumerate().skip(1) {
-        println!("\n{:?}\n", res.payload);
         mpolicy = match mpolicy {
             // This is when we have some policy the higher subordinate statement
             Some(val) => {
@@ -3315,8 +3149,17 @@ pub async fn resolve_entity(
     let filtered_metadata = filter_metadata_by_entity_types(mpolicy, entity_type.as_ref());
 
     // If we reach here means we have a list of JWTs and also verified metadata.
-    let resp = create_resolve_response_jwt(&state, &sub, &result, filtered_metadata, trust_marks)
-        .map_err(error::ErrorInternalServerError)?;
+    let resp =
+        match create_resolve_response_jwt(&state, &sub, &result, filtered_metadata, trust_marks) {
+            Ok(jwt) => jwt,
+            Err(JoseError::Expired) => {
+                return error_response_400(
+                    "invalid_trust_chain",
+                    "Resolution expired before signing",
+                );
+            }
+            Err(e) => return Err(error::ErrorInternalServerError(e)),
+        };
     Ok(HttpResponse::Ok()
         .insert_header(("content-type", "application/resolve-response+jwt"))
         .body(resp))
@@ -3614,9 +3457,10 @@ pub async fn trust_mark_query(
 
 /// Fetches the subordinate statement from authority
 pub async fn fetch_subordinate_statement(fetch_url: &str, entity_id: &str) -> Result<String> {
-    let url = format!("{fetch_url}?sub={entity_id}");
+    let mut url = url::Url::parse(fetch_url)?;
+    url.query_pairs_mut().append_pair("sub", entity_id);
     debug!("FETCH {url}");
-    return get_query(&url).await;
+    get_query(url.as_str()).await
 }
 
 /// Get the entity configuration for a given entity_id
@@ -4375,6 +4219,7 @@ mod tests {
         let key = jwk_from_bytes(&PRIVATE_KEY).expect("read TA signing key");
         let state = web::Data::new(AppState {
             entity_id: "https://ta.example".to_string(),
+            trusted_anchors: HashMap::new(),
             public_keyset: JwkSet {
                 keys: vec![key.to_public_jwk()],
             },
@@ -4387,7 +4232,7 @@ mod tests {
                 ..Claims::default()
             };
             let wire = create_signed_jwt(&statement, &key, Some("entity-statement+jwt")).unwrap();
-            let chain = [VerifiedJWT::new(wire, &statement, false, false)];
+            let chain = [VerifiedJWT::new(wire, &statement, false)];
             let mark = Claims {
                 exp: Some(mark_exp),
                 ..Claims::default()
@@ -4407,6 +4252,26 @@ mod tests {
                     .unwrap();
             assert_eq!(claims.exp, Some(earlier));
         }
+    }
+
+    #[test]
+    fn resolve_refuses_to_sign_after_chain_expiry() {
+        let state = web::Data::new(AppState {
+            entity_id: "https://ta.example".into(),
+            public_keyset: JwkSet { keys: vec![] },
+            trusted_anchors: HashMap::new(),
+        });
+        // The chain was verified before the trust-mark status requests.
+        // Model their elapsed time without sleeping or depending on the clock.
+        let statement = Claims {
+            exp: Some(NumericDate::from(1)),
+            ..Claims::default()
+        };
+        let chain = [VerifiedJWT::new(String::new(), &statement, false)];
+        assert!(matches!(
+            create_resolve_response_jwt(&state, "https://subject.example", &chain, None, None),
+            Err(JoseError::Expired)
+        ));
     }
 
     /// Load the private key from ./privatekeys whose `alg` matches.
@@ -5040,8 +4905,7 @@ mod tests {
     #[test]
     fn test_create_signed_jwt_without_header_omits_trust_chain() {
         // Guardrail: the plain `create_signed_jwt` MUST NOT emit a
-        // `trust_chain` header — that header is reserved for explicit
-        // produce-on-resolve callers.
+        // `trust_chain` header without a separately supplied issuer chain.
         let key = first_private_key();
         let mut payload = Claims::default();
         payload.iss = Some("https://issuer.example".to_string());

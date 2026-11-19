@@ -20,10 +20,7 @@ file_dir = os.path.dirname(os.path.abspath(__file__))
 # /.well-known/openid-federation. Because `resolve_entity_to_trustanchor`
 # self-verifies the TA's entity configuration during chain validation, we
 # must re-sign the JWT after editing the payload — see `_repatch_ta_ec()`.
-# The TA's resolve trust-mark gate intentionally trusts Redis (uses
-# `get_unverified_payload_header`) so the re-signed JWT just needs to be
-# decodable; the signature is checked by chain validation which uses the
-# inline `jwks` claim.
+# Recognition uses the verified anchor EC returned in the chain.
 
 _TM_TYPE = "https://sunet.se/does_not_exist_trustmark"
 _TA_ENTITY_ID = "https://localhost:8080"

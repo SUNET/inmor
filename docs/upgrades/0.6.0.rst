@@ -8,6 +8,12 @@ Before rollout
 
 * If you use the bundled PostgreSQL 14 or 15 database, follow
   :doc:`../postgresql-upgrade` before starting the 0.6.0 stack.
+* If clients use ``/resolve`` with an external trust anchor, provision its
+  public keys before rollout. The local anchor uses its existing public keys.
+  See :ref:`resolver-trust-anchors`.
+* Check that resolve clients read the subject's ``trust_chain`` from the signed
+  payload. Earlier versions also copied it into the JWS header. In 0.6.0
+  the chain appears only in the payload.
 * Identify the people who manage the federation through the Admin UI and the
   accounts that own keys used by automation. With the current Admin checkout,
   run ``python manage.py apikey list --all`` to see key owners. Confirm that
@@ -69,4 +75,5 @@ Verify before resuming automation
   authorized operator and confirm that it lists the expected subordinates.
 * Retrieve ``/.well-known/openid-federation`` from the Trust Anchor and verify
   its signature with your federation client. Resolve a known subordinate and
-  confirm that the chain still leads to the expected Trust Anchor.
+  confirm that the chain still leads to the expected Trust Anchor. Repeat
+  for each external anchor your clients request.
