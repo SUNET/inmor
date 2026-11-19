@@ -41,8 +41,9 @@ Update all of these together when bumping the version:
      - Image tags in the compose example and the ``inmor-keygeneration``
        command
    * - ``CHANGELOG.md``
-     - Rename ``Unreleased`` to ``<version> - <YYYY-MM-DD>`` with a
-       ``changelog-<version>`` anchor
+     - Use ``<version> - Unreleased`` with a ``changelog-<version>`` anchor
+       during development. Replace ``Unreleased`` with the release date
+       when cutting the release.
 
 The compose image tags matter at runtime, not just for documentation: the
 root ``docker-compose.yml`` bind-mounts ``./templates`` into the TA
@@ -66,6 +67,10 @@ When adding a new file that pins an inmor image tag or version, add it to
 
 Release steps
 -------------
+
+Keep the version's guide in ``docs/upgrades/`` current as changes land.
+Record any operator action and how to check its result. Link the guide from
+the changelog and the documentation index.
 
 1. Update every version reference listed above, then run ``cargo build``,
    ``uv lock`` and ``uv lock`` in ``admin/`` to refresh the lockfiles.

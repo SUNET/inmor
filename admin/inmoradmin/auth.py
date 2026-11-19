@@ -7,7 +7,7 @@ subclassing ``AuthBackend`` and appending to ``CombinedAuthentication.backends``
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from django.contrib.auth import logout
 from django.contrib.auth.models import User
@@ -15,8 +15,10 @@ from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import CsrfViewMiddleware
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from ninja import Router, Schema
+from ninja.errors import AuthorizationError
 from ninja.security.apikey import APIKeyBase
 
+from apikeys.models import APIKey
 
 # ---------------------------------------------------------------------------
 # Auth result and backend protocol
@@ -36,6 +38,7 @@ class AuthResult:
     auth_method: str  # "session", "api_key", or future plugin names
     api_key_name: str | None = None  # Name of the API key used (None for session)
     tenant: str = "default"  # Tenant identifier
+    api_key: APIKey | None = field(default=None, repr=False, compare=False)
 
 
 class AuthBackend:
@@ -60,17 +63,15 @@ class APIKeyAuthBackend(AuthBackend):
         if not key:
             return None
 
-        from apikeys.models import APIKey
-
-        result = APIKey.authenticate(key)
-        if result is None:
+        api_key = APIKey.get_valid_key(key)
+        if api_key is None:
             return None
 
-        user, api_key = result
         return AuthResult(
-            user=user,
+            user=api_key.user,
             auth_method="api_key",
             api_key_name=api_key.name,
+            api_key=api_key,
             tenant=api_key.tenant,
         )
 
@@ -142,6 +143,12 @@ class CombinedAuthentication(APIKeyBase):
         for backend in self.backends:
             result = backend.authenticate(request)
             if result is not None:
+                if not result.user.is_active or not result.user.has_perm(
+                    "entities.manage_federation"
+                ):
+                    raise AuthorizationError()
+                if result.api_key is not None:
+                    result.api_key.update_last_used()
                 request.auth_result = result  # type: ignore[attr-defined]
                 return result.user
         return None

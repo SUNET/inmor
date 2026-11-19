@@ -1,0 +1,72 @@
+Upgrade to Inmor 0.6.0
+======================
+
+This guide covers upgrading from 0.5.1. Version 0.6.0 is in development.
+
+Before rollout
+--------------
+
+* If you use the bundled PostgreSQL 14 or 15 database, follow
+  :doc:`../postgresql-upgrade` before starting the 0.6.0 stack.
+* Identify the people who manage the federation through the Admin UI and the
+  accounts that own keys used by automation. With the current Admin checkout,
+  run ``python manage.py apikey list --all`` to see key owners. Confirm that
+  you can sign in to Django admin as an active superuser to grant access.
+* Check the signing algorithms used by your federation peers. Admin now
+  applies the Trust Anchor's allowlist during onboarding, self-verification
+  and renewal. Peers using ``RS384``, ``RS512``, ``PS384``, ``PS512`` or HMAC
+  must switch to a supported algorithm before rollout. Each statement's
+  ``kid`` must identify one verification key, and JWT payload member names
+  must be unique. See :ref:`signature-algorithms` for the accepted algorithms.
+* Existing signing keys and issued statements retain their format. Adopting
+  post-quantum signatures is optional. If you plan to rotate to one of the
+  new algorithms, confirm peer support first. See :ref:`pqc-signing-keys`.
+
+Deploy and grant operator access
+--------------------------------
+
+1. Deploy the 0.6.0 Trust Anchor and Admin together with the matching
+   templates and frontend, if used. Keep the existing signing keys and MFA
+   encryption key. The Admin container runs Django migrations at startup.
+   For a source deployment, build the Trust Anchor with ``cargo build
+   --release --locked``. From ``admin/``, run ``uv sync --locked`` and
+   ``uv run python manage.py migrate`` with the deployment's settings.
+   In Compose, check the applied migration::
+
+      docker compose exec -T admin python manage.py showmigrations entities
+
+   Look for ``[X] 0004_manage_federation_permission`` before assigning access.
+
+2. In Django admin (``/admin/``), open **Groups**, create or edit an operator
+   group, and add **Can manage the federation**
+   (``entities.manage_federation``). Under **Users**, assign the
+   group to each intended operator and API key owner. Active superusers
+   already have the permission. Service accounts need no staff status.
+   Automation can keep using its existing keys. Each key uses its owner's
+   current permissions on every request.
+
+3. Provision future accounts through your administrator. Public signup is
+   closed. Staff sign in through allauth and complete any enrolled MFA
+   challenge. Existing sessions keep their expiry. If staff must authenticate
+   again at cutover, invalidate their existing sessions. See :doc:`../guides/mfa`
+   for enrollment and recovery.
+
+Verify before resuming automation
+---------------------------------
+
+* From the management network, make a read-only request using an existing
+  operator key. Set ``ADMIN_URL`` to the HTTPS origin of your Admin service
+  and ``INMOR_API_KEY`` to that key::
+
+     curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
+       --header "X-API-Key: $INMOR_API_KEY" "$ADMIN_URL/api/v1/trustmarktypes"
+
+  Expect HTTP 200. HTTP 403 with a valid key means its owner lacks the
+  operator permission. HTTP 401 means the key failed authentication. See
+  :doc:`../guides/api-keys` to check its status.
+* In a fresh browser session, open ``/admin/`` as a staff member with an
+  enrolled factor and complete the MFA challenge. Open the Admin UI as an
+  authorized operator and confirm that it lists the expected subordinates.
+* Retrieve ``/.well-known/openid-federation`` from the Trust Anchor and verify
+  its signature with your federation client. Resolve a known subordinate and
+  confirm that the chain still leads to the expected Trust Anchor.

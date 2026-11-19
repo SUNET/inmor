@@ -100,9 +100,10 @@ AUTHENTICATION_BACKENDS = [
 ACCOUNT_LOGIN_METHODS = {"email", "username"}
 ACCOUNT_SIGNUP_FIELDS = ["email", "username*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "none"  # For development; set to "mandatory" in production
-ACCOUNT_ALLOW_SIGNUPS = False  # Disable public registration; only admins can create users
+ACCOUNT_ADAPTER = "common.account_adapter.ClosedSignupAdapter"
 
 # Login/logout redirect URLs (relative paths work with nginx proxy)
+LOGIN_URL = "account_login"
 LOGIN_REDIRECT_URL = os.environ.get("LOGIN_REDIRECT_URL", "/")
 LOGOUT_REDIRECT_URL = os.environ.get("LOGOUT_REDIRECT_URL", "/login")
 

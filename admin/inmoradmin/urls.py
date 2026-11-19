@@ -15,11 +15,17 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from allauth.account.decorators import secure_admin_login
 from django.contrib import admin
 from django.urls import include, path
+from django.views.decorators.http import require_safe
 
 from . import views
 from .api import api
+
+# allauth redirects anonymous users, but passes authenticated staff to this
+# view. Only allow navigation there: the stock POST would accept a password.
+admin.site.login = secure_admin_login(require_safe(admin.site.login))
 
 urlpatterns = [
     path("trustmarks/", include("trustmarks.urls")),

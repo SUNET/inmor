@@ -1,6 +1,14 @@
-# Unreleased
+<a id='changelog-0.6.0'></a>
+# 0.6.0 - Unreleased
+
+See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verification.
 
 ## Breaking changes
+
+- The Admin UI and protected management API now require the Django permission
+  `entities.manage_federation`. Grant it to existing non-superuser operators
+  and API key owners during rollout. Public signup is closed, and Django admin
+  login now uses allauth, including any enrolled MFA challenge.
 
 - Admin federation verification now uses the TA signature allowlist. Peers
   using RS384, RS512, PS384, PS512 or HMAC must switch before upgrading.

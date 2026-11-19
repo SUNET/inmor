@@ -134,21 +134,18 @@ class APIKey(models.Model):
         return api_key, full_key
 
     @classmethod
-    def authenticate(cls, key: str) -> tuple[User, "APIKey"] | None:
-        """Authenticate using an API key.
-
-        Args:
-            key: The plaintext API key
-
-        Returns:
-            (User, APIKey) tuple if authentication succeeds, None otherwise
-        """
-        key_hash = hash_api_key(key)
+    def get_valid_key(cls, key: str) -> "APIKey | None":
         try:
-            api_key = cls.objects.select_related("user").get(key_hash=key_hash)
-            if api_key.is_valid:
-                api_key.update_last_used()
-                return api_key.user, api_key
+            api_key = cls.objects.select_related("user").get(key_hash=hash_api_key(key))
         except cls.DoesNotExist:
-            pass
-        return None
+            return None
+        return api_key if api_key.is_valid else None
+
+    @classmethod
+    def authenticate(cls, key: str) -> tuple[User, "APIKey"] | None:
+        """Authenticate the key and record its use."""
+        api_key = cls.get_valid_key(key)
+        if api_key is None:
+            return None
+        api_key.update_last_used()
+        return api_key.user, api_key

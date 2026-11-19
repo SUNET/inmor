@@ -25,6 +25,7 @@ class Subordinate(models.Model):
         return self.entityid
 
     class Meta:
+        permissions = [("manage_federation", "Can manage the federation")]
         indexes = [
             models.Index(fields=["entityid"]),
             models.Index(fields=["valid_for"]),
