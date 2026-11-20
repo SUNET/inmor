@@ -176,14 +176,22 @@ def merge_our_policy_ontop_subpolicy(subpolicy: dict[Any, Any]) -> str | None:
     return None
 
 
-def apply_server_policy(metadata: str, forced_metadata: dict[str, Any] | None = None) -> str:
-    """Return resolved metadata as JSON, raising RuntimeError on a policy violation."""
+def apply_server_policy(
+    metadata: str,
+    forced_metadata: dict[str, Any] | None = None,
+    *,
+    additional_claims: dict[str, Any] | None = None,
+) -> str:
+    """Apply the issuing superior's overrides, policy, and critical declaration to the metadata."""
     policy = settings.POLICY_DOCUMENT.get("metadata_policy", {})
     # oidfpolicy reads statement claims. Mirror the issuer, which omits the
     # default empty policy and places superior overrides under "metadata".
     document = {} if policy == {} else {"metadata_policy": policy}
     if forced_metadata is not None:
         document["metadata"] = forced_metadata
+    # Preserve an explicitly null or empty declaration so oidfpolicy can reject it.
+    if additional_claims is not None and "metadata_policy_crit" in additional_claims:
+        document["metadata_policy_crit"] = additional_claims["metadata_policy_crit"]
     return apply_policy(json.dumps(document), metadata)
 
 

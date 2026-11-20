@@ -4,11 +4,15 @@ import os
 import socket
 from typing import Any
 
+import httpx
 import pytest
+from django.core.management import call_command
 from django.test import Client
 from pyjosers import jwt
 
+from common.signing import create_signed_jwt
 from entities.lib import self_validate
+from entities.models import Subordinate
 
 # from pprint import pprint
 
@@ -624,6 +628,63 @@ def test_subordinate_create_rejects_protected_additional_claim(auth_client, prot
     assert response.status_code == 422
     assert protected_claim in response.content.decode()
     assert not Subordinate.objects.filter(entityid=entity_id).exists()
+
+
+@pytest.mark.django_db
+def test_critical_policy_checked_before_issuing_subordinate(
+    auth_client, loadredis, settings, monkeypatch, capsys
+):
+    """Check proposed and stored declarations before a statement reaches the database or Redis."""
+    entity = "https://rp.example"
+    endpoint = "/api/v1/subordinates"
+    metadata = {"federation_entity": {"organization_name": "Campus"}}
+    key = settings.SIGNING_PRIVATE_KEY
+    keys = {"keys": [key.export_public(as_dict=True)]}
+    claims = {"iss": entity, "sub": entity, "jwks": keys, "authority_hints": [settings.TA_DOMAIN]}
+    wire = create_signed_jwt({**claims, "metadata": metadata}, key, "entity-statement+jwt")
+    monkeypatch.setattr("entities.lib._federation_get", lambda url: httpx.Response(200, text=wire))
+
+    data = {"entityid": entity, "metadata": metadata, "forced_metadata": {}, "jwks": keys}
+    critical = {"metadata_policy_crit": ["extension"]}
+    response = auth_client.post(
+        endpoint, {**data, "additional_claims": critical}, "application/json"
+    )
+    assert response.status_code == 400
+    assert "unsupported critical" in response.json()["message"]
+    assert not Subordinate.objects.filter(entityid=entity).exists()
+    assert loadredis.hget("inmor:subordinates", entity) is None
+
+    # An ordinary extension remains in the signed statement.
+    extra = {"example_claim": "campus"}
+    response = auth_client.post(endpoint, {**data, "additional_claims": extra}, "application/json")
+    assert response.status_code == 201
+    sub = Subordinate.objects.get(entityid=entity)
+    previous = sub.statement
+    assert previous is not None
+    assert get_payload(previous)["example_claim"] == "campus"
+    url = f"{endpoint}/{sub.pk}"
+    response = auth_client.post(
+        url, {**data, "additional_claims": {"metadata_policy_crit": None}}, "application/json"
+    )
+    assert response.status_code == 400
+    assert "metadata_policy_crit" in response.json()["message"]
+    sub.refresh_from_db()
+    assert (sub.statement, sub.additional_claims) == (previous, extra)
+
+    # Both renewal paths can encounter declarations stored before this check existed.
+    sub.additional_claims = critical
+    sub.save(update_fields=["additional_claims"])
+    response = auth_client.post(f"{url}/renew")
+    assert response.status_code == 400
+    assert "unsupported critical" in response.json()["message"]
+    Subordinate.objects.exclude(pk=sub.pk).update(active=False)
+    call_command("renew_subordinates")
+    output = capsys.readouterr().out
+    assert "FAILED (policy apply: unsupported critical" in output
+    assert "0/1 renewed, 1 failed" in output
+    sub.refresh_from_db()
+    assert sub.statement == previous
+    assert loadredis.hget("inmor:subordinates", entity) == previous.encode()
 
 
 @pytest.mark.django_db
