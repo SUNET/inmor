@@ -5,16 +5,19 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
+  // Preserve the browser's Host (including its port) for allauth redirects and CSRF.
+  const django = { target: 'http://127.0.0.1:8000', changeOrigin: false }
+
   return {
     plugins: [vue()],
     server: {
       port: 5173,
       host: true,
       proxy: {
-        '/api': {
-          target: 'http://localhost:8000',
-          changeOrigin: true,
-        },
+        '/api/': django,
+        '/accounts/': django,
+        '/admin/': django,
+        '/static/': django,
       },
     },
     build: {

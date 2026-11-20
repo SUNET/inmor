@@ -5,7 +5,6 @@ declare module 'vue' {
     interface ComponentCustomProperties {
         $sdk: AdminSDK;
         $router: Router;
-        $resetAuth: () => void;
     }
 }
 

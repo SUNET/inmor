@@ -5,6 +5,8 @@ import Heading from '../components/base/Heading.vue';
 import Button from '../components/base/Button.vue';
 import Badge from '../components/base/Badge.vue';
 import DataTable from '../components/base/DataTable.vue';
+import Pagination from '../components/base/Pagination.vue';
+import { usePagedList } from '../lib/pagination';
 import Modal from '../components/base/Modal.vue';
 import Input from '../components/base/Input.vue';
 import Toggle from '../components/base/Toggle.vue';
@@ -40,6 +42,7 @@ export default defineComponent({
         Button,
         Badge,
         DataTable,
+        Pagination,
         Modal,
         Input,
         Toggle,
@@ -51,11 +54,11 @@ export default defineComponent({
         Download,
         RefreshCw,
     },
+    setup() {
+        return usePagedList<Subordinates>('subordinates');
+    },
     data() {
         return {
-            loading: true,
-            error: null as string | null,
-            subordinates: null as Subordinates | null,
             columns: [
                 { key: 'id', label: 'ID', width: '80px' },
                 { key: 'entityid', label: 'Entity ID' },
@@ -104,17 +107,9 @@ export default defineComponent({
                 minute: '2-digit',
             });
         },
-        async loadData() {
-            this.loading = true;
-            this.error = null;
-            try {
-                this.subordinates = await this.$sdk.listSubordinates({ limit: 25 });
-            } catch (e) {
-                this.error = 'Failed to load subordinates. Please try again later.';
-                console.error(e);
-            } finally {
-                this.loading = false;
-            }
+        /** Refresh the displayed page or navigate to the requested offset. */
+        loadData(offset?: number) {
+            return this.loadPage(filters => this.$sdk.listSubordinates(filters), offset);
         },
         formatHours(hours: number | null): string {
             if (hours === null) return 'Default';
@@ -263,7 +258,7 @@ export default defineComponent({
             }
             if (!skipDuplicateCheck) {
                 // Check if this entity ID already exists as a subordinate
-                const existingSubordinate = this.subordinates?.items.find(
+                const existingSubordinate = this.page?.items.find(
                     (sub) => sub.entityid === this.formData.entityid
                 );
                 if (existingSubordinate) {
@@ -275,11 +270,16 @@ export default defineComponent({
             this.formError = null;
             try {
                 const config = await this.$sdk.fetchEntityConfig(this.formData.entityid);
-                // Populate the form fields with fetched data
-                this.formData.metadata = config.metadata || {};
-                this.formData.jwks = config.jwks || { keys: [] };
-                // Clear JSON errors since we just set valid JSON
-                this.jsonErrors = { metadata: null, forced_metadata: null, jwks: null, additional_claims: null };
+                this.formData.metadata = config.metadata;
+                this.jsonErrors.metadata = null;
+                // Preserve manually entered keys when discovery only supplies a URI.
+                if (config.jwks === null) {
+                    const source = config.jwks_uri ? ` from ${config.jwks_uri}` : '';
+                    this.formError = `No public keys were retrieved${source}. Review or enter the JWKS before saving.`;
+                } else {
+                    this.formData.jwks = config.jwks;
+                    this.jsonErrors.jwks = null;
+                }
             } catch (e: any) {
                 this.formError = e.message || 'Failed to fetch entity configuration';
                 console.error(e);
@@ -305,7 +305,7 @@ export default defineComponent({
 
         <DataTable
             :columns="columns"
-            :data="subordinates?.items || []"
+            :data="page?.items || []"
             :loading="loading"
             empty-message="No subordinates found. Add one to get started."
         >
@@ -346,6 +346,7 @@ export default defineComponent({
                 </div>
             </template>
         </DataTable>
+        <Pagination :offset="offset" :count="page?.count ?? 0" :loading="loading" @navigate="loadData" />
 
         <!-- Create Modal -->
         <Modal :open="showCreateModal" title="Add Subordinate" size="lg" @close="closeModals">
@@ -362,7 +363,7 @@ export default defineComponent({
                     <Button
                         type="button"
                         :loading="fetchLoading"
-                        @click="fetchConfiguration"
+                        @click="fetchConfiguration()"
                         class="fetch-config-btn"
                     >
                         <Download :size="16" />

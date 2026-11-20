@@ -138,10 +138,12 @@ export const SubordinatesSchema = object({
     count: number(),
 });
 
+/** Configuration discovery can succeed even when the remote keys are unavailable. */
 export type EntityConfig = InferOutput<typeof EntityConfigSchema>;
 export const EntityConfigSchema = object({
     metadata: record(string(), unknown()),
-    jwks: record(string(), unknown()),
+    jwks: nullable(record(string(), unknown())),
+    jwks_uri: optional(nullable(string())),
     authority_hints: optional(nullable(array(string()))),
     trust_marks: optional(nullable(array(record(string(), unknown())))),
 });

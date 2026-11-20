@@ -12,6 +12,18 @@ export const routes = [
         meta: { requiresAuth: false, layout: 'none', title: 'Login' },
     },
     {
+        path: '/access-denied',
+        name: 'access-denied',
+        component: LoginView,
+        meta: { layout: 'none', title: 'Access denied' },
+    },
+    {
+        path: '/service-unavailable',
+        name: 'service-unavailable',
+        component: LoginView,
+        meta: { layout: 'none', title: 'Service unavailable' },
+    },
+    {
         path: '/',
         name: 'home',
         component: HomeView,

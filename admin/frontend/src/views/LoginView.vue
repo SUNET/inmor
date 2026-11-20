@@ -5,33 +5,17 @@ import Button from '../components/base/Button.vue';
 export default defineComponent({
     name: 'LoginView',
     components: { Button },
-    data() {
-        return {
-            checking: true,
-        };
-    },
-    async mounted() {
-        // Check if already authenticated
-        try {
-            const user = await this.$sdk.getCurrentUser();
-            if (user) {
-                // Already logged in, redirect to home
-                this.$router.push('/');
-            } else {
-                // Not authenticated, show login options
-                this.checking = false;
-            }
-        } catch {
-            // Error occurred, show login options
-            this.checking = false;
-        }
+    computed: {
+        /** Browser authentication always runs through Django allauth. */
+        accountsUrl(): string {
+            return `${import.meta.env.VITE_API_URL || ''}/accounts`;
+        },
     },
     methods: {
         redirectToLogin() {
             // Redirect to Django allauth login page
             // After successful login (including MFA), Django redirects back to frontend
-            const backendUrl = import.meta.env.VITE_API_URL || '';
-            window.location.href = `${backendUrl}/accounts/login/?next=${encodeURIComponent(window.location.origin + '/')}`;
+            window.location.href = `${this.accountsUrl}/login/?next=${encodeURIComponent(window.location.origin + '/')}`;
         },
     },
 });
@@ -46,8 +30,17 @@ export default defineComponent({
                 <p class="login-subtitle">Trust Anchor Admin</p>
             </header>
 
-            <div v-if="checking" class="login-checking">
-                Checking authentication...
+            <div v-if="$route.name === 'access-denied'" class="login-content">
+                <p class="login-message" role="alert">
+                    Your account does not have permission to manage this federation.
+                    Ask a federation administrator for access.
+                </p>
+                <RouterLink to="/">Check access again</RouterLink> · <a :href="`${accountsUrl}/logout/`">Sign out</a>
+            </div>
+
+            <div v-else-if="$route.name === 'service-unavailable'" class="login-content">
+                <p class="login-message" role="alert">Unable to check your access. The admin API is unavailable.</p>
+                <RouterLink to="/">Try again</RouterLink>
             </div>
 
             <div v-else class="login-content">
@@ -115,12 +108,6 @@ export default defineComponent({
     color: var(--ir--color--gray-600);
     font-size: var(--ir--font-size--s);
     margin-bottom: var(--ir--space--4);
-}
-
-.login-checking {
-    text-align: center;
-    color: var(--ir--color--gray-500);
-    font-size: var(--ir--font-size--s);
 }
 
 .login-button {

@@ -279,8 +279,8 @@ def create_trust_mark_type(request: HttpRequest, data: TrustMarkTypeSchema):
 def list_trust_mark_type(
     request: HttpRequest,
 ):
-    """Lists all existing TrustMarkType(s) from database."""
-    return TrustMarkType.objects.all()
+    """List trust mark types in stable ID order for offset pagination."""
+    return TrustMarkType.objects.order_by("pk")
 
 
 @router.get(
@@ -440,8 +440,8 @@ def get_trustmark_list_perdomain(request: HttpRequest, data: TrustMarkListSchema
 )
 @paginate(LimitOffsetPagination)
 def get_trustmark_list(request: HttpRequest):
-    """Returns a list of existing TrustMarks."""
-    return TrustMark.objects.all()
+    """List trust marks in stable ID order for offset pagination."""
+    return TrustMark.objects.order_by("pk")
 
 
 @router.post(
@@ -604,8 +604,8 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
 def list_trust_subordinates(
     request: HttpRequest,
 ):
-    """Lists all existing TrustMarkType(s) from database."""
-    return Subordinate.objects.all()
+    """List subordinates in stable ID order for offset pagination."""
+    return Subordinate.objects.order_by("pk")
 
 
 @router.get(

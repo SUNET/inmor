@@ -5,11 +5,13 @@ import Heading from '../components/base/Heading.vue';
 import Button from '../components/base/Button.vue';
 import Badge from '../components/base/Badge.vue';
 import DataTable from '../components/base/DataTable.vue';
+import Pagination from '../components/base/Pagination.vue';
+import { usePagedList } from '../lib/pagination';
 import Modal from '../components/base/Modal.vue';
 import Input from '../components/base/Input.vue';
 import Toggle from '../components/base/Toggle.vue';
 import JsonEditor from '../components/base/JsonEditor.vue';
-import type { TrustMark, TrustMarks, TrustMarkType, TrustMarkTypes } from '../lib/admin-sdk';
+import type { TrustMark, TrustMarks, TrustMarkType } from '../lib/admin-sdk';
 
 interface FormData {
     tmt: number | null;
@@ -34,6 +36,7 @@ export default defineComponent({
         Button,
         Badge,
         DataTable,
+        Pagination,
         Modal,
         Input,
         Toggle,
@@ -45,12 +48,11 @@ export default defineComponent({
         Copy,
         Check,
     },
+    setup() {
+        return usePagedList<TrustMarks & { types: TrustMarkType[] }>('trust marks');
+    },
     data() {
         return {
-            loading: true,
-            error: null as string | null,
-            trustMarks: null as TrustMarks | null,
-            trustMarkTypes: null as TrustMarkTypes | null,
             columns: [
                 { key: 'id', label: 'ID', width: '80px' },
                 { key: 'domain', label: 'Domain' },
@@ -79,35 +81,24 @@ export default defineComponent({
             return !!this.jsonError;
         },
         trustMarkTypesMap(): Map<number, TrustMarkType> {
-            const map = new Map<number, TrustMarkType>();
-            if (this.trustMarkTypes?.items) {
-                for (const type of this.trustMarkTypes.items) {
-                    map.set(type.id, type);
-                }
-            }
-            return map;
+            return new Map(this.page?.types.map(type => [type.id, type]));
         },
     },
     async mounted() {
         await this.loadData();
     },
     methods: {
-        async loadData() {
-            this.loading = true;
-            this.error = null;
-            try {
-                const [marks, types] = await Promise.all([
-                    this.$sdk.listTrustMarks({ limit: 25 }),
-                    this.$sdk.listTrustMarkTypes({ limit: 100 }),
-                ]);
-                this.trustMarks = marks;
-                this.trustMarkTypes = types;
-            } catch (e) {
-                this.error = 'Failed to load trust marks. Please try again later.';
-                console.error(e);
-            } finally {
-                this.loading = false;
-            }
+        /** Refresh the displayed page or navigate to the requested offset. */
+        loadData(offset?: number) {
+            return this.loadPage(async filters => {
+                const marks = await this.$sdk.listTrustMarks(filters);
+                let types = this.page?.types;
+                // Refresh after mutations and when a new page references a newly issued type.
+                if (!types || offset === undefined || marks.items.some(mark => !this.trustMarkTypesMap.has(mark.tmt_id))) {
+                    types = await this.$sdk.listAllTrustMarkTypes();
+                }
+                return { ...marks, types };
+            }, offset);
         },
         formatDate(dateStr: string): string {
             const date = new Date(dateStr);
@@ -287,7 +278,7 @@ export default defineComponent({
 
         <DataTable
             :columns="columns"
-            :data="trustMarks?.items || []"
+            :data="page?.items || []"
             :loading="loading"
             empty-message="No trust marks found. Issue one to get started."
         >
@@ -347,6 +338,7 @@ export default defineComponent({
                 </div>
             </template>
         </DataTable>
+        <Pagination :offset="offset" :count="page?.count ?? 0" :loading="loading" @navigate="loadData" />
 
         <!-- Create Modal -->
         <Modal :open="showCreateModal" title="Issue Trust Mark" @close="closeModals">
@@ -362,7 +354,7 @@ export default defineComponent({
                     >
                         <option :value="null" disabled>Select a type...</option>
                         <option
-                            v-for="type in trustMarkTypes?.items.filter(t => t.active)"
+                            v-for="type in page?.types.filter(t => t.active)"
                             :key="type.id"
                             :value="type.id"
                         >

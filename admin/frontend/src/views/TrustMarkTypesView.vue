@@ -5,6 +5,8 @@ import Heading from '../components/base/Heading.vue';
 import Button from '../components/base/Button.vue';
 import Badge from '../components/base/Badge.vue';
 import DataTable from '../components/base/DataTable.vue';
+import Pagination from '../components/base/Pagination.vue';
+import { usePagedList } from '../lib/pagination';
 import Modal from '../components/base/Modal.vue';
 import Input from '../components/base/Input.vue';
 import Toggle from '../components/base/Toggle.vue';
@@ -33,6 +35,7 @@ export default defineComponent({
         Button,
         Badge,
         DataTable,
+        Pagination,
         Modal,
         Input,
         Toggle,
@@ -40,11 +43,11 @@ export default defineComponent({
         Pencil,
         ShieldOff,
     },
+    setup() {
+        return usePagedList<TrustMarkTypes>('trust mark types');
+    },
     data() {
         return {
-            loading: true,
-            error: null as string | null,
-            trustMarkTypes: null as TrustMarkTypes | null,
             columns: [
                 { key: 'id', label: 'ID', width: '80px' },
                 { key: 'tmtype', label: 'Trust mark type' },
@@ -68,17 +71,9 @@ export default defineComponent({
         await this.loadData();
     },
     methods: {
-        async loadData() {
-            this.loading = true;
-            this.error = null;
-            try {
-                this.trustMarkTypes = await this.$sdk.listTrustMarkTypes({ limit: 25 });
-            } catch (e) {
-                this.error = 'Failed to load trust mark types. Please try again later.';
-                console.error(e);
-            } finally {
-                this.loading = false;
-            }
+        /** Refresh the displayed page or navigate to the requested offset. */
+        loadData(offset?: number) {
+            return this.loadPage(filters => this.$sdk.listTrustMarkTypes(filters), offset);
         },
         formatHours(hours: number): string {
             if (hours >= 8760) {
@@ -195,7 +190,7 @@ export default defineComponent({
 
         <DataTable
             :columns="columns"
-            :data="trustMarkTypes?.items || []"
+            :data="page?.items || []"
             :loading="loading"
             empty-message="No trust mark types found. Create one to get started."
         >
@@ -231,6 +226,7 @@ export default defineComponent({
                 </div>
             </template>
         </DataTable>
+        <Pagination :offset="offset" :count="page?.count ?? 0" :loading="loading" @navigate="loadData" />
 
         <!-- Create Modal -->
         <Modal :open="showCreateModal" title="Create Trust Mark Type" @close="closeModals">
