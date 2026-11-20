@@ -58,7 +58,7 @@ def _is_public_federation_address(address: IPv4Address | IPv6Address) -> bool:
 
 
 def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
-    """Validate a federation URL and return the exact addresses to connect to."""
+    """Validate a federation URL and return its resolved IPv4 or IPv6 addresses."""
     try:
         parsed = urlsplit(url)
         port = parsed.port
@@ -84,6 +84,9 @@ def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
     addresses: list[str] = []
     for answer in answers:
         address = answer[4][0]
+        if not isinstance(address, str):
+            raise ValueError(f"DNS returned an invalid address for {parsed.hostname}")
+        # Strip the IPv6 zone identifier before checking the address.
         normalized = address.split("%", 1)[0]
         try:
             resolved_ip = ip_address(normalized)

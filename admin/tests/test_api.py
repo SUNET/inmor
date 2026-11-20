@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from django.core.management import call_command
+from django.http import HttpResponse
 from django.test import Client
 from pyjosers import jwt
 
@@ -115,6 +116,7 @@ def test_trustmarktypes_get_byid(auth_client: Client):
 
 
 def test_trustmarktypes_get_bytype(auth_client: Client):
+    """Look up a trust mark type by sending its identifier in a GET body."""
     data = {
         "tmtype": "https://example.com/trust_mark_type",
         "id": 2,
@@ -129,8 +131,10 @@ def test_trustmarktypes_get_bytype(auth_client: Client):
         data=json.dumps({"tmtype": "https://example.com/trust_mark_type"}),
         content_type="application/json",
     )
-    assert response.status_code == 200  # type: ignore[union-attr]
-    mark = response.json()  # type: ignore[union-attr]
+    # Client.generic dispatches through Client.request and returns the view response.
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == 200
+    mark = response.json()
     assert mark == data
 
 
@@ -631,7 +635,7 @@ def test_deactivate_subordinate_preserves_configuration(auth_client, loadredis, 
 
 
 @pytest.mark.django_db
-def test_add_subordinate(auth_client: Client, loadredis, conf_settings):  # type: ignore
+def test_add_subordinate(auth_client: Client, loadredis, conf_settings):
     "Tests adding subordinate without passing any JWKS"
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
@@ -650,7 +654,7 @@ def test_add_subordinate(auth_client: Client, loadredis, conf_settings):  # type
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_key(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
+def test_add_subordinate_with_key(auth_client: Client, loadredis, clean_subordinate):
     "Tests adding subordinate"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
@@ -831,7 +835,7 @@ def test_critical_policy_checked_before_issuing_subordinate(
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_key_twice(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
+def test_add_subordinate_with_key_twice(auth_client: Client, loadredis, clean_subordinate):
     "Tests adding subordinate"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)
@@ -865,7 +869,7 @@ def test_add_subordinate_with_key_twice(auth_client: Client, loadredis, clean_su
 
 
 @pytest.mark.django_db
-def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
+def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis, clean_subordinate):
     "Tests listing subordinates"
     with open(os.path.join(data_dir, "fakerp0_metadata.json")) as fobj:
         metadata = json.load(fobj)
@@ -891,7 +895,7 @@ def test_add_subordinate_with_forced_metadata(auth_client: Client, loadredis, cl
 
 
 @pytest.mark.django_db
-def test_list_subordinates(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
+def test_list_subordinates(auth_client: Client, loadredis, clean_subordinate):
     "Tests listing subordinates"
     # Get initial count (fixture may have existing subordinates)
     response = auth_client.get("/api/v1/subordinates")
@@ -926,7 +930,7 @@ def test_list_subordinates(auth_client: Client, loadredis, clean_subordinate):  
 
 
 @pytest.mark.django_db
-def test_get_subordinate_byid(auth_client: Client, loadredis, clean_subordinate):  # type: ignore
+def test_get_subordinate_byid(auth_client: Client, loadredis, clean_subordinate):
     "Tests listing subordinates"
     with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
         metadata = json.load(fobj)

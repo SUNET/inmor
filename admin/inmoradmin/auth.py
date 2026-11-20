@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from django.contrib.auth import logout
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AbstractUser
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import CsrfViewMiddleware
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
@@ -34,7 +34,7 @@ class AuthResult:
     without re-inspecting headers.
     """
 
-    user: User
+    user: AbstractUser
     auth_method: str  # "session", "api_key", or future plugin names
     api_key_name: str | None = None  # Name of the API key used (None for session)
     tenant: str = "default"  # Tenant identifier
@@ -107,7 +107,8 @@ class _CSRFCheck(CsrfViewMiddleware):
 def _enforce_csrf(request: HttpRequest):
     """Enforce CSRF for session-based requests on unsafe methods."""
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-        check = _CSRFCheck(lambda req: None)
+        # The check runs the middleware hooks directly, without dispatching a view.
+        check = _CSRFCheck(lambda req: HttpResponse())
         # populates request.META["CSRF_COOKIE"] from the cookie
         check.process_request(request)
         reason = check.process_view(request, None, (), {})
@@ -140,6 +141,7 @@ class CombinedAuthentication(APIKeyBase):
         return request.META.get("HTTP_X_API_KEY")
 
     def authenticate(self, request: HttpRequest, key: str | None = None):
+        """Return the authorized user and attach the backend result for audit logging."""
         for backend in self.backends:
             result = backend.authenticate(request)
             if result is not None:
@@ -149,7 +151,7 @@ class CombinedAuthentication(APIKeyBase):
                     raise AuthorizationError()
                 if result.api_key is not None:
                     result.api_key.update_last_used()
-                request.auth_result = result  # type: ignore[attr-defined]
+                setattr(request, "auth_result", result)
                 return result.user
         return None
 

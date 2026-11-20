@@ -488,7 +488,7 @@ def renew_trustmark(request: HttpRequest, tmid: int):
     tags=["TrustMarks"],
 )
 def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchema):
-    """Update a TrustMark"""
+    """Update a trust mark and reissue its token when reactivated or its claims change."""
     try:
         with transaction.atomic():
             tm = TrustMark.objects.select_for_update().get(id=tmid)
@@ -512,10 +512,12 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
                     pipe.srem(f"inmor:tmtype:{tm.tmt.tmtype}", tm.domain)
                     pipe.execute()
             elif claims_changed or not before["active"]:
-                tm.mark = add_trustmark(
+                mark = add_trustmark(
                     tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con
                 )
-                tm.expire_at = datetime.fromtimestamp(get_expiry(tm.mark), pytz.utc)
+                # The signed token determines the expiry recorded for this issuance.
+                tm.mark = mark
+                tm.expire_at = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
             tm.save()
             log_update(request, "TrustMark", tm, snapshot_before=before)
         return 200, tm
