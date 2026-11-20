@@ -290,6 +290,36 @@ def test_invalid_policy_at_either_level(chain, statement, bad_policy):
     assert_invalid(chain.resolve())
 
 
+def test_merged_policies_apply_to_immediate_superior_override(chain):
+    """Verify the signed leaf metadata after merging both policies and checking the override."""
+    leaf = chain.statements["leaf"].claims
+    parent = chain.statements["parent"].claims  # Anchor's statement about the intermediate.
+    child = chain.statements["child"].claims  # Intermediate's statement about the leaf.
+    leaf["metadata"]["federation_entity"]["organization_name"] = "Leaf"
+    parent["metadata_policy"] = {
+        "federation_entity": {"organization_name": {"one_of": ["Campus", "Anchor only"]}}
+    }
+    child["metadata_policy"] = {
+        "federation_entity": {"organization_name": {"one_of": ["Campus", "Intermediate only"]}}
+    }
+    # Only the immediate superior supplies overrides for the leaf. Applying policy
+    # to the original leaf value or taking the anchor's override would reject this path.
+    parent["metadata"] = {"federation_entity": {"organization_name": "Anchor only"}}
+    child["metadata"] = {"federation_entity": {"organization_name": "Campus"}}
+    claims = chain.verified_response(chain.resolve())
+    assert claims["metadata"] == {
+        "federation_entity": {
+            "federation_fetch_endpoint": chain.entity("leaf") + "/fetch",
+            "organization_name": "Campus",
+        }
+    }
+
+    # Each value satisfies exactly one superior. Both must fail the merged rule.
+    for name in ("Anchor only", "Intermediate only"):
+        child["metadata"]["federation_entity"]["organization_name"] = name
+        assert_invalid(chain.resolve())
+
+
 def test_malformed_superior_metadata_is_rejected(chain):
     """Require an object for every role, even when the leaf omits that role."""
     chain.statements["child"].claims["metadata"] = {"unknown_entity_type": "scalar"}
