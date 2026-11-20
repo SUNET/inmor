@@ -16,8 +16,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 # Copy source files
 COPY . .
 
-# Build argument for API URL (can be overridden at build time)
-ARG VITE_API_URL=http://localhost:8000
+# Use the frontend proxy unless a separate API origin is configured.
+ARG VITE_API_URL=
 ENV VITE_API_URL=${VITE_API_URL}
 
 # Build for production

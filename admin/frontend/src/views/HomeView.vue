@@ -10,13 +10,14 @@ export default defineComponent({
     data() {
         return {
             stats: {
-                trustMarkTypes: 0,
-                trustMarks: 0,
-                subordinates: 0,
+                trustMarkTypes: null as number | null,
+                trustMarks: null as number | null,
+                subordinates: null as number | null,
             },
             loading: true,
             // Entity Collection statistics; null until loaded or on failure.
             collection: null as CollectionStats | null,
+            collectionFailed: false,
         };
     },
     computed: {
@@ -30,30 +31,27 @@ export default defineComponent({
         await Promise.all([this.loadStats(), this.loadCollection()]);
     },
     methods: {
+        /** Keep each successful count visible if another management endpoint fails. */
         async loadStats() {
             this.loading = true;
-            try {
-                const [types, marks, subs] = await Promise.all([
-                    this.$sdk.listTrustMarkTypes({ limit: 1 }),
-                    this.$sdk.listTrustMarks({ limit: 1 }),
-                    this.$sdk.listSubordinates({ limit: 1 }),
-                ]);
-                this.stats = {
-                    trustMarkTypes: types.count,
-                    trustMarks: marks.count,
-                    subordinates: subs.count,
-                };
-            } catch (e) {
-                console.error('Failed to load stats:', e);
-            } finally {
-                this.loading = false;
-            }
+            const [types, marks, subs] = await Promise.allSettled([
+                this.$sdk.listTrustMarkTypes({ limit: 1 }),
+                this.$sdk.listTrustMarks({ limit: 1 }),
+                this.$sdk.listSubordinates({ limit: 1 }),
+            ]);
+            this.stats = {
+                trustMarkTypes: types.status === 'fulfilled' ? types.value.count : null,
+                trustMarks: marks.status === 'fulfilled' ? marks.value.count : null,
+                subordinates: subs.status === 'fulfilled' ? subs.value.count : null,
+            };
+            this.loading = false;
         },
-        /** Loads Entity Collection statistics; failures leave the card hidden. */
+        /** Show the collection separately so a failed walk statistics request is visible. */
         async loadCollection() {
             try {
                 this.collection = await this.$sdk.getCollectionStats();
             } catch (e) {
+                this.collectionFailed = true;
                 console.error('Failed to load collection stats:', e);
             }
         },
@@ -71,7 +69,7 @@ export default defineComponent({
                     <FileLock2 :size="24" />
                 </div>
                 <div class="stat-content">
-                    <div class="stat-value">{{ loading ? '...' : stats.trustMarkTypes }}</div>
+                    <div class="stat-value">{{ loading ? '...' : stats.trustMarkTypes ?? 'Unavailable' }}</div>
                     <div class="stat-label">Trust Mark Types</div>
                 </div>
                 <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
@@ -82,7 +80,7 @@ export default defineComponent({
                     <Files :size="24" />
                 </div>
                 <div class="stat-content">
-                    <div class="stat-value">{{ loading ? '...' : stats.trustMarks }}</div>
+                    <div class="stat-value">{{ loading ? '...' : stats.trustMarks ?? 'Unavailable' }}</div>
                     <div class="stat-label">Trust Marks</div>
                 </div>
                 <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
@@ -93,7 +91,7 @@ export default defineComponent({
                     <Server :size="24" />
                 </div>
                 <div class="stat-content">
-                    <div class="stat-value">{{ loading ? '...' : stats.subordinates }}</div>
+                    <div class="stat-value">{{ loading ? '...' : stats.subordinates ?? 'Unavailable' }}</div>
                     <div class="stat-label">Subordinates</div>
                 </div>
                 <ArrowRight :size="20" class="stat-arrow" aria-hidden="true" />
@@ -138,6 +136,8 @@ export default defineComponent({
                 </div>
             </dl>
         </section>
+
+        <p v-else-if="collectionFailed" role="status">Entity collection statistics are unavailable.</p>
 
         <section class="quick-start" aria-labelledby="quick-start-heading">
             <Heading id="quick-start-heading" level="h2">Quick Start</Heading>

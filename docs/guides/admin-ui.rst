@@ -109,7 +109,7 @@ For development, run the frontend separately from Docker:
 .. code-block:: bash
 
    # Start backend services
-   just up
+   docker compose -f dev/docker-compose.dev.yml --project-directory . up -d admin
 
    # Start frontend dev server (from admin/frontend/)
    cd admin/frontend
@@ -137,7 +137,7 @@ Docker frontend container:
    just build
 
 The Docker Compose setup includes a frontend container that serves the
-built assets on port 3000.
+built assets on host port 5173 when enabled.
 
 Authentication
 --------------
@@ -180,24 +180,16 @@ Configuration
 Vite Proxy
 ^^^^^^^^^^
 
-In development, Vite proxies API requests to the Django backend:
-
-.. code-block:: typescript
-
-   // vite.config.ts
-   server: {
-     proxy: {
-       '/api': {
-         target: 'http://localhost:8000',
-         changeOrigin: true,
-       },
-     },
-   }
+Vite forwards ``/api/``, ``/accounts/``, ``/admin/``, and ``/static/`` to
+Django on port 8000. Open the frontend on port 5173 so login, MFA, logout,
+and the management API share the browser session. The nginx frontend uses
+the same routes.
 
 Environment Variables
 ^^^^^^^^^^^^^^^^^^^^^
 
-For production builds, set the API URL:
+Production builds use the frontend origin by default. To configure a separate
+API origin at build time:
 
 .. code-block:: bash
 
