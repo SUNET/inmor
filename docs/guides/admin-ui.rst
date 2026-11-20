@@ -210,7 +210,7 @@ The frontend is built with:
 
 * **Vue 3** - Composition API with TypeScript
 * **Vue Router** - Client-side routing with authentication guards
-* **Vite 7** - Build tool and development server
+* **Vite 8** - Build tool and development server
 * **CodeMirror 6** - JSON editor with syntax validation
 * **Lucide Vue** - Icon library
 * **Valibot** - Schema validation

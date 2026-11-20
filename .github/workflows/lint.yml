@@ -26,14 +26,11 @@ jobs:
         with:
           python-version: "3.14"
 
-      # pnpm comes from corepack (bundled with the runner's Node.js), pinned
-      # to the version that wrote admin/frontend/pnpm-lock.yaml. The frozen
-      # lockfile install is needed by the lint-frontend type check.
+      # Corepack selects the pnpm version pinned in the frontend manifest.
       - name: Install frontend dependencies
         working-directory: admin/frontend
         run: |
           corepack enable
-          corepack prepare pnpm@10.27.0 --activate
           pnpm install --frozen-lockfile
 
       - name: lint

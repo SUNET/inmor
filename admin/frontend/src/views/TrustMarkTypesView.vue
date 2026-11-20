@@ -1,6 +1,6 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { Plus, Pencil, ShieldOff } from 'lucide-vue-next';
+import { Plus, Pencil, ShieldOff } from '@lucide/vue';
 import Heading from '../components/base/Heading.vue';
 import Button from '../components/base/Button.vue';
 import Badge from '../components/base/Badge.vue';
