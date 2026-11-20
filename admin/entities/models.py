@@ -31,3 +31,23 @@ class Subordinate(models.Model):
             models.Index(fields=["valid_for"]),
             models.Index(fields=["autorenew"]),
         ]
+
+
+class PendingPublication(models.Model):
+    """A committed Redis update awaiting delivery for one federation record."""
+
+    subordinate = models.OneToOneField(Subordinate, null=True, on_delete=models.CASCADE)
+    trust_mark = models.OneToOneField("trustmarks.TrustMark", null=True, on_delete=models.CASCADE)
+    # The verified wire JWT cannot be reconstructed from the subordinate's stored claims.
+    entity_configuration = models.TextField(default="")
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(subordinate__isnull=False, trust_mark__isnull=True)
+                    | models.Q(subordinate__isnull=True, trust_mark__isnull=False)
+                ),
+                name="publication_has_one_resource",
+            )
+        ]

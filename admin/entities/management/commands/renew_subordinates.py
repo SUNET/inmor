@@ -5,21 +5,19 @@ from typing import Any
 import djclick as click
 from django.conf import settings
 from django.db import transaction
-from django_redis import get_redis_connection
 
 from entities.lib import (
     apply_server_policy,
     create_subordinate_statement,
     fetch_entity_configuration,
-    update_redis_with_subordinate,
 )
 from entities.models import Subordinate
+from entities.publication import queue_publication
 
 
 @click.command()
 def command():
     """Renew active subordinates after checking stored overrides and critical declarations."""
-    con = get_redis_connection("default")
     subs = Subordinate.objects.filter(active=True)
     total = subs.count()
     renewed = 0
@@ -77,7 +75,7 @@ def command():
         )
 
         # A deactivation or edit may have occurred during the remote fetch.
-        # Hold the row lock from the conditional update through Redis publication.
+        # Record the publication in the same transaction as the conditional update.
         updates: dict[str, Any] = {"statement": signed_statement, "metadata": metadata}
         if fresh_jwks := claims.get("jwks"):
             updates["jwks"] = json.dumps(fresh_jwks)
@@ -89,9 +87,7 @@ def command():
                 if not current.update(**updates):
                     click.secho("Skipped (subordinate changed during renewal)")
                     continue
-                update_redis_with_subordinate(
-                    sub.entityid, entity_jwt_str, metadata, signed_statement, con
-                )
+                queue_publication(sub, entity_jwt_str)
         except Exception as e:
             click.secho(f"FAILED (renewal: {e})", fg="red")
             failed += 1

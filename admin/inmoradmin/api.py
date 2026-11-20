@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 import httpx
-import pytz
 from auditlog.diff import model_to_dict
 from auditlog.helpers import log_create, log_update
 from common.signing import create_signed_jwt
@@ -19,15 +18,14 @@ from entities.lib import (
     fetch_entity_configuration,
     fetch_jwks_from_uri,
     fetch_payload,
-    update_redis_with_subordinate,
-    withdraw_subordinate,
 )
 from entities.models import Subordinate
+from entities.publication import queue_publication
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
 from redis.client import Redis
-from trustmarks.lib import add_trustmark, get_expiry
+from trustmarks.lib import issue_trustmark
 from trustmarks.models import TrustMark, TrustMarkType
 
 from common.claims import (
@@ -398,32 +396,25 @@ def create_trust_mark(request: HttpRequest, data: TrustMarkSchema):
                 "id": data.tmt,
             }
     try:
-        # Task 1: First check if a TrustMark for the given domain and TrustMarkType exists.
-        try:
-            tm = TrustMark.objects.get(tmt=tmt, domain=data.domain)
-            # TrustMark already exists, return 403
-            return 403, tm
-        except TrustMark.DoesNotExist:
-            # Task 2: TrustMark does not exist, create a new TrustMark entry in DB.
-            tm = TrustMark.objects.create(
+        with transaction.atomic():
+            tm, created = TrustMark.objects.get_or_create(
                 tmt=tmt,
                 domain=data.domain,
-                autorenew=data.autorenew,
-                valid_for=data.valid_for,
-                renewal_time=data.renewal_time,
-                active=data.active,
-                additional_claims=data.additional_claims,
+                defaults={
+                    "autorenew": data.autorenew,
+                    "valid_for": data.valid_for,
+                    "renewal_time": data.renewal_time,
+                    "active": data.active,
+                    "additional_claims": data.additional_claims,
+                },
             )
-            con: Redis = get_redis_connection("default")
-            # Now we should create the signed JWT and store in redis
-            mark = add_trustmark(tm.domain, tmt.tmtype, tm.valid_for, tm.additional_claims, con)
-            # Adds the newly created JWT in the response
-            tm.mark = mark
-            expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
-            tm.expire_at = expiry
+            if not created:
+                return 403, tm
+            issue_trustmark(tm, tm.valid_for)
             tm.save()
             log_create(request, "TrustMark", tm)
-            return 201, tm
+            queue_publication(tm)
+        return 201, tm
     except Exception as e:
         print(e)
         return 500, {"message": "Error while creating a new TrustMark."}
@@ -458,22 +449,18 @@ def get_trustmark_list(request: HttpRequest):
     response={200: TrustMarkOutSchema, 400: Message, 404: Message, 500: Message},
     tags=["TrustMarks"],
 )
-@transaction.atomic
 def renew_trustmark(request: HttpRequest, tmid: int):
-    """Renews a TrustMark"""
+    """Renew an active trust mark and publish only after its audit entry commits."""
     try:
-        tm = TrustMark.objects.select_for_update().get(id=tmid)
-        if not tm.active:
-            return 400, {"message": "Cannot renew a revoked trust mark."}
-        before = model_to_dict(tm)
-        con: Redis = get_redis_connection("default")
-        mark = add_trustmark(tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con)
-        # Adds the newly created JWT in the response
-        tm.mark = mark
-        expiry = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
-        tm.expire_at = expiry
-        tm.save()
-        log_update(request, "TrustMark", tm, snapshot_before=before, is_renew=True)
+        with transaction.atomic():
+            tm = TrustMark.objects.select_for_update().get(id=tmid)
+            if not tm.active:
+                return 400, {"message": "Cannot renew a revoked trust mark."}
+            before = model_to_dict(tm)
+            issue_trustmark(tm, tm.valid_for)
+            tm.save()
+            log_update(request, "TrustMark", tm, snapshot_before=before, is_renew=True)
+            queue_publication(tm)
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}
@@ -504,22 +491,15 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             if claims_changed:
                 tm.additional_claims = data.additional_claims
 
-            con: Redis = get_redis_connection("default")
+            publish = not tm.active or claims_changed or not before["active"]
             if not tm.active:
                 tm.mark = None
-                with con.pipeline() as pipe:
-                    pipe.hset(f"inmor:tm:{tm.domain}", tm.tmt.tmtype, "revoked")
-                    pipe.srem(f"inmor:tmtype:{tm.tmt.tmtype}", tm.domain)
-                    pipe.execute()
-            elif claims_changed or not before["active"]:
-                mark = add_trustmark(
-                    tm.domain, tm.tmt.tmtype, tm.valid_for, tm.additional_claims, con
-                )
-                # The signed token determines the expiry recorded for this issuance.
-                tm.mark = mark
-                tm.expire_at = datetime.fromtimestamp(get_expiry(mark), pytz.utc)
+            elif publish:
+                issue_trustmark(tm, tm.valid_for)
             tm.save()
             log_update(request, "TrustMark", tm, snapshot_before=before)
+            if publish:
+                queue_publication(tm)
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}
@@ -540,7 +520,6 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
 def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     """Verify the entity configuration and proposed statement policy before registration."""
     # First get verified JWT from entity configuration with the keys we provided
-    official_metadata = data.metadata
     keys = data.jwks
 
     try:
@@ -612,13 +591,9 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
     # If we did not create a new subordinate, return now.
     if not created:
         return 403, sub_statement
-    # All good so far, we will update all related redis entries now.
-    if sub_statement.active:
-        con: Redis = get_redis_connection("default")
-        update_redis_with_subordinate(
-            data.entityid, entity_jwt_str, official_metadata, signed_statement, con
-        )
     log_create(request, "Subordinate", sub_statement, event_type="registration")
+    if sub_statement.active:
+        queue_publication(sub_statement, entity_jwt_str)
     return 201, sub_statement
 
 
@@ -671,8 +646,8 @@ def update_subordinate(
     if isinstance(data, SubordinateDeactivationSchema):
         sub.active = False
         sub.save(update_fields=["active"])
-        withdraw_subordinate(sub.entityid, get_redis_connection("default"))
         log_update(request, "Subordinate", sub, snapshot_before=before)
+        queue_publication(sub)
         return 200, sub
 
     # Older clients deactivate through a full update with only the required fields.
@@ -685,7 +660,6 @@ def update_subordinate(
             data.autorenew = sub.autorenew
 
     # First get verified JWT from entity configuration with the keys we provided
-    official_metadata = data.metadata
     keys: dict[Any, Any] | None = None
     if data.jwks:
         keys = data.jwks
@@ -752,15 +726,8 @@ def update_subordinate(
     except Exception as e:
         print(e)
         return 500, {"message": "Error while updating the subordinate", id: subid}
-    # All good so far, we will update all related redis entries now.
-    con: Redis = get_redis_connection("default")
-    if sub.active:
-        update_redis_with_subordinate(
-            sub.entityid, entity_jwt_str, official_metadata, signed_statement, con
-        )
-    else:
-        withdraw_subordinate(sub.entityid, con)
     log_update(request, "Subordinate", sub, snapshot_before=before)
+    queue_publication(sub, entity_jwt_str if sub.active else "")
     return 200, sub
 
 
@@ -840,9 +807,7 @@ def renew_subordinate(request: HttpRequest, subid: int):
         print(e)
         return 500, {"message": "Error while renewing the subordinate.", "id": subid}
 
-    # Update Redis
-    con: Redis = get_redis_connection("default")
-    update_redis_with_subordinate(sub.entityid, entity_jwt_str, metadata, signed_statement, con)
+    queue_publication(sub, entity_jwt_str)
     return 200, sub
 
 

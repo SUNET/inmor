@@ -232,7 +232,7 @@ def test_trustmarktypes_update(auth_client: Client):
     assert "https://example.com/trust_mark_type" == mark.get("tmtype")
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_trustmark_create(auth_client: Client, loadredis):
     domain = "https://newrp.test.example.com"
 
@@ -314,7 +314,7 @@ def test_trustmark_create_rejects_protected_additional_claim(auth_client, protec
     assert not TrustMark.objects.filter(domain=domain).exists()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_trustmark_update_additional_claims(auth_client: Client, loadredis):
     """Test updating a trustmark's additional_claims and verify changes in JWT payload."""
     domain = "https://fakerp2.labb.sunet.se"
@@ -526,7 +526,7 @@ def test_trustmark_renew(auth_client: Client, loadredis):
     assert renewed_resp.get("id") == trustmark_id
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_trustmark_update(auth_client: Client, loadredis):
     domain0 = "https://newrp0.test.example.com"
 
@@ -562,7 +562,7 @@ def test_trustmark_update(auth_client: Client, loadredis):
     assert resp.get("active") is False
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("revoke_fields", [{}, {"additional_claims": None}])
 def test_revoke_trustmark_with_claims(auth_client, loadredis, monkeypatch, revoke_fields):
     domain = "https://rp.example"
@@ -578,7 +578,7 @@ def test_revoke_trustmark_with_claims(auth_client, loadredis, monkeypatch, revok
     member_key = f"inmor:tmtype:{tm.tmt.tmtype}"
     assert loadredis.sismember(member_key, domain)
     monkeypatch.setattr(
-        "inmoradmin.api.add_trustmark", lambda *args: pytest.fail("unexpected signing")
+        "inmoradmin.api.issue_trustmark", lambda *args: pytest.fail("unexpected signing")
     )
 
     url = f"/api/v1/trustmarks/{tm.pk}"
@@ -596,7 +596,7 @@ def test_revoke_trustmark_with_claims(auth_client, loadredis, monkeypatch, revok
     assert auth_client.post(f"{url}/renew").status_code == 400
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_deactivate_subordinate_preserves_configuration(auth_client, loadredis, monkeypatch):
     sub = Subordinate.objects.create(
         entityid="https://rp.example",
@@ -709,7 +709,7 @@ def test_subordinate_create_rejects_protected_additional_claim(auth_client, prot
     assert not Subordinate.objects.filter(entityid=entity_id).exists()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
     ("claim", "value"),
     [
@@ -777,7 +777,7 @@ def test_subordinate_only_claim_in_entity_configuration(
     assert loadredis.hget("inmor:subordinates:jwt", entity) == valid.encode()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_critical_policy_checked_before_issuing_subordinate(
     auth_client, loadredis, settings, monkeypatch, capsys
 ):
@@ -1064,7 +1064,7 @@ def test_renew_subordinate(auth_client: Client, loadredis, clean_subordinate):
     assert renewed["active"] is True
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_renew_inactive_subordinate(auth_client, loadredis, settings, monkeypatch):
     """Older clients send required metadata alongside active=false."""
     entity = "https://rp.example"
@@ -1118,7 +1118,7 @@ def test_renew_inactive_subordinate(auth_client, loadredis, settings, monkeypatc
     assert response.status_code == 400
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_deactivation_during_batch_renewal(auth_client, loadredis, settings, monkeypatch):
     Subordinate.objects.update(active=False)
     entity = "https://rp.example"

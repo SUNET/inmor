@@ -278,7 +278,7 @@ class TestSessionAuthBackend:
         assert result.tenant == "default"
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("auth_method", ["session", "api_key"])
 def test_operator_permission_controls_trust_mark_issuance(db, rdb, auth_method):
     client = Client(enforce_csrf_checks=True)
