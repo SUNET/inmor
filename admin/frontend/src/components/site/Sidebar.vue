@@ -1,7 +1,7 @@
 <script lang="ts">
 import { defineComponent, type FunctionalComponent } from 'vue';
 import { RouterLink } from 'vue-router';
-import { Home, FileLock2, Files, Server, ServerCog, RefreshCw, LogOut } from 'lucide-vue-next';
+import { Home, FileLock2, Files, Server, ServerCog, RefreshCw, LogOut } from '@lucide/vue';
 import packageJson from '../../../package.json';
 import sunetLogo from '../../assets/sunet-logo.svg';
 

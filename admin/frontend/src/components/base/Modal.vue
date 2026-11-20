@@ -1,6 +1,6 @@
 <script lang="ts">
 import { defineComponent, ref, nextTick } from 'vue';
-import { X } from 'lucide-vue-next';
+import { X } from '@lucide/vue';
 
 export default defineComponent({
     name: 'Modal',

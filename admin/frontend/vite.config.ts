@@ -19,10 +19,14 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       sourcemap: false,
-      rollupOptions: {
+      rolldownOptions: {
         output: {
-          manualChunks: {
-            vendor: ['vue', 'vue-router'],
+          codeSplitting: {
+            groups: [{
+              name: 'vendor',
+              test: /node_modules\/(vue|vue-router)\//,
+              includeDependenciesRecursively: true,
+            }],
           },
         },
       },

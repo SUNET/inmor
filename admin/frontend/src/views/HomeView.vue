@@ -1,6 +1,6 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { FileLock2, Files, Server, ArrowRight, Network } from 'lucide-vue-next';
+import { FileLock2, Files, Server, ArrowRight, Network } from '@lucide/vue';
 import Heading from '../components/base/Heading.vue';
 import type { CollectionStats } from '../lib/admin-sdk/resources';
 
