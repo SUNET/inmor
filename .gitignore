@@ -26,6 +26,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+# The admin SDK is frontend source.
+!/admin/frontend/src/lib/
 lib64/
 parts/
 sdist/
