@@ -1,7 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import Mock
 
 import pytest
 from django.contrib import admin
@@ -10,7 +9,7 @@ from pyjosers import jwk, jwt
 
 from entities.lib import create_subordinate_statement
 from entities.models import Subordinate
-from trustmarks.lib import add_trustmark
+from trustmarks.lib import sign_trustmark
 from trustmarks.models import TrustMark
 
 
@@ -118,19 +117,14 @@ def test_admin_change_rejects_protected_claim_without_persisting(
 @pytest.mark.parametrize("protected_claim", TRUST_MARK_PROTECTED_CLAIMS)
 def test_trust_mark_signing_rejects_protected_additional_claim(protected_claim):
     """Reject Trust Mark claim collisions before signing or writing to Redis."""
-    redis = Mock()
 
     with pytest.raises(ValueError, match=protected_claim):
-        add_trustmark(
+        sign_trustmark(
             "https://subject.example",
             "https://issuer.example/trust-mark-type",
             24,
             {protected_claim: "attacker-controlled"},
-            redis,
         )
-
-    redis.hset.assert_not_called()
-    redis.sadd.assert_not_called()
 
 
 @pytest.mark.parametrize("protected_claim", SUBORDINATE_PROTECTED_CLAIMS)

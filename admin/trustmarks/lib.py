@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-import hashlib
 from typing import Any, Optional
 
 import redis
@@ -9,6 +8,7 @@ from pydantic import BaseModel
 
 from common.claims import validate_trust_mark_additional_claims
 from common.signing import create_signed_jwt
+from trustmarks.models import TrustMark
 
 
 class TrustMarkRequest(BaseModel):
@@ -20,24 +20,13 @@ class TrustMarkTypeRequest(BaseModel):
     type: str
 
 
-def add_trustmark(
+def sign_trustmark(
     entity: str,
     trustmarktype: str,
     expiry: int,
     additional_claims: Optional[dict["str", Any]],
-    r: redis.Redis,
 ) -> str:
-    """Adds a new TrustMark for a given entity for a given TrustMarkType.
-
-    :args entity: The entity_id to be added
-    :args trustmarktype: The TrustMarkType value in JWT
-    :args expiry: The JWT will be valid for the number of hours.
-    :args r: Redis client instance.
-
-    :returns: JWT as str.
-    """
-    # Based on https://openid.net/specs/openid-federation-1_0.html#name-trust-marks
-
+    """Sign a trust mark without changing its database or Redis state."""
     additional_claims = validate_trust_mark_additional_claims(additional_claims)
 
     # Merge extensions first, then set claims that are authoritative for this issuer.
@@ -51,19 +40,14 @@ def add_trustmark(
     sub_data["trust_mark_type"] = trustmarktype
 
     key = settings.SIGNING_PRIVATE_KEY
-    token_data = create_signed_jwt(sub_data, key, "trust-mark+jwt")
-    # Now we should set it in the redis
-    # First, the trustmark for the entity and that trustmarktype
-    _ = r.hset(f"inmor:tm:{entity}", trustmarktype, token_data)
-    # second, add to the set of trust_mark_type
-    _ = r.sadd(f"inmor:tmtype:{trustmarktype}", entity)
-    # third, add to the index of all trust mark types (used by /status)
-    _ = r.sadd("inmor:tmtypes", trustmarktype)
-    # fourth, add to the list of all trustmarks generated
-    h = hashlib.new("sha256")
-    h.update(token_data.encode("utf-8"))
-    _ = r.sadd("inmor:tm:alltime", h.hexdigest())
-    return token_data
+    return create_signed_jwt(sub_data, key, "trust-mark+jwt")
+
+
+def issue_trustmark(tm: TrustMark, valid_for: int) -> None:
+    """Set the signed mark and its expiry on the instance for the caller to save."""
+    mark = sign_trustmark(tm.domain, tm.tmt.tmtype, valid_for, tm.additional_claims)
+    tm.mark = mark
+    tm.expire_at = datetime.fromtimestamp(get_expiry(mark), UTC)
 
 
 def get_trustmark(entity: str, trustmarktype: str, r: redis.Redis) -> str | None:

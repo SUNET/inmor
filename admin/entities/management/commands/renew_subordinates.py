@@ -4,21 +4,20 @@ from typing import Any
 
 import djclick as click
 from django.conf import settings
-from django_redis import get_redis_connection
+from django.db import transaction
 
 from entities.lib import (
     apply_server_policy,
     create_subordinate_statement,
     fetch_entity_configuration,
-    update_redis_with_subordinate,
 )
 from entities.models import Subordinate
+from entities.publication import queue_publication
 
 
 @click.command()
 def command():
     """Renew active subordinates after checking stored overrides and critical declarations."""
-    con = get_redis_connection("default")
     subs = Subordinate.objects.filter(active=True)
     total = subs.count()
     renewed = 0
@@ -75,21 +74,25 @@ def command():
             additional_claims=sub.additional_claims,
         )
 
-        # Update database
-        fresh_jwks = claims.get("jwks", None)
+        # A deactivation or edit may have occurred during the remote fetch.
+        # Record the publication in the same transaction as the conditional update.
+        updates: dict[str, Any] = {"statement": signed_statement, "metadata": metadata}
+        if fresh_jwks := claims.get("jwks"):
+            updates["jwks"] = json.dumps(fresh_jwks)
         try:
-            sub.metadata = metadata
-            if fresh_jwks:
-                sub.jwks = json.dumps(fresh_jwks)
-            sub.statement = signed_statement
-            sub.save()
+            with transaction.atomic():
+                current = Subordinate.objects.filter(
+                    pk=sub.pk, active=True, statement=sub.statement
+                )
+                if not current.update(**updates):
+                    click.secho("Skipped (subordinate changed during renewal)")
+                    continue
+                queue_publication(sub, entity_jwt_str)
         except Exception as e:
-            click.secho(f"FAILED (db save: {e})", fg="red")
+            click.secho(f"FAILED (renewal: {e})", fg="red")
             failed += 1
             continue
 
-        # Update Redis
-        update_redis_with_subordinate(sub.entityid, entity_jwt_str, metadata, signed_statement, con)
         renewed += 1
         click.secho("OK", fg="green")
 

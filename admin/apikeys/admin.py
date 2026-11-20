@@ -70,20 +70,19 @@ class APIKeyAdmin(admin.ModelAdmin):
 
     actions = ["revoke_keys"]
 
+    # Only the public prefix belongs in the changelist.
+    @admin.display(description="Key Prefix")
     def prefix_display(self, obj: APIKey) -> str:
-        """Display the key prefix with ellipsis."""
+        """Display the public key prefix with an ellipsis."""
         return f"{obj.prefix}..."
 
-    prefix_display.short_description = "Key Prefix"  # type: ignore[attr-defined]
-
+    @admin.display(description="Status")
     def is_valid_display(self, obj: APIKey) -> str:
         """Display validity status with color."""
         is_valid = obj.is_valid
         color = "green" if is_valid else "red"
         status = "Valid" if is_valid else "Invalid"
         return format_html('<span style="color: {};">{}</span>', color, status)
-
-    is_valid_display.short_description = "Status"  # type: ignore[attr-defined]
 
     @admin.action(description="Revoke selected API keys")
     def revoke_keys(self, request: HttpRequest, queryset) -> None:

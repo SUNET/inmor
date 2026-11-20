@@ -25,7 +25,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Ignore root packaging output while keeping frontend source directories visible to sync tools.
+/lib/
 lib64/
 parts/
 sdist/

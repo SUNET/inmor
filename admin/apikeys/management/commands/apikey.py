@@ -7,7 +7,7 @@ Usage:
     python manage.py apikey revoke --username admin --key-name "CI deploy"
 """
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
@@ -66,7 +66,7 @@ class Command(BaseCommand):
             self.handle_revoke(options)
 
     def handle_create(self, options):
-        User = get_user_model()
+        """Issue a key for the requested owner and tenant."""
         username = options["username"]
         key_name = options["key_name"]
         tenant = options["tenant"]
@@ -85,7 +85,6 @@ class Command(BaseCommand):
         self.stdout.write(plaintext_key)
 
     def handle_list(self, options):
-        User = get_user_model()
         show_all = options.get("all_users", False)
 
         if show_all:
@@ -134,7 +133,6 @@ class Command(BaseCommand):
                 )
 
     def handle_revoke(self, options):
-        User = get_user_model()
         username = options["username"]
         key_name = options["key_name"]
 

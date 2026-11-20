@@ -76,10 +76,10 @@ Deactivates all active keys matching the given name for the user.
 reload_issued_tms
 -----------------
 
-Reload existing trust mark JWTs from the database into Redis. This does **not**
-re-sign anything — it reads the stored ``mark`` field from each active
-``TrustMark`` row and inserts its SHA-256 hash into the ``inmor:tm:alltime``
-Redis set.
+Restore the SHA-256 digests of issued JWTs from PostgreSQL to the
+``inmor:tm:alltime`` Redis set. Superseded and revoked marks remain available for
+status lookup. The migration imports tokens still stored in PostgreSQL.
+Preserve existing Redis history for older tokens that PostgreSQL no longer holds.
 
 ::
 
@@ -152,3 +152,23 @@ listing/revoking.
 
 The plaintext key is printed to stdout. For full API key management, prefer
 the ``apikey`` command instead.
+
+retry_publications
+------------------
+
+Trust mark and subordinate API changes commit their database records, audit
+entries, and pending Redis work together. The Admin then updates Redis before
+returning success. If delivery fails or the process stops after commit, the
+pending work stays in PostgreSQL. An API error during delivery can therefore
+accompany a committed change. Redis may still serve the previous state,
+including a membership whose withdrawal is pending.
+
+Run this command after restoring Redis or restarting an interrupted Admin.
+Schedule it periodically to recover interrupted deliveries automatically::
+
+   python manage.py retry_publications
+
+The command retries the latest committed state for each pending record,
+including withdrawals. It exits with an error if any delivery fails.
+For rollout, apply the Admin migrations and replace all old Admin writers
+and renewal processes before resuming federation changes.

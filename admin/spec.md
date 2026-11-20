@@ -9,7 +9,7 @@ This document describes how the inmor admin module implements the [OpenID Federa
 | Claim | Spec Requirement | Implementation |
 |-------|------------------|----------------|
 | `iss` | REQUIRED | ✅ Set from `settings.TRUSTMARK_PROVIDER` |
-| `sub` | REQUIRED | ✅ Entity identifier passed to `add_trustmark()` |
+| `sub` | REQUIRED | ✅ Entity identifier passed to `sign_trustmark()` |
 | `trust_mark_type` | REQUIRED | ✅ Set from `TrustMarkType.tmtype` |
 | `iat` | REQUIRED | ✅ Automatically set to current timestamp |
 | `logo_uri` | OPTIONAL | ✅ Via `additional_claims` |
@@ -26,9 +26,9 @@ issuer.
 Per Section 7:
 > Trust Mark JWTs MUST be explicitly typed by using the `typ` header parameter... The `typ` header parameter value MUST be `trust-mark+jwt`
 
-**Implementation:** `trustmarks/lib.py` - `add_trustmark()` function uses:
+**Implementation:** `trustmarks/lib.py` - `sign_trustmark()` function uses:
 ```python
-token_data = create_signed_jwt(sub_data, key, "trust-mark+jwt")
+return create_signed_jwt(sub_data, key, "trust-mark+jwt")
 ```
 
 ### Trust Mark Storage

@@ -1,17 +1,21 @@
 import djclick as click
-from django_redis import get_redis_connection
+from django.db import transaction
 
-from trustmarks.lib import add_trustmark
+from entities.publication import queue_publication
+from trustmarks.lib import issue_trustmark
 from trustmarks.models import TrustMark
 
 
 @click.command()
 def command():
-    "Reissues TrustMarks for activated entities from the Database."
-    con = get_redis_connection("default")
-    tms = TrustMark.objects.all()
-    for tm in tms:
-        if tm.active:
-            # Means we can reissue this one
-            _ = add_trustmark(tm.domain, tm.tmt.tmtype, tm.tmt.valid_for, tm.additional_claims, con)
-            click.secho(f"Reissued {tm.domain}")
+    """Persist and publish newly signed tokens for active trust marks."""
+    for pk in TrustMark.objects.filter(active=True).values_list("pk", flat=True):
+        with transaction.atomic():
+            tm = TrustMark.objects.select_for_update().filter(pk=pk, active=True).first()
+            if tm is None:
+                continue
+            # Persist the exact token so a retry never signs a different one.
+            issue_trustmark(tm, tm.tmt.valid_for)
+            tm.save(update_fields=["mark", "expire_at"])
+            queue_publication(tm)
+        click.secho(f"Reissued {tm.domain}")

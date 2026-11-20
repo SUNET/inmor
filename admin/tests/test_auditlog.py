@@ -209,7 +209,7 @@ class TestAuditLogIntegration:
 
     @pytest.mark.django_db
     def test_create_trustmarktype_logged(self, user):
-        """Creating a TrustMarkType creates an audit log entry."""
+        """Creating a TrustMarkType records exactly one creation event."""
         from apikeys.models import APIKey
 
         _, plaintext = APIKey.create_key(name="audit-test", user=user)
@@ -224,12 +224,11 @@ class TestAuditLogIntegration:
         )
         assert response.status_code == 201
 
-        entries = AuditLogEntry.objects.filter(
+        # get() also detects missing or duplicate events.
+        entry = AuditLogEntry.objects.get(
             resource_type="TrustMarkType",
             action="CREATE",
         )
-        assert entries.count() == 1
-        entry = entries.first()
         assert entry.user == user
         assert entry.auth_method == "api_key"
         assert entry.success is True
@@ -264,12 +263,10 @@ class TestAuditLogIntegration:
         )
         assert response.status_code == 200
 
-        entries = AuditLogEntry.objects.filter(
+        entry = AuditLogEntry.objects.get(
             resource_type="TrustMarkType",
             action="UPDATE",
         )
-        assert entries.count() == 1
-        entry = entries.first()
         assert entry.event_type == "trustmarktype_deactivated"
         assert entry.diff is not None
         assert entry.diff["active"] == {"old": True, "new": False}

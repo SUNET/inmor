@@ -5,7 +5,7 @@ Usage:
     python manage.py create_api_key --username admin --key-name "CI script key"
 """
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
@@ -30,7 +30,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        User = get_user_model()
+        """Issue a key owned by the user referenced by APIKey.user."""
         username = options["username"]
         key_name = options["key_name"]
 

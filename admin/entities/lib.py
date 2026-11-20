@@ -58,7 +58,7 @@ def _is_public_federation_address(address: IPv4Address | IPv6Address) -> bool:
 
 
 def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
-    """Validate a federation URL and return the exact addresses to connect to."""
+    """Validate a federation URL and return its resolved IPv4 or IPv6 addresses."""
     try:
         parsed = urlsplit(url)
         port = parsed.port
@@ -84,6 +84,9 @@ def _resolve_federation_destination(url: str) -> tuple[SplitResult, list[str]]:
     addresses: list[str] = []
     for answer in answers:
         address = answer[4][0]
+        if not isinstance(address, str):
+            raise ValueError(f"DNS returned an invalid address for {parsed.hostname}")
+        # Strip the IPv6 zone identifier before checking the address.
         normalized = address.split("%", 1)[0]
         try:
             resolved_ip = ip_address(normalized)
@@ -356,54 +359,6 @@ def create_subordinate_statement(
     key = settings.SIGNING_PRIVATE_KEY
     token_data = create_signed_jwt(sub_data, key, "entity-statement+jwt")
     return token_data
-
-
-def update_redis_with_subordinate(
-    entity_id: str, jwt_text: str, sub_metadata: dict[str, Any], signed_statement: str, r: Redis
-) -> None:
-    """Adds a new subordinate to the federation.
-
-    This creates a subordinate statement by the TA as iss and adds the metadata of the entity (subordinate).
-    https://openid.net/specs/openid-federation-1_0.html#name-fetch-subordinate-statement-
-
-    :args entity_id: The entity_id to be added
-    :args keyset: The keyset of the subordinate
-    :args jwt_text: The str version of the JWT of the subordinate.
-    :args sub_metadata: The subordinate's metadata
-    :args singed_statement: The signed subordinate statement.
-    :args r: Redis class from Django
-
-    """
-    # TODO: Verify that the authority_hints matches with the inmor's entity_id.
-
-    # We don't need this for subordinate statement
-    # sub_data["authority_hints"] = payload.get("authority_hints")
-    if sub_metadata:
-        # We should mark what kind of entity it is, for the /list endpoint
-        # The treewalking code will visit the entity later, but this is to make sure
-        # that we have some information storied at the first check.
-        if "openid_relying_party" in sub_metadata:
-            # Mweans RP
-            _ = r.sadd("inmor:rp", entity_id)
-            logger.info(f"{entity_id} added as RP to memory database.")
-        elif "openid_provider" in sub_metadata:
-            # Means  OP
-            _ = r.sadd("inmor:op", entity_id)
-            logger.info(f"{entity_id} added as OP to memory database.")
-        else:  # means "federation_entity" in metadata:
-            # Means we have a TA/IA
-            _ = r.sadd("inmor:taia", entity_id)
-
-        # We don't need trustmarks for the subordinate statements.
-    # trust_marks = payload.get("trust_marks")
-    # if trust_marks:
-    # sub_data["trust_marks"] = trust_marks
-
-    # Now we should set it in the redis
-    _ = r.hset("inmor:subordinates", entity_id, signed_statement)
-    _ = r.hset("inmor:subordinates:jwt", entity_id, jwt_text)
-    # Add the entity in the queue for walking the tree (if any)
-    _ = r.lpush("inmor:newsubordinate", entity_id)
 
 
 def fetch_jwks_from_uri(uri: str) -> JWKSet:

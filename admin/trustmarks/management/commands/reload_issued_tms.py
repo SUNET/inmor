@@ -1,19 +1,25 @@
+"""Restore the all-time trust mark digest index from committed issuance history."""
+
+from hashlib import sha256
+from itertools import batched, chain
+
 import djclick as click
 from django_redis import get_redis_connection
-import hashlib
 
+from entities.models import IssuedTrustMarkHash
 from trustmarks.models import TrustMark
 
 
 @click.command()
 def command():
-    "Reload TrustMarks for activated entities from the Database to redis."
+    """Restore status lookup for issued JWTs, including superseded and revoked marks."""
     con = get_redis_connection("default")
-    tms = TrustMark.objects.all()
-    for tm in tms:
-        if tm.active and tm.mark:
-            # Means we can reissue this one
-            h = hashlib.new("sha256")
-            h.update(tm.mark.encode("utf-8"))
-            _ = con.sadd("inmor:tm:alltime", h.hexdigest())
-            click.secho(f"Reloaded {tm.domain} - {tm.tmt.tmtype}")
+    digests = IssuedTrustMarkHash.objects.values_list("digest", flat=True)
+    # SADD is idempotent and keeps older entries that exist only in Redis.
+    # Legacy fixtures can be loaded after the migration that imports retained JWTs.
+    tokens = TrustMark.objects.filter(active=True, mark__isnull=False).values_list(
+        "mark", flat=True
+    )
+    legacy = (sha256(token.encode()).hexdigest() for token in tokens.iterator() if token)
+    for batch in batched(chain(digests.iterator(), legacy), 1000):
+        con.sadd("inmor:tm:alltime", *batch)
