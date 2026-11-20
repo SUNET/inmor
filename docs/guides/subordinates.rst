@@ -374,7 +374,6 @@ The Trust Anchor creates subordinate statements with this structure:
          "application_type": "web"
        }
      },
-     "metadata_policy": {},
      "organization_name": "Example Corp"
    }
 
@@ -384,7 +383,8 @@ Key fields:
 * ``sub``: Subordinate entity ID
 * ``jwks``: Entity's public keys (for chain verification)
 * ``metadata``: Merged and policy-applied metadata
-* ``metadata_policy``: Any policy the subordinate should apply to its subordinates
+* ``metadata_policy`` is optional and restricts the subject and its subordinates.
+  Omit it when no policy applies. See :ref:`resolver-metadata-policy`.
 
 Fetching Subordinate Statements
 -------------------------------

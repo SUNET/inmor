@@ -180,7 +180,9 @@ Fetches the subordinate statement for a specific entity.
          "redirect_uris": ["https://example-rp.com/callback"]
        }
      },
-     "metadata_policy": {}
+     "metadata_policy": {
+       "openid_relying_party": {"application_type": {"one_of": ["web"]}}
+     }
    }
 
 **Response (404 Not Found):**
@@ -735,73 +737,87 @@ All error responses follow this format:
 
 * ``not_found`` - Resource not found
 * ``invalid_request`` - Missing or invalid parameters
-* ``invalid_trust_chain`` - Trust chain build, signature, temporal, or policy
-  validation failed. ``error_description`` carries a precise reason in two
-  cases that the resolver propagates verbatim:
+* ``invalid_trust_chain`` (HTTP 400) - No candidate path satisfied the
+  signature, time, constraint and policy checks. A policy error can identify
+  a particular parameter or unsupported critical operator. Individual
+  authority failures are also recorded in the server log.
+* ``temporarily_unavailable`` (HTTP 503) - A transient fetch failure or an
+  expired fetch budget prevented a conclusive result.
+* ``server_error`` - Internal server error.
 
-  - Leaf entity-configuration verification failures detected at the start
-    of the walk (bad self-signature, missing ``jwks``, ``iss`` / ``sub``
-    mismatch under §3.1, or an unknown ``crit`` entry under §3.1.1 -- the
-    offending claim name appears in the message).
-  - Metadata-policy merge failures from the ``oidfed_metadata_policy`` crate
-    (§6.1.3.2), including the offending critical operator name when
-    ``metadata_policy_crit`` rejects it.
+.. _resolver-metadata-policy:
 
-  Other chain-walking failures (subordinate-statement signature, constraint
-  violation, permitted/excluded-subtree mismatch) cause the walker to skip
-  the offending authority and try another branch. If no chain reaches a
-  trust anchor after exploring all branches, the response is the generic
-  ``"Failed to find trust chain"`` -- the per-authority reasons are
-  recorded in the server log rather than surfaced to the client.
-* ``server_error`` - Internal server error
+Metadata policy during resolution (§6.1)
+----------------------------------------
+
+For each candidate trust chain, the resolver checks the
+``metadata_policy_crit`` declarations in **every** verified Subordinate
+Statement before merging any policies. Inmor supports the seven standard
+operators. An unrecognized optional operator can be ignored. If any superior
+declares an unsupported operator critical, the whole candidate fails,
+including when a different superior uses that operator. Standard operators
+must not be listed in ``metadata_policy_crit``.
+
+A superior with no policy should omit ``metadata_policy``. A present policy
+must contain at least one entity type, each with at least one parameter, and
+each parameter must have at least one operator. Invalid operand types or
+incompatible rules invalidate the candidate, including rules for entity types
+absent from the leaf. These policy claims and ``constraints`` belong in
+Subordinate Statements. An Entity Configuration carrying them is rejected.
+
+The resolver merges policies from the anchor down to the leaf. For example,
+if the anchor permits two values for a parameter with ``one_of`` and an
+intermediate permits just one of them, only the common value is allowed.
+The immediate superior can supply metadata for a role declared by the leaf.
+The resolver applies the merged policy to that effective metadata, then signs
+the result together with the selected chain. If a candidate fails, the
+resolver tries the remaining authority hints.
+
+.. _resolver-naming-constraints:
 
 Chain constraints (§6.2)
 ------------------------
 
-Subordinate Statements can carry a ``constraints`` object that restricts
-which entities may appear below the SS subject in the chain. inmor parses
-and enforces all four standard constraint shapes during trust-chain
-walking:
+A Subordinate Statement can restrict entity identifiers through
+``constraints.naming_constraints`` (§6.2.2). The resolver checks the host of
+each entity below the issuer on that path, including the statement's subject,
+any intermediates and the leaf. A name without a leading dot matches exactly
+one host. A leading dot matches one or more additional DNS labels. Paths and
+ports play no part in this comparison. An exclusion always wins. Omitting
+``permitted`` imposes no allowlist, while an empty ``permitted`` list permits
+no host.
 
-* ``max_path_length`` (§6.2.1) — the SS rejects any chain where the leaf is
-  more than ``max_path_length`` entities below the SS subject. inmor also
-  retains a fixed depth backstop (``MAX_RESOLVE_DEPTH = 10``).
-* ``permitted_subtrees`` (§6.2.2) — array of URL prefixes. The resolve
-  subject MUST be a subordinate of at least one entry. Matching is
-  URL-component-aware: scheme + host case-insensitive, port (or scheme
-  default) equal, path is a prefix at a path-segment boundary, trailing
-  slashes normalized. A subtree containing a query or fragment is treated
-  as malformed.
-* ``excluded_subtrees`` (§6.2.2) — array of URL prefixes the resolve
-  subject MUST NOT be a subordinate of.
-* ``allowed_entity_types`` / ``allowed_leaf_entity_types`` (§6.2.3) — every
-  entity type the subject declares (top-level keys of its ``metadata``)
-  MUST appear in the allowlist (subset semantics). A subject that declares
-  even one disallowed type is rejected, so an entity cannot mix an allowed
-  type with a disallowed one to slip through. A subject with no declared
-  entity types is also rejected when the allowlist is set (fail-closed:
-  a missing or empty ``metadata`` cannot bypass the restriction). The
-  ``leaf`` variant applies only when the subject is the chain leaf.
-
-A violation by any single Subordinate Statement causes the walker to skip
-that authority and try sibling branches. The conjunction across all
-superiors falls out of these per-SS checks against the same leaf.
-
-**Example** — a Subordinate Statement issued by an intermediate that wants
-to scope its subordinates to one URL subtree and limit chain depth:
+For example, this statement admits both its subject and a leaf at
+``https://rp.example.edu/app``, but excludes a path containing
+``https://test.example.edu``. The bare host ``example.edu`` also falls
+outside the permitted namespace.
 
 .. code-block:: json
 
    {
-     "iss": "https://intermediate.example",
-     "sub": "https://leaf.example",
+     "iss": "https://anchor.example",
+     "sub": "https://intermediate.example.edu",
      "constraints": {
        "max_path_length": 1,
-       "permitted_subtrees": ["https://leaf.example/"],
-       "excluded_subtrees": ["https://leaf.example/banned/"],
-       "allowed_entity_types": ["openid_relying_party", "federation_entity"]
+       "naming_constraints": {
+         "permitted": [".example.edu"],
+         "excluded": ["test.example.edu"]
+       }
      }
    }
+
+The resolver also enforces the following constraints:
+
+* ``max_path_length`` limits how many entities may appear below the
+  statement's subject. The resolver also has a fixed depth limit of ten.
+* Inmor's legacy ``permitted_subtrees`` and ``excluded_subtrees`` fields
+  restrict the **leaf** by URL prefix, matching scheme, host, effective port
+  and path segments. If a statement uses both forms, the chain must satisfy
+  both. A DNS constraint cannot express a path or port restriction.
+* Inmor checks the leaf's declared entity types against a supplied
+  ``allowed_entity_types`` allowlist. It also supports the legacy
+  ``allowed_leaf_entity_types`` field on a statement about the leaf.
+  A missing, empty or disallowed set of leaf types fails the check.
 
 Trust Mark Delegation (§7.2)
 ----------------------------

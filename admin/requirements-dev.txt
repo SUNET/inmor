@@ -23,4 +23,5 @@ humanreadable
 pytest-django
 python-dotenv
 pytest-dotenv
-oidfpolicy
+# Match the policy engine used to validate subordinate statements in the Admin.
+oidfpolicy>=0.3.0

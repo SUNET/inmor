@@ -18,6 +18,39 @@ def get_payload(token_str: str):
     return jwt.decode_unverified(token_str)[1]
 
 
+def test_apply_server_policy_enforces_merged_policy(settings):
+    """Check the common allowed value, including when the superior supplies it."""
+
+    def policy(names):
+        """Build a role policy restricting organization_name to the supplied values."""
+        return {"federation_entity": {"organization_name": {"one_of": names}}}
+
+    settings.POLICY_DOCUMENT = {"metadata_policy": policy(["A", "B"])}
+    merged = lib.merge_our_policy_ontop_subpolicy(policy(["B", "C"]))
+    assert merged is not None
+    settings.POLICY_DOCUMENT = {"metadata_policy": json.loads(merged)}
+
+    allowed = {"federation_entity": {"organization_name": "B"}}
+    outside_policy = {"federation_entity": {"organization_name": "A"}}
+    assert json.loads(lib.apply_server_policy(json.dumps(allowed))) == allowed
+    with pytest.raises(RuntimeError, match="one_of"):
+        lib.apply_server_policy(json.dumps(outside_policy))
+
+    # The superior's value is the one the policy must accept or reject.
+    assert json.loads(lib.apply_server_policy(json.dumps(outside_policy), allowed)) == allowed
+    with pytest.raises(RuntimeError, match="one_of"):
+        lib.apply_server_policy(json.dumps(allowed), outside_policy)
+
+
+def test_apply_server_policy_with_empty_policy(settings):
+    """An empty configuration allows metadata while still validating override structure."""
+    settings.POLICY_DOCUMENT = {"metadata_policy": {}}
+    metadata = {"federation_entity": {"organization_name": "Campus"}}
+    assert json.loads(lib.apply_server_policy(json.dumps(metadata))) == metadata
+    with pytest.raises(RuntimeError, match="invalid superior metadata"):
+        lib.apply_server_policy(json.dumps(metadata), {"federation_entity": "Campus"})
+
+
 def test_fetch_entity_configuration_with_keys():
     "Tests fetching entity configuration and verification."
     self = TestCase()

@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 exclude-newer = "2026-11-01T00:00:00Z"
 
 [options.exclude-newer-package]
+oidfpolicy = "2026-11-21T00:00:00Z"
 pyjosers = "2026-11-19T00:00:00Z"
 
 [[package]]
@@ -540,7 +541,7 @@ requires-dist = [
     { name = "granian" },
     { name = "httpx" },
     { name = "humanreadable" },
-    { name = "oidfpolicy" },
+    { name = "oidfpolicy", specifier = ">=0.3.0" },
     { name = "port-for" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
@@ -593,11 +594,11 @@ wheels = [
 
 [[package]]
 name = "oidfpolicy"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/06/56/1967c542322672a38087d64e7a27229feae0f5c74720408a72b84873057d/oidfpolicy-0.2.0.tar.gz", hash = "sha256:25bc7eac841b1618f88c188fc59fb97d6303fb24516657f79fdc626a64b87e35", size = 39018, upload-time = "2025-12-22T10:12:22.116Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/20/668e2c9149adf700f983d3db15125ddbb050a474db13d1a21ceb19ce9461/oidfpolicy-0.3.0.tar.gz", hash = "sha256:8ba874b21cce19740e6bba0cdc928fc8a75a2b68f113ec08ad971ee536ef3c59", size = 51718, upload-time = "2026-11-20T09:47:59.15Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/c8/9e8aaf734b0852695a8453f8ad94790910e1debb233d6ec1c2601af2bad7/oidfpolicy-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:50365c16abcd3e1677dc1ea8023d1daad0a227e5bd3dcb2488dc5d39cc96f9a1", size = 962096, upload-time = "2025-12-22T10:12:20.644Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/60/07fd13313995d862ea600876d3bd8a6b9491917bbff8976a41944eaf41d4/oidfpolicy-0.3.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:2b46faf0aedf0a3b72050fd704be294d0fc7434be325b829af82c3f1b1a14bed", size = 325458, upload-time = "2026-11-20T09:47:57.864Z" },
 ]
 
 [[package]]

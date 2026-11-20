@@ -5,6 +5,15 @@ See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verificat
 
 ## Breaking changes
 
+- `/resolve` enforces standard DNS naming constraints on intermediates and
+  leaves. It checks critical metadata-policy declarations across each
+  candidate chain, rejects malformed policies, and tries alternate paths
+  before signing a result. See the 0.6.0 upgrade guide before reissuing statements.
+
+- The Admin now enforces its configured `metadata_policy` when validating
+  subordinate metadata during registration, updates, and renewal. Previously
+  it could accept metadata that violated a configured rule.
+
 - The resolver now verifies each returned trust-chain link and both
   anchor-issued statements against their expected keys. Deployments resolving
   to external anchors must configure their public keys in `taconfig.toml`.
@@ -43,6 +52,10 @@ See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verificat
   JOSE libraries" in `docs/installation.rst`.
 
 ## Dependencies
+
+- The resolver uses `oidfed_metadata_policy` 0.9.0 and the Admin uses
+  `oidfpolicy` 0.3.0. The Admin's uv lock allows this release through
+  a package-specific cooling-window exception.
 
 - Python: the required `pyjosers` 0.4.1 falls after the uv dependency cooling
   window (`exclude-newer`, 2026-11-01), so both `pyproject.toml` files carry

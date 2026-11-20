@@ -522,7 +522,7 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
     tags=["Subordinates"],
 )
 def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
-    "Adds a new subordinate."
+    """Validate the proposed metadata overrides and register the subordinate."""
     # First get verified JWT from entity configuration with the keys we provided
     official_metadata = data.metadata
     keys = data.jwks
@@ -550,7 +550,7 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
 
     metadata: dict[str, Any] = claims["metadata"]
     try:
-        _ = apply_server_policy(json.dumps(metadata))
+        _ = apply_server_policy(json.dumps(metadata), data.forced_metadata)
 
     except Exception as e:
         print(e)
@@ -644,7 +644,7 @@ def get_subordinate_byid(request: HttpRequest, subid: int):
     tags=["Subordinates"],
 )
 def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateSchema):
-    "Updates a subordinate."
+    """Verify the current entity configuration against the proposed overrides before updating."""
 
     try:
         sub = Subordinate.objects.get(id=subid)
@@ -684,7 +684,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
 
     metadata: dict[str, Any] = claims["metadata"]
     try:
-        _ = apply_server_policy(json.dumps(metadata))
+        _ = apply_server_policy(json.dumps(metadata), data.forced_metadata)
 
     except Exception as e:
         print(e)
@@ -745,7 +745,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     tags=["Subordinates"],
 )
 def renew_subordinate(request: HttpRequest, subid: int):
-    """Renews a subordinate by re-fetching and verifying its entity configuration."""
+    """Renew using the freshly verified entity configuration and the stored overrides."""
 
     try:
         sub = Subordinate.objects.get(id=subid)
@@ -791,7 +791,7 @@ def renew_subordinate(request: HttpRequest, subid: int):
 
     metadata: dict[str, Any] = claims["metadata"]
     try:
-        _ = apply_server_policy(json.dumps(metadata))
+        _ = apply_server_policy(json.dumps(metadata), sub.forced_metadata)
     except Exception as e:
         print(e)
         return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}

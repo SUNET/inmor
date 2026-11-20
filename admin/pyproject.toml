@@ -8,7 +8,7 @@ requires-python = '>=3.14'
 
 dependencies = [
 	"pyjosers>=0.4.1",
-	"oidfpolicy",
+	"oidfpolicy>=0.3.0",
 	"httpx",
 	"redis",
 	"django>=6,<7",
@@ -52,8 +52,8 @@ Home = "https://github.com/SUNET/inmor"
 # --locked` builds reproducible across hosts and the UTC build container.
 # Bump deliberately when updating dependencies.
 exclude-newer = "2026-11-01T00:00:00Z"
-# Allow the pyjosers release used for JWK metadata assignment and exact JWT dates.
-exclude-newer-package = { pyjosers = "2026-11-19T00:00:00Z" }
+# Allow the pyjosers and oidfpolicy releases used by the Admin.
+exclude-newer-package = { pyjosers = "2026-11-19T00:00:00Z", oidfpolicy = "2026-11-21T00:00:00Z" }
 
 [tool.pyright]
 stubPath = "typings"

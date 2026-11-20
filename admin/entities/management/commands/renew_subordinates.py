@@ -18,7 +18,7 @@ from entities.models import Subordinate
 
 @click.command()
 def command():
-    "Renews all active subordinates by re-fetching and verifying their entity configurations."
+    """Renew active subordinates whose current metadata and stored overrides satisfy policy."""
     con = get_redis_connection("default")
     subs = Subordinate.objects.filter(active=True)
     total = subs.count()
@@ -63,8 +63,9 @@ def command():
                 continue
 
         metadata: dict[str, Any] = claims["metadata"]
+        # Renewal reissues the stored overrides, so check them against the fresh metadata.
         try:
-            apply_server_policy(json.dumps(metadata))
+            apply_server_policy(json.dumps(metadata), sub.forced_metadata)
         except Exception as e:
             click.secho(f"FAILED (policy apply: {e})", fg="red")
             failed += 1

@@ -11,6 +11,18 @@ Before rollout
 * If clients use ``/resolve`` with an external trust anchor, provision its
   public keys before rollout. The local anchor uses its existing public keys.
   See :ref:`resolver-trust-anchors`.
+* Review Subordinate Statements issued by your anchor and intermediates.
+  Check that each host under a ``naming_constraints`` rule is in scope.
+  Keep legacy URL subtree rules if you rely on path or port restrictions.
+  See :ref:`resolver-naming-constraints`.
+* Omit unused ``metadata_policy`` and ``metadata_policy_crit`` claims.
+  Reissue statements containing empty policy objects, malformed operators
+  or unsupported critical extensions, and remove subordinate-only claims
+  from Entity Configurations. Check that policies from different superiors
+  have compatible operands. See :ref:`resolver-metadata-policy`.
+* Check forced metadata on existing subordinates before renewal. Every
+  top-level key must name an entity type and its value must be an object.
+  The Admin applies the configured policy after those overrides.
 * Check that resolve clients read the subject's ``trust_chain`` from the signed
   payload. Earlier versions also copied it into the JWS header. In 0.6.0
   the chain appears only in the payload.
@@ -77,3 +89,7 @@ Verify before resuming automation
   its signature with your federation client. Resolve a known subordinate and
   confirm that the chain still leads to the expected Trust Anchor. Repeat
   for each external anchor your clients request.
+* Resolve a leaf with a known policy and inspect the signed metadata and
+  chain. In staging, also check a leaf for which every path violates a
+  naming or policy rule. Expect HTTP 400 with ``invalid_trust_chain``.
+  If a valid alternate path exists, expect HTTP 200 and that path's metadata.

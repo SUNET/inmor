@@ -1,3 +1,5 @@
+"""Populate the test Admin and Redis with signed trust marks and subordinate statements."""
+
 import os
 import sys
 from pprint import pprint
@@ -80,14 +82,13 @@ for tm in subs:
 
     metadata = payload.get("metadata")
     if tm == "https://fakeop0.labb.sunet.se":
-        # Only for fakerp0 we add forced_metadata
+        # Each top-level override names a role and contains its metadata parameters.
         forced_metadata = {
             "openid_provider": {
                 "application_type": "mutant",
                 "system": ["py", "rust"],
                 "subject_types_supported": ["pairwise", "public", "e2e"],
             },
-            "extra_field": "extra_value",
         }
     else:
         forced_metadata = {}
