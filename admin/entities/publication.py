@@ -3,13 +3,14 @@
 from contextlib import contextmanager
 from functools import partial
 from hashlib import sha256
+from itertools import batched
 
 from django.db import transaction
 from django_redis import get_redis_connection
 from redis.client import Pipeline
 from trustmarks.models import TrustMark
 
-from .models import PendingPublication, Subordinate
+from .models import IssuedTrustMarkHash, PendingPublication, Subordinate
 
 
 def queue_publication(resource: Subordinate | TrustMark, entity_configuration: str = "") -> None:
@@ -22,8 +23,21 @@ def queue_publication(resource: Subordinate | TrustMark, entity_configuration: s
     pending, _ = PendingPublication.objects.update_or_create(
         **owner, defaults={"entity_configuration": entity_configuration}
     )
+    if isinstance(resource, TrustMark) and resource.mark:
+        # Multiple issuances can share this job before any callback acquires its lock.
+        IssuedTrustMarkHash.objects.get_or_create(
+            digest=sha256(resource.mark.encode()).hexdigest(),
+            defaults={"pending_publication": pending},
+        )
     # Capture only the job identity. A subsequent edit may replace its contents.
     transaction.on_commit(partial(deliver_publication, pending.pk))
+
+
+def retry_pending_trustmark(tm: TrustMark) -> None:
+    """Retry a committed update even when the repeated PUT changes no signed claims."""
+    pk = PendingPublication.objects.filter(trust_mark=tm).values_list("pk", flat=True).first()
+    if pk is not None:
+        transaction.on_commit(partial(deliver_publication, pk))
 
 
 @contextmanager
@@ -68,7 +82,7 @@ def publish_subordinate(sub: Subordinate, config: str, pipe: Pipeline) -> None:
 
 
 def publish_trustmark(tm: TrustMark, pipe: Pipeline) -> None:
-    """Stage the current mark and its membership while retaining historical hashes."""
+    """Stage the current mark and its membership in the public indexes."""
     tmtype = tm.tmt.tmtype
     if not tm.active:
         pipe.hset(f"inmor:tm:{tm.domain}", tmtype, "revoked")
@@ -79,7 +93,6 @@ def publish_trustmark(tm: TrustMark, pipe: Pipeline) -> None:
     pipe.hset(f"inmor:tm:{tm.domain}", tmtype, tm.mark)
     pipe.sadd(f"inmor:tmtype:{tmtype}", tm.domain)
     pipe.sadd("inmor:tmtypes", tmtype)
-    pipe.sadd("inmor:tm:alltime", sha256(tm.mark.encode()).hexdigest())
 
 
 @transaction.atomic
@@ -103,5 +116,11 @@ def deliver_publication(pk: int) -> None:
             tm = pending.trust_mark
             if tm is None:
                 raise ValueError("Missing trust mark for publication")
+            # A revocation can supersede issuance, but status lookup still needs every hash.
+            digests = IssuedTrustMarkHash.objects.filter(pending_publication=pending).values_list(
+                "digest", flat=True
+            )
+            for batch in batched(digests.iterator(), 1000):
+                pipe.sadd("inmor:tm:alltime", *batch)
             publish_trustmark(tm, pipe)
     pending.delete()

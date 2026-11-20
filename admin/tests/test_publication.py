@@ -1,6 +1,7 @@
 """Check database rollback, Redis retries, and ordering at real commit boundaries."""
 
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from threading import Event
 
 import httpx
@@ -12,7 +13,7 @@ from redis.exceptions import WatchError
 from auditlog.models import AuditLogEntry
 from common.signing import create_signed_jwt
 from entities import publication
-from entities.models import PendingPublication, Subordinate
+from entities.models import IssuedTrustMarkHash, PendingPublication, Subordinate
 from trustmarks.models import TrustMark
 
 
@@ -81,6 +82,13 @@ def test_trustmark_audit_failure_keeps_revocation(auth_client, loadredis, monkey
     url = f"/api/v1/trustmarks/{tm.pk}"
     assert auth_client.put(url, {"active": False}, "application/json").status_code == 200
 
+    # Even a signed and queued token must disappear if the enclosing transaction rolls back.
+    with transaction.atomic():
+        assert auth_client.put(url, {"active": True}, "application/json").status_code == 200
+        assert IssuedTrustMarkHash.objects.count() == 2
+        transaction.set_rollback(True)
+    assert IssuedTrustMarkHash.objects.count() == 1
+
     def fail_audit(*args, **kwargs):
         raise RuntimeError("audit insert failed")
 
@@ -92,6 +100,7 @@ def test_trustmark_audit_failure_keeps_revocation(auth_client, loadredis, monkey
     assert loadredis.hget(f"inmor:tm:{domain}", tm.tmt.tmtype) == b"revoked"
     assert not loadredis.sismember(f"inmor:tmtype:{tm.tmt.tmtype}", domain)
     assert loadredis.scard("inmor:tm:alltime") == 1
+    assert IssuedTrustMarkHash.objects.count() == 1
 
 
 def test_redis_outage_keeps_committed_mark_for_retry(auth_client, loadredis, monkeypatch):
@@ -139,8 +148,9 @@ def test_retry_after_interrupted_subordinate_publication(loadredis, monkeypatch)
     assert loadredis.lrange("inmor:newsubordinate", 0, -1) == [sub.entityid.encode()]
 
 
-def test_late_callback_after_revocation(auth_client, loadredis, monkeypatch):
-    """A delayed issuance callback cannot overwrite a newer committed revocation."""
+@pytest.mark.parametrize("replacement", [{"active": False}, {"additional_claims": {"ref": "new"}}])
+def test_late_callback_preserves_issuance_history(auth_client, loadredis, monkeypatch, replacement):
+    """Both callbacks preserve the first JWT and publish only the latest membership state."""
     entered, resume = Event(), Event()
     deliver = publication.deliver_publication
     domain = "https://ordering.example"
@@ -167,15 +177,62 @@ def test_late_callback_after_revocation(auth_client, loadredis, monkeypatch):
             assert entered.wait(15)
             tm = TrustMark.objects.get(domain=domain)
             response = auth_client.put(
-                f"/api/v1/trustmarks/{tm.pk}", {"active": False}, "application/json"
+                f"/api/v1/trustmarks/{tm.pk}", replacement, "application/json"
             )
             assert response.status_code == 200
         finally:
             resume.set()
-        assert result.result().status_code == 201
+        issued = result.result()
+        assert issued.status_code == 201
+    first = issued.json()["mark"]
+    expected = {sha256(first.encode()).hexdigest().encode()}
+    latest = response.json()["mark"]
+    if latest is not None:
+        assert latest != first
+        expected.add(sha256(latest.encode()).hexdigest().encode())
     assert not PendingPublication.objects.exists()
-    assert loadredis.hget(f"inmor:tm:{domain}", tm.tmt.tmtype) == b"revoked"
-    assert not loadredis.sismember(f"inmor:tmtype:{tm.tmt.tmtype}", domain)
+    assert loadredis.hget(f"inmor:tm:{domain}", tm.tmt.tmtype) == (latest or "revoked").encode()
+    assert bool(loadredis.sismember(f"inmor:tmtype:{tm.tmt.tmtype}", domain)) == bool(latest)
+    assert loadredis.smembers("inmor:tm:alltime") == expected
+    # Rebuilding the status index after Redis loss also preserves the superseded JWT.
+    loadredis.delete("inmor:tm:alltime")
+    call_command("reload_issued_tms")
+    assert expected <= loadredis.smembers("inmor:tm:alltime")
+
+
+@pytest.mark.parametrize("update", [{"active": True}, {"additional_claims": {"ref": "changed"}}])
+def test_identical_update_retries_committed_jwt(auth_client, loadredis, monkeypatch, update):
+    """A replay of a failed PUT delivers the saved JWT without signing another token."""
+    domain = "https://replay.example"
+    issued = auth_client.post(
+        "/api/v1/trustmarks", {"tmt": 2, "domain": domain}, "application/json"
+    )
+    assert issued.status_code == 201
+    tm = TrustMark.objects.get(pk=issued.json()["id"])
+    url = f"/api/v1/trustmarks/{tm.pk}"
+    if "active" in update:
+        assert auth_client.put(url, {"active": False}, "application/json").status_code == 200
+
+    def unavailable(alias):
+        raise ConnectionError("Redis unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(publication, "get_redis_connection", unavailable)
+        assert auth_client.put(url, update, "application/json").status_code == 500
+        tm.refresh_from_db()
+        saved = tm.mark
+        assert saved and saved != issued.json()["mark"]
+        assert loadredis.hget(f"inmor:tm:{domain}", tm.tmt.tmtype) != saved.encode()
+        # A second attempt during the outage must still report delivery failure.
+        assert auth_client.put(url, update, "application/json").status_code == 500
+
+    monkeypatch.setattr("inmoradmin.api.issue_trustmark", lambda *args: pytest.fail("re-signed"))
+    result = auth_client.put(url, update, "application/json")
+    assert result.status_code == 200
+    assert result.json()["mark"] == saved
+    assert not PendingPublication.objects.exists()
+    assert loadredis.hget(f"inmor:tm:{domain}", tm.tmt.tmtype) == saved.encode()
+    assert loadredis.sismember("inmor:tm:alltime", sha256(saved.encode()).hexdigest())
 
 
 def test_delayed_redis_execution_after_withdrawal(loadredis):

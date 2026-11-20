@@ -20,7 +20,7 @@ from entities.lib import (
     fetch_payload,
 )
 from entities.models import Subordinate
-from entities.publication import queue_publication
+from entities.publication import queue_publication, retry_pending_trustmark
 from ninja import NinjaAPI, Router, Schema
 from ninja.pagination import LimitOffsetPagination, paginate
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
@@ -500,6 +500,8 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
             log_update(request, "TrustMark", tm, snapshot_before=before)
             if publish:
                 queue_publication(tm)
+            else:
+                retry_pending_trustmark(tm)
         return 200, tm
     except TrustMark.DoesNotExist:
         return 404, {"message": "TrustMark does not exist.", "id": tmid}

@@ -51,3 +51,13 @@ class PendingPublication(models.Model):
                 name="publication_has_one_resource",
             )
         ]
+
+
+class IssuedTrustMarkHash(models.Model):
+    """Keep the digest of each issued JWT for the public trust mark status lookup."""
+
+    digest = models.CharField(max_length=64, primary_key=True)
+    # Acknowledging the job clears this link while retaining the issuance history.
+    pending_publication = models.ForeignKey(
+        PendingPublication, null=True, on_delete=models.SET_NULL
+    )

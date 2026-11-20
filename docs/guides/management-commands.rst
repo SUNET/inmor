@@ -76,10 +76,10 @@ Deactivates all active keys matching the given name for the user.
 reload_issued_tms
 -----------------
 
-Reload existing trust mark JWTs from the database into Redis. This does **not**
-re-sign anything — it reads the stored ``mark`` field from each active
-``TrustMark`` row and inserts its SHA-256 hash into the ``inmor:tm:alltime``
-Redis set.
+Restore the SHA-256 digests of issued JWTs from PostgreSQL to the
+``inmor:tm:alltime`` Redis set. Superseded and revoked marks remain available for
+status lookup. The migration imports tokens still stored in PostgreSQL.
+Preserve existing Redis history for older tokens that PostgreSQL no longer holds.
 
 ::
 
