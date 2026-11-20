@@ -260,7 +260,8 @@ Update the additional claims in a trust mark:
        }
      }'
 
-This generates a new JWT with the updated claims.
+Updating claims on an active trust mark generates a new JWT. A revoked trust
+mark stores the updated claims for use if it is reactivated.
 
 Verifying Trust Marks
 ---------------------

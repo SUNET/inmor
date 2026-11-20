@@ -13,6 +13,7 @@ from pyjosers import jwt
 from common.signing import create_signed_jwt
 from entities.lib import self_validate
 from entities.models import Subordinate
+from trustmarks.models import TrustMark
 
 # from pprint import pprint
 
@@ -357,6 +358,8 @@ def test_trustmark_update_additional_claims(auth_client: Client, loadredis):
     payload = get_payload(jwt_token)
     # Verify the claim is removed from the JWT payload
     assert payload.get("ref") is None
+    assert TrustMark.objects.get(pk=trustmark_id).additional_claims is None
+    assert loadredis.hget(f"inmor:tm:{domain}", payload["trust_mark_type"]) == jwt_token.encode()
 
 
 @pytest.mark.django_db
@@ -553,6 +556,78 @@ def test_trustmark_update(auth_client: Client, loadredis):
     assert redis_data == b"revoked"
     assert resp.get("autorenew") is False
     assert resp.get("active") is False
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("revoke_fields", [{}, {"additional_claims": None}])
+def test_revoke_trustmark_with_claims(auth_client, loadredis, monkeypatch, revoke_fields):
+    domain = "https://rp.example"
+    claims = {"ref": "https://issuer.example/ref"}
+    issued = auth_client.post(
+        "/api/v1/trustmarks",
+        {"tmt": 2, "domain": domain, "additional_claims": claims},
+        content_type="application/json",
+    )
+    assert issued.status_code == 201
+    tm = TrustMark.objects.get(pk=issued.json()["id"])
+    original_expiry = tm.expire_at
+    member_key = f"inmor:tmtype:{tm.tmt.tmtype}"
+    assert loadredis.sismember(member_key, domain)
+    monkeypatch.setattr(
+        "inmoradmin.api.add_trustmark", lambda *args: pytest.fail("unexpected signing")
+    )
+
+    url = f"/api/v1/trustmarks/{tm.pk}"
+    revoke = {"active": False, **revoke_fields}
+    for fields in (revoke, revoke, {"additional_claims": {}}):
+        response = auth_client.put(url, fields, content_type="application/json")
+        assert response.status_code == 200
+        tm.refresh_from_db()
+        assert tm.active is False
+        assert tm.additional_claims == fields.get("additional_claims", claims)
+        assert tm.mark is None
+        assert tm.expire_at == original_expiry
+        assert loadredis.hget(f"inmor:tm:{domain}", tm.tmt.tmtype) == b"revoked"
+        assert not loadredis.sismember(member_key, domain)
+    assert auth_client.post(f"{url}/renew").status_code == 400
+
+
+@pytest.mark.django_db
+def test_deactivate_subordinate_preserves_configuration(auth_client, loadredis, monkeypatch):
+    sub = Subordinate.objects.create(
+        entityid="https://rp.example",
+        metadata={"openid_relying_party": {}},
+        forced_metadata={"openid_relying_party": {"scope": "openid"}},
+        jwks='{"keys":[]}',
+        required_trustmarks="https://issuer.example/type",
+        statement="previously signed statement",
+        valid_for=24,
+        autorenew=False,
+        additional_claims={"ref": "https://issuer.example/ref"},
+    )
+    records = Subordinate.objects.filter(pk=sub.pk).values()
+    original = records.get()
+    for name in ["inmor:subordinates", "inmor:subordinates:jwt"]:
+        loadredis.hset(name, mapping={sub.entityid: "old token", "other": "other token"})
+    loadredis.lpush("inmor:newsubordinate", sub.entityid, "other", sub.entityid)
+    monkeypatch.setattr(
+        "inmoradmin.api.fetch_entity_configuration", lambda *args: pytest.fail("unexpected fetch")
+    )
+    url = f"/api/v1/subordinates/{sub.pk}"
+    # A malformed full edit must not be interpreted as a deactivation.
+    invalid = auth_client.post(
+        url, {"active": False, "metadata": []}, content_type="application/json"
+    )
+    assert invalid.status_code == 422
+    assert records.get() == original
+    for _ in range(2):
+        response = auth_client.post(url, {"active": False}, content_type="application/json")
+        assert response.status_code == 200
+        assert records.get() == {**original, "active": False}
+        for name in ["inmor:subordinates", "inmor:subordinates:jwt"]:
+            assert loadredis.hgetall(name) == {b"other": b"other token"}
+        assert loadredis.lrange("inmor:newsubordinate", 0, -1) == [b"other"]
+    assert auth_client.post(f"{url}/renew").status_code == 400
 
 
 @pytest.mark.django_db
@@ -986,19 +1061,23 @@ def test_renew_subordinate(auth_client: Client, loadredis, clean_subordinate):
 
 
 @pytest.mark.django_db
-def test_renew_inactive_subordinate(auth_client: Client, loadredis, clean_subordinate):
-    """Test that renewing an inactive subordinate returns 400."""
-    with open(os.path.join(data_dir, "fakerp0_metadata_without_key.json")) as fobj:
-        metadata = json.load(fobj)
-    with open(os.path.join(data_dir, "fakerp0_key.json")) as fobj:
-        keys = json.load(fobj)
-
-    # Create and then deactivate a subordinate
+def test_renew_inactive_subordinate(auth_client, loadredis, settings, monkeypatch):
+    """Older clients send required metadata alongside active=false."""
+    entity = "https://rp.example"
+    metadata = {"federation_entity": {}}
+    key = settings.SIGNING_PRIVATE_KEY
+    keys = {"keys": [key.export_public(as_dict=True)]}
+    claims = {"iss": entity, "sub": entity, "jwks": keys, "authority_hints": [settings.TA_DOMAIN]}
+    wire = create_signed_jwt({**claims, "metadata": metadata}, key, "entity-statement+jwt")
+    monkeypatch.setattr("entities.lib._federation_get", lambda url: httpx.Response(200, text=wire))
     data = {
-        "entityid": "https://fakerp0.labb.sunet.se",
+        "entityid": entity,
         "metadata": metadata,
         "jwks": keys,
         "forced_metadata": {},
+        "additional_claims": {"ref": "https://issuer.example/ref"},
+        "autorenew": False,
+        "valid_for": 24,
     }
     response = auth_client.post(
         "/api/v1/subordinates",
@@ -1022,9 +1101,50 @@ def test_renew_inactive_subordinate(auth_client: Client, loadredis, clean_subord
     )
     assert response.status_code == 200
 
+    sub = Subordinate.objects.get(pk=original["id"])
+    assert sub.active is False
+    assert sub.additional_claims == data["additional_claims"]
+    assert sub.autorenew is False
+    assert sub.valid_for == 24
+    assert not loadredis.hexists("inmor:subordinates", entity)
+    assert not loadredis.hexists("inmor:subordinates:jwt", entity)
+
     # Try to renew - should fail
     response = auth_client.post(f"/api/v1/subordinates/{original['id']}/renew")
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_deactivation_during_batch_renewal(auth_client, loadredis, settings, monkeypatch):
+    Subordinate.objects.update(active=False)
+    entity = "https://rp.example"
+    key = settings.SIGNING_PRIVATE_KEY
+    keys = {"keys": [key.export_public(as_dict=True)]}
+    sub = Subordinate.objects.create(entityid=entity, jwks=json.dumps(keys), statement="original")
+    claims = {
+        "iss": entity,
+        "sub": entity,
+        "jwks": keys,
+        "authority_hints": [settings.TA_DOMAIN],
+        "metadata": {"federation_entity": {}},
+    }
+    wire = create_signed_jwt(claims, key, "entity-statement+jwt")
+    loadredis.hset("inmor:subordinates", entity, "original")
+
+    def deactivate_during_fetch(url):
+        response = auth_client.post(
+            f"/api/v1/subordinates/{sub.pk}", {"active": False}, "application/json"
+        )
+        assert response.status_code == 200
+        return httpx.Response(200, text=wire)
+
+    monkeypatch.setattr("entities.lib._federation_get", deactivate_during_fetch)
+    call_command("renew_subordinates")
+    sub.refresh_from_db()
+    assert sub.active is False
+    assert sub.statement == "original"
+    assert not loadredis.hexists("inmor:subordinates", entity)
+    assert not loadredis.hexists("inmor:subordinates:jwt", entity)
 
 
 @pytest.mark.django_db

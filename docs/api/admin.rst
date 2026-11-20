@@ -505,14 +505,14 @@ Update Trust Mark
    * - ``additional_claims``
      - object
      - No
-     - Extra claims to include in the JWT (triggers re-signing); issuer-controlled claims are
-       rejected
+     - Extra claims for the JWT. Issuer-controlled claims are rejected.
 
 Setting ``active`` to ``false`` revokes the trust mark. The entity will
 no longer appear in trust mark lists, and status checks will return "revoked".
 
-Changing ``additional_claims`` triggers re-signing of the trust mark JWT
-with the updated claims.
+Omitting ``additional_claims`` preserves the saved claims. Send ``null`` to
+clear them. A change to the claims re-signs an active mark. A revoked mark
+keeps its saved claims and has no JWT until it is reactivated.
 
 Subordinates
 ------------
@@ -708,8 +708,13 @@ Update Subordinate
 
    POST /api/v1/subordinates/{id}
 
-Updates an existing subordinate. The API will re-fetch and re-validate
-the entity configuration before creating a new signed statement.
+To deactivate a subordinate, send ``{"active": false}`` as the entire body.
+This preserves the saved configuration and withdraws the entity from the
+Trust Anchor's fetch and list endpoints. Deactivation works even when the
+subordinate is offline.
+
+For a full edit, the API re-fetches and re-validates the entity configuration
+before creating a signed statement. The following fields apply to full edits.
 
 **Request Body:**
 

@@ -233,9 +233,6 @@ export default defineComponent({
             this.formError = null;
             try {
                 await this.$sdk.updateSubordinate(this.deactivatingItem.id, {
-                    metadata: this.deactivatingItem.metadata || {},
-                    forced_metadata: this.deactivatingItem.forced_metadata || {},
-                    jwks: this.deactivatingItem.jwks || { keys: [] },
                     active: false,
                 });
                 this.closeModals();

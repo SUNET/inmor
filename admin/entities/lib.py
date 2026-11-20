@@ -406,6 +406,15 @@ def update_redis_with_subordinate(
     _ = r.lpush("inmor:newsubordinate", entity_id)
 
 
+def withdraw_subordinate(entity_id: str, r: Redis) -> None:
+    """Remove direct federation membership from the fetch, list, and pending walk data."""
+    with r.pipeline() as pipe:
+        pipe.hdel("inmor:subordinates", entity_id)
+        pipe.hdel("inmor:subordinates:jwt", entity_id)
+        pipe.lrem("inmor:newsubordinate", 0, entity_id)
+        pipe.execute()
+
+
 def fetch_jwks_from_uri(uri: str) -> JWKSet:
     """Fetch a JWKS from a remote jwks_uri endpoint."""
     resp = _federation_get(uri)

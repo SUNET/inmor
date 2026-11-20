@@ -4,6 +4,7 @@ from typing import Any
 
 import djclick as click
 from django.conf import settings
+from django.db import transaction
 from django_redis import get_redis_connection
 
 from entities.lib import (
@@ -75,21 +76,27 @@ def command():
             additional_claims=sub.additional_claims,
         )
 
-        # Update database
-        fresh_jwks = claims.get("jwks", None)
+        # A deactivation or edit may have occurred during the remote fetch.
+        # Hold the row lock from the conditional update through Redis publication.
+        updates: dict[str, Any] = {"statement": signed_statement, "metadata": metadata}
+        if fresh_jwks := claims.get("jwks"):
+            updates["jwks"] = json.dumps(fresh_jwks)
         try:
-            sub.metadata = metadata
-            if fresh_jwks:
-                sub.jwks = json.dumps(fresh_jwks)
-            sub.statement = signed_statement
-            sub.save()
+            with transaction.atomic():
+                current = Subordinate.objects.filter(
+                    pk=sub.pk, active=True, statement=sub.statement
+                )
+                if not current.update(**updates):
+                    click.secho("Skipped (subordinate changed during renewal)")
+                    continue
+                update_redis_with_subordinate(
+                    sub.entityid, entity_jwt_str, metadata, signed_statement, con
+                )
         except Exception as e:
-            click.secho(f"FAILED (db save: {e})", fg="red")
+            click.secho(f"FAILED (renewal: {e})", fg="red")
             failed += 1
             continue
 
-        # Update Redis
-        update_redis_with_subordinate(sub.entityid, entity_jwt_str, metadata, signed_statement, con)
         renewed += 1
         click.secho("OK", fg="green")
 
