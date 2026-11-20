@@ -631,6 +631,74 @@ def test_subordinate_create_rejects_protected_additional_claim(auth_client, prot
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("claim", "value"),
+    [
+        ("metadata_policy", {}),
+        ("metadata_policy", {"federation_entity": {"organization_name": {"value": "Campus"}}}),
+        ("constraints", {}),
+        ("metadata_policy_crit", []),
+        ("metadata_policy_crit", None),
+    ],
+)
+def test_subordinate_only_claim_in_entity_configuration(
+    auth_client, loadredis, settings, monkeypatch, capsys, claim, value
+):
+    """Reject a signed configuration containing a subordinate-only claim on every issuance path."""
+    settings.POLICY_DOCUMENT = {"metadata_policy": {}}
+    entity = "https://rp.example"
+    endpoint = "/api/v1/subordinates"
+    key = settings.SIGNING_PRIVATE_KEY
+    keys = {"keys": [key.export_public(as_dict=True)]}
+    metadata = {"federation_entity": {"organization_name": "Campus"}}
+    claims = {
+        "iss": entity,
+        "sub": entity,
+        "jwks": keys,
+        "authority_hints": [settings.TA_DOMAIN],
+        "metadata": metadata,
+    }
+    valid = create_signed_jwt(claims, key, "entity-statement+jwt")
+    invalid = create_signed_jwt({**claims, claim: value}, key, "entity-statement+jwt")
+    wire = invalid
+    monkeypatch.setattr("entities.lib._federation_get", lambda url: httpx.Response(200, text=wire))
+    data = {"entityid": entity, "jwks": keys, "metadata": metadata, "forced_metadata": {}}
+
+    response = auth_client.post(endpoint, data, "application/json")
+    assert response.status_code == 400
+    assert claim in response.json()["message"]
+    assert not Subordinate.objects.filter(entityid=entity).exists()
+    assert loadredis.hget("inmor:subordinates", entity) is None
+    preview = auth_client.post(f"{endpoint}/fetch-config", {"url": entity}, "application/json")
+    assert preview.status_code == 400
+    assert claim in preview.json()["message"]
+
+    # Register a valid configuration, then have the same peer publish the invalid one.
+    wire = valid
+    assert auth_client.post(endpoint, data, "application/json").status_code == 201
+    sub = Subordinate.objects.get(entityid=entity)
+    previous = sub.statement
+    assert previous is not None
+    wire = invalid
+    url = f"{endpoint}/{sub.pk}"
+    for response in (
+        auth_client.post(url, data, "application/json"),
+        auth_client.post(f"{url}/renew"),
+    ):
+        assert response.status_code == 400
+        assert claim in response.json()["message"]
+
+    Subordinate.objects.exclude(pk=sub.pk).update(active=False)
+    call_command("renew_subordinates")
+    output = capsys.readouterr().out
+    assert claim in output and "0/1 renewed, 1 failed" in output
+    sub.refresh_from_db()
+    assert sub.statement == previous
+    assert loadredis.hget("inmor:subordinates", entity) == previous.encode()
+    assert loadredis.hget("inmor:subordinates:jwt", entity) == valid.encode()
+
+
+@pytest.mark.django_db
 def test_critical_policy_checked_before_issuing_subordinate(
     auth_client, loadredis, settings, monkeypatch, capsys
 ):

@@ -10,7 +10,6 @@ from entities.lib import (
     apply_server_policy,
     create_subordinate_statement,
     fetch_entity_configuration,
-    merge_our_policy_ontop_subpolicy,
     update_redis_with_subordinate,
 )
 from entities.models import Subordinate
@@ -51,16 +50,6 @@ def command():
             )
             failed += 1
             continue
-
-        # Verify metadata policy merge if present
-        if "metadata_policy" in claims:
-            sub_policy = claims.get("metadata_policy", {})
-            try:
-                merge_our_policy_ontop_subpolicy(sub_policy)
-            except Exception as e:
-                click.secho(f"FAILED (policy merge: {e})", fg="red")
-                failed += 1
-                continue
 
         metadata: dict[str, Any] = claims["metadata"]
         # Renewal signs the stored critical declaration along with the overrides.

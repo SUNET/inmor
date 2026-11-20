@@ -18,17 +18,11 @@ def get_payload(token_str: str):
     return jwt.decode_unverified(token_str)[1]
 
 
-def test_apply_server_policy_enforces_merged_policy(settings):
-    """Check the common allowed value, including when the superior supplies it."""
-
-    def policy(names):
-        """Build a role policy restricting organization_name to the supplied values."""
-        return {"federation_entity": {"organization_name": {"one_of": names}}}
-
-    settings.POLICY_DOCUMENT = {"metadata_policy": policy(["A", "B"])}
-    merged = lib.merge_our_policy_ontop_subpolicy(policy(["B", "C"]))
-    assert merged is not None
-    settings.POLICY_DOCUMENT = {"metadata_policy": json.loads(merged)}
+def test_apply_server_policy_enforces_configured_policy(settings):
+    """Check the issuer's configured rule, including when it supplies a metadata override."""
+    settings.POLICY_DOCUMENT = {
+        "metadata_policy": {"federation_entity": {"organization_name": {"one_of": ["B"]}}}
+    }
 
     allowed = {"federation_entity": {"organization_name": "B"}}
     outside_policy = {"federation_entity": {"organization_name": "A"}}
