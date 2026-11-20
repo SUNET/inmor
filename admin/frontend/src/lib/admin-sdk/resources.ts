@@ -1,12 +1,15 @@
 import {
     array,
     boolean,
+    literal,
     nullable,
     number,
     object,
     optional,
     record,
     string,
+    strictObject,
+    union,
     unknown,
     type InferOutput
 } from 'valibot';
@@ -97,17 +100,22 @@ export const SubordinateCreateOptionsSchema = object({
     additional_claims: optional(nullable(record(string(), unknown()))),
 });
 
+/** A full configuration edit or a request to deactivate a subordinate. */
 export type SubordinateUpdateOptions = InferOutput<typeof SubordinateUpdateOptionsSchema>;
-export const SubordinateUpdateOptionsSchema = object({
-    metadata: record(string(), unknown()),
-    forced_metadata: record(string(), unknown()),
-    jwks: record(string(), unknown()),
-    required_trustmarks: optional(nullable(string())),
-    valid_for: optional(nullable(number())),
-    autorenew: optional(boolean()),
-    active: optional(boolean()),
-    additional_claims: optional(nullable(record(string(), unknown()))),
-});
+export const SubordinateUpdateOptionsSchema = union([
+    object({
+        metadata: record(string(), unknown()),
+        forced_metadata: record(string(), unknown()),
+        jwks: record(string(), unknown()),
+        required_trustmarks: optional(nullable(string())),
+        valid_for: optional(nullable(number())),
+        autorenew: optional(boolean()),
+        active: optional(boolean()),
+        additional_claims: optional(nullable(record(string(), unknown()))),
+    }),
+    // Reject partial edits here so validation cannot silently discard configuration fields.
+    strictObject({ active: literal(false) }),
+]);
 
 export type Subordinate = InferOutput<typeof SubordinateSchema>;
 export const SubordinateSchema = object({
