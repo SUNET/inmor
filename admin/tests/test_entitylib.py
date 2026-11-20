@@ -18,6 +18,33 @@ def get_payload(token_str: str):
     return jwt.decode_unverified(token_str)[1]
 
 
+def test_apply_server_policy_enforces_configured_policy(settings):
+    """Check the issuer's configured rule, including when it supplies a metadata override."""
+    settings.POLICY_DOCUMENT = {
+        "metadata_policy": {"federation_entity": {"organization_name": {"one_of": ["B"]}}}
+    }
+
+    allowed = {"federation_entity": {"organization_name": "B"}}
+    outside_policy = {"federation_entity": {"organization_name": "A"}}
+    assert json.loads(lib.apply_server_policy(json.dumps(allowed))) == allowed
+    with pytest.raises(RuntimeError, match="one_of"):
+        lib.apply_server_policy(json.dumps(outside_policy))
+
+    # The superior's value is the one the policy must accept or reject.
+    assert json.loads(lib.apply_server_policy(json.dumps(outside_policy), allowed)) == allowed
+    with pytest.raises(RuntimeError, match="one_of"):
+        lib.apply_server_policy(json.dumps(allowed), outside_policy)
+
+
+def test_apply_server_policy_with_empty_policy(settings):
+    """An empty configuration allows metadata while still validating override structure."""
+    settings.POLICY_DOCUMENT = {"metadata_policy": {}}
+    metadata = {"federation_entity": {"organization_name": "Campus"}}
+    assert json.loads(lib.apply_server_policy(json.dumps(metadata))) == metadata
+    with pytest.raises(RuntimeError, match="invalid superior metadata"):
+        lib.apply_server_policy(json.dumps(metadata), {"federation_entity": "Campus"})
+
+
 def test_fetch_entity_configuration_with_keys():
     "Tests fetching entity configuration and verification."
     self = TestCase()

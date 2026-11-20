@@ -374,7 +374,6 @@ The Trust Anchor creates subordinate statements with this structure:
          "application_type": "web"
        }
      },
-     "metadata_policy": {},
      "organization_name": "Example Corp"
    }
 
@@ -384,7 +383,8 @@ Key fields:
 * ``sub``: Subordinate entity ID
 * ``jwks``: Entity's public keys (for chain verification)
 * ``metadata``: Merged and policy-applied metadata
-* ``metadata_policy``: Any policy the subordinate should apply to its subordinates
+* ``metadata_policy`` is optional and restricts the subject and its subordinates.
+  Omit it when no policy applies. See :ref:`resolver-metadata-policy`.
 
 Fetching Subordinate Statements
 -------------------------------
@@ -536,9 +536,11 @@ Renew a Single Subordinate (API)
 The endpoint:
 
 1. Re-fetches the entity's ``/.well-known/openid-federation`` JWT
-2. Verifies the signature using the stored JWKS
+2. Verifies the signature using the stored JWKS and rejects configurations
+   containing ``constraints``, ``metadata_policy``, or ``metadata_policy_crit``,
+   including empty values
 3. Checks that the TA domain is still in ``authority_hints``
-4. Validates metadata policy merge and application
+4. Applies the issuer's configured policy to the metadata with the stored overrides
 5. Regenerates the signed subordinate statement
 6. Updates the database and Redis
 

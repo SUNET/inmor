@@ -12,7 +12,7 @@ from django.conf import settings
 from pyjosers import jwk, jwt
 from pyjosers.jwk import JWKSet
 from pyjosers.jwt import JWT
-from oidfpolicy import apply_policy, merge_policies
+from oidfpolicy import apply_policy
 from pydantic import BaseModel
 from redis import Redis
 
@@ -144,17 +144,18 @@ def _entity_configuration_url(entity_id: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
+def _validate_entity_configuration_claims(claims: dict[str, Any]) -> None:
+    """Reject superior-issued policy and constraints in a verified entity configuration."""
+    # The claim's presence determines its role, even when its value is empty or null.
+    for name in ("constraints", "metadata_policy", "metadata_policy_crit"):
+        if name in claims:
+            raise ValueError(f"{name} is only valid in a subordinate statement")
+
+
 def fetch_entity_configuration(
     entityid: str, keys: dict[Any, Any] | None = None
 ) -> tuple[JWT, JWKSet, str]:
-    """Fetches the entity configuration and returns verified JWT.
-
-
-    :args entityid: str the entity_id
-
-    :returns: Tuple of JWT representation and JWKSet, and jwt in str format
-    """
-    # Let us get the JWKS
+    """Verify an entity configuration with the supplied keys and check its claim placement."""
     if keys is not None:
         keys_str = json.dumps(keys)
         keyset = jwk.JWKSet.from_json(keys_str)
@@ -163,23 +164,27 @@ def fetch_entity_configuration(
     resp = _federation_get(_entity_configuration_url(entityid))
     text = resp.text
     jwt_net: JWT = verify_federation_jwt(text, keyset)
+    _validate_entity_configuration_claims(json.loads(jwt_net.claims))
     return jwt_net, keyset, text
 
 
-def merge_our_policy_ontop_subpolicy(subpolicy: dict[Any, Any]) -> str | None:
-    "To verify that we can succesfully merge policies."
-    if settings.POLICY_DOCUMENT.get("metadata_policy", {}):
-        merged_policy = merge_policies(
-            json.dumps(settings.POLICY_DOCUMENT.get("metadata_policy", {})), json.dumps(subpolicy)
-        )
-        return merged_policy
-    return None
-
-
-def apply_server_policy(metadata: str):
-    "Verifies that we can apply our policy on the metadata."
-    m = apply_policy(json.dumps(settings.POLICY_DOCUMENT.get("metadata_policy", {})), metadata)
-    return m
+def apply_server_policy(
+    metadata: str,
+    forced_metadata: dict[str, Any] | None = None,
+    *,
+    additional_claims: dict[str, Any] | None = None,
+) -> str:
+    """Apply the issuing superior's overrides, policy, and critical declaration to the metadata."""
+    policy = settings.POLICY_DOCUMENT.get("metadata_policy", {})
+    # oidfpolicy reads statement claims. Mirror the issuer, which omits the
+    # default empty policy and places superior overrides under "metadata".
+    document = {} if policy == {} else {"metadata_policy": policy}
+    if forced_metadata is not None:
+        document["metadata"] = forced_metadata
+    # Preserve an explicitly null or empty declaration so oidfpolicy can reject it.
+    if additional_claims is not None and "metadata_policy_crit" in additional_claims:
+        document["metadata_policy_crit"] = additional_claims["metadata_policy_crit"]
+    return apply_policy(json.dumps(document), metadata)
 
 
 def create_server_statement() -> str:
@@ -425,12 +430,14 @@ def self_validate(token: str) -> dict[str, Any]:
 
 
 def fetch_payload(entity_id: str):
-    """Fetch and self-verify the entity configuration, retaining its original compact JWT."""
+    """Verify the self-signed configuration and return its validated claims and original JWT."""
     resp = _federation_get(_entity_configuration_url(entity_id))
     if resp.status_code != 200:
         raise Exception(f"Fetching payload returns {resp.status_code} for {entity_id}")
     text = resp.text
-    return self_validate(text), text
+    claims = self_validate(text)
+    _validate_entity_configuration_claims(claims)
+    return claims, text
 
 
 def fetch_subordinate_statements(authority_hints: list[str], entity_id: str, r: Redis):

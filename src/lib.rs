@@ -1,5 +1,7 @@
+mod naming_constraints;
 pub mod tree;
 use anyhow::{Result, anyhow, bail};
+use naming_constraints::NamingConstraints;
 
 use lazy_static::lazy_static;
 use log::{debug, warn};
@@ -16,7 +18,7 @@ use jose_rs::{
     jwk::{Jwk, JwkSet, selection::SelectionPolicy},
     jwt::{self, Claims, NumericDate, UnverifiedJwt, Validation},
 };
-use oidfed_metadata_policy::*;
+use oidfed_metadata_policy::{SubordinatePolicy, resolve_chain_metadata};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -1649,24 +1651,20 @@ pub fn self_verify_jwt(data: &str) -> Result<(Claims, JoseHeader)> {
     Ok((payload, header))
 }
 
-/// OpenID Federation §6.2 `constraints` parsed from a Subordinate Statement
-/// (or an Entity Configuration). Each Subordinate Statement's constraints
-/// apply to its subject and any entity below it in the chain.
-///
-/// Inmor's walker checks each successfully-verified Subordinate Statement's
-/// constraints against the resolve subject (the chain leaf). A violation
-/// causes the offending authority to be skipped — same `continue` pattern
-/// as a bad signature or missing JWKS.
+/// Constraints from one signed Subordinate Statement. Naming constraints
+/// cover each subordinate on the path. The legacy URL subtrees cover the leaf.
 #[derive(Debug, Clone, Default)]
 pub struct Constraints {
     /// §6.2.1 — maximum number of entities allowed below the SS subject in
     /// the chain. `None` means no constraint set by this statement.
     pub max_path_length: Option<u8>,
-    /// §6.2.2 — URL subtrees the subject MUST be a subordinate of (any one
+    /// Standard host restrictions apply to every subordinate in this branch.
+    pub naming_constraints: Option<NamingConstraints>,
+    /// Legacy URL subtrees the leaf must be a subordinate of (any one
     /// match within this list suffices; empty list means no constraint set
     /// by this statement).
     pub permitted_subtrees: Vec<String>,
-    /// §6.2.2 — URL subtrees the subject MUST NOT be a subordinate of.
+    /// Legacy URL prefixes excluded for the leaf.
     pub excluded_subtrees: Vec<String>,
     /// §6.2.3 — entity types allowed for any entity below the SS subject in
     /// the chain. `None` means no constraint set.
@@ -1738,6 +1736,10 @@ impl Constraints {
         };
         Ok(Self {
             max_path_length,
+            naming_constraints: obj
+                .get("naming_constraints")
+                .map(NamingConstraints::parse)
+                .transpose()?,
             permitted_subtrees: pull_string_array("permitted_subtrees")?,
             excluded_subtrees: pull_string_array("excluded_subtrees")?,
             allowed_entity_types: pull_opt_string_array("allowed_entity_types")?,
@@ -1817,7 +1819,7 @@ impl Constraints {
     }
 }
 
-/// Spec §6.2.2 — is `entity_url` a subordinate of the URL `subtree`?
+/// Compatibility with the legacy full-URL subtree fields.
 ///
 /// Matching rules:
 /// * scheme + host are compared case-insensitively
@@ -2041,6 +2043,15 @@ fn verify_entity_statement(
     if header.kid.as_deref().is_none_or(str::is_empty) {
         bail!("entity statement requires a nonempty kid");
     }
+    if issuer == subject {
+        // These claims express a superior's decision about a subordinate.
+        // A self-signed configuration cannot supply them (§3.1.3).
+        for name in ["constraints", "metadata_policy", "metadata_policy_crit"] {
+            if payload.extra.contains_key(name) {
+                bail!("{name} is only valid in a subordinate statement");
+            }
+        }
+    }
     enforce_crit_claim(&payload)?;
     Ok(VerifiedJWT {
         jwt,
@@ -2066,7 +2077,7 @@ async fn fetch_chain_link(
     subject: &str,
     ctx: &WalkContext,
     child: &VerifiedJWT,
-    depth: u8,
+    branch: &HashSet<String>,
 ) -> Result<(VerifiedJWT, VerifiedJWT)> {
     check_chain_fetch_budget(ctx, subject)?;
     let ec = fetch_resolver_configuration(authority).await?;
@@ -2090,7 +2101,16 @@ async fn fetch_chain_link(
     // which may use a different key from its discovery EC during rollover.
     let endorsed_keys = get_jwks_from_payload(&statement.payload)?;
     verify_jwt_signature_with_jwks(&child.jwt, Some(endorsed_keys))?;
-    Constraints::from_payload(&statement.payload)?.check_subject(
+    let constraints = Constraints::from_payload(&statement.payload)?;
+    // The walk grows upwards. Its current branch contains exactly the entities
+    // below this issuer, including the immediate subject of the endorsement.
+    if let Some(names) = &constraints.naming_constraints {
+        for entity in branch {
+            names.check(entity)?;
+        }
+    }
+    let depth = (branch.len() - 1) as u8;
+    constraints.check_subject(
         &ctx.original_subject,
         &ctx.original_subject_entity_types,
         depth == 0,
@@ -2099,8 +2119,33 @@ async fn fetch_chain_link(
     Ok((ec, statement))
 }
 
+/// Evaluate only the subordinate statements on this candidate path. The wire
+/// order is leaf to anchor; policy resolution runs in the opposite direction.
+fn candidate_metadata(leaf: &VerifiedJWT, chain: &[VerifiedJWT]) -> Result<Map<String, Value>> {
+    let metadata = leaf
+        .payload
+        .extra
+        .get("metadata")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow!("missing or malformed subject metadata"))?;
+    let policies = chain
+        .iter()
+        .rev()
+        .map(|entry| {
+            debug_assert!(entry.substatement);
+            SubordinatePolicy {
+                metadata_policy: entry.payload.extra.get("metadata_policy"),
+                metadata_policy_crit: entry.payload.extra.get("metadata_policy_crit"),
+                metadata: entry.payload.extra.get("metadata"),
+            }
+        })
+        .collect::<Vec<_>>();
+    resolve_chain_metadata(metadata, &policies)
+}
+
 /// Append subordinate statements in leaf-to-anchor order. Only a complete,
-/// pinned path is returned. Failed branches leave the caller's path intact.
+/// pinned path is returned, together with the metadata its policies produce.
+/// Failed branches leave the caller's path intact.
 async fn extend_trust_chain(
     subject: &str,
     config: &VerifiedJWT,
@@ -2108,10 +2153,11 @@ async fn extend_trust_chain(
     chain: &mut Vec<VerifiedJWT>,
     visited: &mut HashSet<String>,
     ctx: &WalkContext,
-) -> Result<bool> {
+    leaf: &VerifiedJWT,
+) -> Result<Option<Map<String, Value>>> {
     let depth = chain.len();
     if depth > usize::from(MAX_RESOLVE_DEPTH) {
-        return Ok(false);
+        return Ok(None);
     }
     let hints = config
         .payload
@@ -2119,6 +2165,7 @@ async fn extend_trust_chain(
         .get("authority_hints")
         .and_then(Value::as_array);
     let mut transient_error = None;
+    let mut policy_error = None;
     for authority in hints.into_iter().flatten().filter_map(Value::as_str) {
         if visited.contains(authority) {
             continue;
@@ -2127,7 +2174,7 @@ async fn extend_trust_chain(
         let pins = anchors.get(authority).copied();
         let child = chain.last().unwrap_or(config);
         let (superior, endorsement) =
-            match fetch_chain_link(authority, subject, ctx, child, depth as u8).await {
+            match fetch_chain_link(authority, subject, ctx, child, visited).await {
                 Ok(link) => link,
                 Err(err) => {
                     warn!("Skipping authority {authority} for {subject}: {err}");
@@ -2152,41 +2199,72 @@ async fn extend_trust_chain(
         }
         chain.push(endorsement);
         if trusted {
-            chain.push(superior);
-            return Ok(true);
+            // A signed path is only a candidate until its policy also succeeds.
+            // Finish this check before selecting the path or verifying trust marks.
+            match candidate_metadata(leaf, chain) {
+                Ok(metadata) => {
+                    chain.push(superior);
+                    return Ok(Some(metadata));
+                }
+                Err(err) => {
+                    warn!("Policy rejected chain to {authority}: {err:#}");
+                    policy_error = Some(err);
+                    if anchors.len() == 1 {
+                        chain.pop();
+                        continue;
+                    }
+                }
+            }
         }
         visited.insert(authority.to_owned());
         let found = Box::pin(extend_trust_chain(
-            authority, &superior, anchors, chain, visited, ctx,
+            authority, &superior, anchors, chain, visited, ctx, leaf,
         ))
         .await;
         visited.remove(authority);
         match found {
-            Ok(true) => return Ok(true),
-            Ok(false) => {}
-            Err(err) => transient_error = Some(err),
+            Ok(Some(metadata)) => return Ok(Some(metadata)),
+            Ok(None) => {}
+            Err(err)
+                if err
+                    .downcast_ref::<FetchError>()
+                    .is_some_and(|f| f.transient) =>
+            {
+                transient_error = Some(err)
+            }
+            Err(err) => policy_error = Some(err),
         }
         chain.pop();
     }
-    match transient_error {
+    // A temporarily unreachable alternative might still yield a valid path.
+    match transient_error.or(policy_error) {
         Some(err) => Err(err),
-        None => Ok(false),
+        None => Ok(None),
     }
 }
 
+/// Return the verified wire chain and resolved leaf metadata for the same path.
 async fn resolve_entity_to_trustanchor(
     subject: &str,
     anchors: &HashMap<&str, &JwkSet>,
-) -> Result<Vec<VerifiedJWT>> {
+) -> Result<(Vec<VerifiedJWT>, Map<String, Value>)> {
     let leaf = fetch_resolver_configuration(subject).await?;
     let ctx = WalkContext::from_subject_payload(subject, &leaf.payload);
     let mut chain = Vec::new();
     let mut visited = HashSet::from([subject.to_owned()]);
-    if !extend_trust_chain(subject, &leaf, anchors, &mut chain, &mut visited, &ctx).await? {
-        bail!("no validated path to a requested trust anchor");
-    }
+    let metadata = extend_trust_chain(
+        subject,
+        &leaf,
+        anchors,
+        &mut chain,
+        &mut visited,
+        &ctx,
+        &leaf,
+    )
+    .await?
+    .ok_or_else(|| anyhow!("no validated path to a requested trust anchor"))?;
     chain.insert(0, leaf);
-    Ok(chain)
+    Ok((chain, metadata))
 }
 
 /// To create the signed JWT for resolve response
@@ -2957,7 +3035,7 @@ pub async fn resolve_entity(
         .get_connection_manager()
         .await
         .map_err(error::ErrorInternalServerError)?;
-    let result = match resolve_entity_to_trustanchor(&sub, &anchors).await {
+    let (result, metadata) = match resolve_entity_to_trustanchor(&sub, &anchors).await {
         Ok(res) => res,
         Err(e) => {
             warn!("Error resolving entity {} to trust anchors: {}", sub, e);
@@ -3021,132 +3099,10 @@ pub async fn resolve_entity(
         Some(verified_trust_marks)
     };
 
-    let mut mpolicy: Option<Map<String, Value>> = None;
-    let reversed: Vec<&VerifiedJWT> = result.iter().rev().collect();
-
-    // We need to skip the top one (the trust anchor's entity configuration)
-    for (i, res) in reversed.iter().enumerate().skip(1) {
-        mpolicy = match mpolicy {
-            // This is when we have some policy the higher subordinate statement
-            Some(val) => {
-                // But we should only apply claim from subordinate statements
-                if res.substatement {
-                    let new_policy = res.payload.extra.get("metadata_policy");
-                    match new_policy {
-                        Some(p) => {
-                            let temp_val = json!(val);
-                            let merged = merge_policies(&temp_val, p);
-                            match merged {
-                                Ok(policy) => Some(policy),
-                                Err(e) => {
-                                    // Spec §6.1.3.2: surface the crate's error
-                                    // (often the offending critical operator
-                                    // name) rather than swallow it.
-                                    warn!("metadata_policy merge failed: {e}");
-                                    return error_response_400(
-                                        "invalid_trust_chain",
-                                        &format!("metadata policy merge failed: {e}"),
-                                    );
-                                }
-                            }
-                        }
-                        None => Some(val),
-                    }
-                } else {
-                    // Means the final entity statement
-                    // We should now apply the merged policy at val to the metadata claim
-                    let Some(metadata) = res.payload.extra.get("metadata").cloned() else {
-                        return error_response_400(
-                            "invalid_trust_chain",
-                            "missing metadata in entity statement",
-                        );
-                    };
-                    debug!("Final policy checking: val={val:?} metadata={metadata:?}");
-                    let mut forced_metadata: Option<&Value> = None;
-                    // Let us see if we have any subordinate statement's metadata to apply first
-                    if i > 0 {
-                        let last_sub_statement = reversed[i - 1];
-                        forced_metadata = last_sub_statement.payload.extra.get("metadata");
-                    }
-                    let Some(metadata_obj) = metadata.as_object() else {
-                        return error_response_400(
-                            "invalid_trust_chain",
-                            "metadata is not an object",
-                        );
-                    };
-                    let full_policy = match forced_metadata {
-                        Some(fm) => json!({"metadata_policy": val.clone(), "metadata": fm.clone()}),
-                        None => json!({"metadata_policy": val.clone()}),
-                    };
-                    let Some(full_policy_document) = full_policy.as_object() else {
-                        return error_response_400(
-                            "invalid_trust_chain",
-                            "failed to create policy document",
-                        );
-                    };
-                    // Here the policy contains for every kind of entity.
-                    // In the full_policy_document we have any forced metadata from the authority.
-                    match apply_policy_document_on_metadata(full_policy_document, metadata_obj) {
-                        Ok(applied) => {
-                            debug!("Applied final metadata after applying policy: {applied:?}");
-                            Some(applied)
-                        }
-                        Err(e) => {
-                            // Spec §3.1.3 / §6.1.3.2: surface the crate's
-                            // error (e.g., unknown critical operator) instead
-                            // of a generic message.
-                            warn!("metadata_policy apply failed: {e}");
-                            return error_response_400(
-                                "invalid_trust_chain",
-                                &format!("metadata policy apply failed: {e}"),
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Means first time getting a metadata policy.
-            // We should store it properly in mpolicy
-            None => {
-                // We should only get it from a subordinate statement
-                if res.substatement {
-                    let new_policy = res.payload.extra.get("metadata_policy");
-                    match new_policy {
-                        Some(p) => {
-                            if let Some(data) = p.as_object() {
-                                Some(data.clone())
-                            } else {
-                                Some(Map::new())
-                            }
-                        }
-
-                        // Even the subordinate statement does not have any policy
-                        None => Some(Map::new()),
-                    }
-                } else {
-                    // Not a subordinate statement
-                    // Means an entity statement
-                    // Means no policy and only statement, nothing to verify against
-                    // Return the original metadata here
-                    //None
-                    //Some(Map::new())
-                    res.payload
-                        .extra
-                        .get("metadata")
-                        .and_then(|m| m.as_object())
-                        .cloned()
-                }
-            }
-        };
-    }
-    // HACK:
-    debug!("After the whole call: {mpolicy:?}");
-    // The mpolicy now contains the final metadata after applying policies.
-
     // Apply entity_type filtering if provided
     // Per OpenID Federation spec, entity_type filters which metadata keys are returned.
     // If entity_type is provided but none of the types match, return all metadata.
-    let filtered_metadata = filter_metadata_by_entity_types(mpolicy, entity_type.as_ref());
+    let filtered_metadata = filter_metadata_by_entity_types(Some(metadata), entity_type.as_ref());
 
     // If we reach here means we have a list of JWTs and also verified metadata.
     let resp =

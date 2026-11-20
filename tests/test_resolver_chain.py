@@ -223,3 +223,152 @@ def test_selected_anchor_controls_trust_mark_recognition(chain, rdb):
     )
     del anchor.claims["trust_mark_issuers"]
     assert "trust_marks" not in chain.verified_response(chain.resolve())
+
+
+@pytest.mark.parametrize(
+    "restriction,allowed",
+    [
+        ({"permitted": ["127.0.0.1"]}, True),
+        ({"permitted": ["elsewhere.example"]}, False),
+        ({"permitted": ["127.0.0.1"], "excluded": ["127.0.0.1"]}, False),
+        ({"permitted": []}, False),
+        ({"permitted": None}, False),
+        ({"excluded": ["."]}, False),
+        ({"excluded": ["https://example.org/path"]}, False),
+    ],
+)
+def test_standard_host_constraints(chain, restriction, allowed):
+    """Resolve with a signed host restriction and check the outcome for the leaf."""
+    chain.statements["parent"].claims["constraints"] = {"naming_constraints": restriction}
+    response = chain.resolve()
+    if allowed:
+        chain.verified_response(response)
+    else:
+        assert_invalid(response)
+
+
+def test_standard_host_constraints_cover_intermediate(chain):
+    """Verify that excluding an intermediate invalidates the whole path."""
+    # Serve the intermediate at a different hostname on the same loopback
+    # server. The anchor permits the leaf's host but excludes the intermediate.
+    original = chain.entity("intermediate")
+    alias = original.replace("127.0.0.1", "localhost")
+    chain.statements["intermediate"].claims.update(iss=alias, sub=alias)
+    chain.statements["leaf"].claims["authority_hints"] = [alias]
+    chain.statements["child"].claims["iss"] = alias
+    parent = chain.statements["parent"]
+    parent.claims.update(sub=alias, constraints={"naming_constraints": {"excluded": ["localhost"]}})
+    chain.peer.set_document("/anchor/fetch?sub=" + alias, parent.sign())
+    assert_invalid(chain.resolve())
+    del parent.claims["constraints"]
+    chain.peer.set_document("/anchor/fetch?sub=" + alias, parent.sign())
+    chain.verified_response(chain.resolve())
+
+
+def test_legacy_url_restriction_still_applies(chain):
+    """A legacy URL exclusion still rejects a leaf whose hostname is permitted."""
+    chain.statements["parent"].claims["constraints"] = {
+        "naming_constraints": {"permitted": ["127.0.0.1"]},
+        "excluded_subtrees": [chain.entity("leaf")],
+    }
+    assert_invalid(chain.resolve())
+
+
+@pytest.mark.parametrize("statement", ["parent", "child"])
+@pytest.mark.parametrize(
+    "bad_policy",
+    [
+        None,
+        [],
+        {"federation_entity": []},
+        {"federation_entity": {"organization_name": {"one_of": ["x"], "add": ["x"]}}},
+    ],
+)
+def test_invalid_policy_at_either_level(chain, statement, bad_policy):
+    """Require every superior on the path to issue a well-formed policy."""
+    chain.statements[statement].claims["metadata_policy"] = bad_policy
+    assert_invalid(chain.resolve())
+
+
+def test_merged_policies_apply_to_immediate_superior_override(chain):
+    """Verify the signed leaf metadata after merging both policies and checking the override."""
+    leaf = chain.statements["leaf"].claims
+    parent = chain.statements["parent"].claims  # Anchor's statement about the intermediate.
+    child = chain.statements["child"].claims  # Intermediate's statement about the leaf.
+    leaf["metadata"]["federation_entity"]["organization_name"] = "Leaf"
+    parent["metadata_policy"] = {
+        "federation_entity": {"organization_name": {"one_of": ["Campus", "Anchor only"]}}
+    }
+    child["metadata_policy"] = {
+        "federation_entity": {"organization_name": {"one_of": ["Campus", "Intermediate only"]}}
+    }
+    # Only the immediate superior supplies overrides for the leaf. Applying policy
+    # to the original leaf value or taking the anchor's override would reject this path.
+    parent["metadata"] = {"federation_entity": {"organization_name": "Anchor only"}}
+    child["metadata"] = {"federation_entity": {"organization_name": "Campus"}}
+    claims = chain.verified_response(chain.resolve())
+    assert claims["metadata"] == {
+        "federation_entity": {
+            "federation_fetch_endpoint": chain.entity("leaf") + "/fetch",
+            "organization_name": "Campus",
+        }
+    }
+
+    # Each value satisfies exactly one superior. Both must fail the merged rule.
+    for name in ("Anchor only", "Intermediate only"):
+        child["metadata"]["federation_entity"]["organization_name"] = name
+        assert_invalid(chain.resolve())
+
+
+def test_malformed_superior_metadata_is_rejected(chain):
+    """Require an object for every role, even when the leaf omits that role."""
+    chain.statements["child"].claims["metadata"] = {"unknown_entity_type": "scalar"}
+    assert_invalid(chain.resolve())
+
+
+def test_critical_declaration_applies_across_the_chain(chain):
+    """Reject an unknown operator once a superior declares it critical."""
+    chain.statements["child"].claims["metadata_policy"] = {
+        "federation_entity": {"organization_name": {"extension": "operand", "default": "Campus"}}
+    }
+    claims = chain.verified_response(chain.resolve())
+    assert claims["metadata"]["federation_entity"]["organization_name"] == "Campus"
+    chain.statements["parent"].claims["metadata_policy_crit"] = ["extension"]
+    assert_invalid(chain.resolve())
+
+
+def test_policy_failure_tries_next_signed_path(chain):
+    """Verify that the signed response uses the chain and metadata of the successful path."""
+    # Both paths are signed. The leaf's immediate superior on the first path
+    # imposes an unsatisfied rule, so only the direct anchor path can be used.
+    chain.statements["child"].claims["metadata_policy"] = {
+        "federation_entity": {"organization_name": {"essential": True}}
+    }
+    assert_invalid(chain.resolve())
+    leaf = chain.statements["leaf"]
+    anchor = chain.entity("anchor")
+    leaf.claims["authority_hints"].append(anchor)
+    direct = Statement(
+        chain.statements["anchor"].signer,
+        {
+            **chain.statements["child"].claims,
+            "iss": anchor,
+            "metadata_policy": {"federation_entity": {"organization_name": {"value": "Direct"}}},
+        },
+    ).sign()
+    chain.peer.set_document("/anchor/fetch?sub=" + chain.entity("leaf"), direct)
+    response = chain.resolve()
+    assert response.status_code == 200, response.text
+    token = jwt.JWT.from_jose_token(response.text)
+    with open("private.json") as f:
+        token.validate(jwk.JWK(**json.load(f)).public())
+    claims = json.loads(token.claims)
+    assert claims["trust_chain"] == [chain.wire["leaf"], direct, chain.wire["anchor"]]
+    assert claims["metadata"]["federation_entity"]["organization_name"] == "Direct"
+
+
+@pytest.mark.parametrize("claim", ["metadata_policy", "metadata_policy_crit", "constraints"])
+def test_policy_claims_require_a_subordinate_statement(chain, claim):
+    """Reject subordinate-only claims in a self-signed leaf configuration."""
+    chain.statements["leaf"].claims[claim] = {}
+    assert_invalid(chain.resolve())

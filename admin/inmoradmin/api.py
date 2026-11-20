@@ -18,7 +18,6 @@ from entities.lib import (
     fetch_entity_configuration,
     fetch_jwks_from_uri,
     fetch_payload,
-    merge_our_policy_ontop_subpolicy,
     update_redis_with_subordinate,
 )
 from entities.models import Subordinate
@@ -522,13 +521,15 @@ def update_trustmark(request: HttpRequest, tmid: int, data: TrustMarkUpdateSchem
     tags=["Subordinates"],
 )
 def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
-    "Adds a new subordinate."
+    """Verify the entity configuration and proposed statement policy before registration."""
     # First get verified JWT from entity configuration with the keys we provided
     official_metadata = data.metadata
     keys = data.jwks
 
-    # This entity_jwt is verified with the key (signature verification)
-    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(data.entityid, keys)
+    try:
+        entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(data.entityid, keys)
+    except ValueError as e:
+        return 400, {"message": f"Failed to verify entity configuration: {e}"}
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
     # Verify that our TA_DOMAIN is in the authority_hints of the subordinate
     authority_hints = claims.get("authority_hints", [])
@@ -536,21 +537,12 @@ def create_subordinate(request: HttpRequest, data: EntityTypeSchema):
         return 400, {
             "message": f"TA domain {settings.TA_DOMAIN} is not in the authority_hints of the entity configuration."
         }
-    # TODO: If the entity has policy, then we should try to merge to veirfy.
-    if "metadata_policy" in claims:
-        sub_policy = claims.get("metadata_policy", {})
-        try:
-            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
-
-        except Exception as e:
-            print(e)
-            return 400, {
-                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
-            }
 
     metadata: dict[str, Any] = claims["metadata"]
     try:
-        _ = apply_server_policy(json.dumps(metadata))
+        _ = apply_server_policy(
+            json.dumps(metadata), data.forced_metadata, additional_claims=data.additional_claims
+        )
 
     except Exception as e:
         print(e)
@@ -644,7 +636,7 @@ def get_subordinate_byid(request: HttpRequest, subid: int):
     tags=["Subordinates"],
 )
 def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateSchema):
-    "Updates a subordinate."
+    """Verify the fresh entity configuration and proposed statement policy before updating."""
 
     try:
         sub = Subordinate.objects.get(id=subid)
@@ -661,8 +653,10 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     if data.jwks:
         keys = data.jwks
 
-    # This entity_jwt is verified with the key (signature verification)
-    entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(sub.entityid, keys)
+    try:
+        entity_jwt, keyset, entity_jwt_str = fetch_entity_configuration(sub.entityid, keys)
+    except ValueError as e:
+        return 400, {"message": f"Failed to verify entity configuration: {e}"}
     claims: dict[str, Any] = json.loads(entity_jwt.claims)
     # Verify that our TA_DOMAIN is in the authority_hints of the subordinate
     authority_hints = claims.get("authority_hints", [])
@@ -670,21 +664,12 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
         return 400, {
             "message": f"TA domain {settings.TA_DOMAIN} is not in the authority_hints of the entity configuration."
         }
-    # TODO: If the entity has policy, then we should try to merge to veirfy.
-    if "metadata_policy" in claims:
-        sub_policy = claims.get("metadata_policy", {})
-        try:
-            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
-
-        except Exception as e:
-            print(e)
-            return 400, {
-                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
-            }
 
     metadata: dict[str, Any] = claims["metadata"]
     try:
-        _ = apply_server_policy(json.dumps(metadata))
+        _ = apply_server_policy(
+            json.dumps(metadata), data.forced_metadata, additional_claims=data.additional_claims
+        )
 
     except Exception as e:
         print(e)
@@ -745,7 +730,7 @@ def update_subordinate(request: HttpRequest, subid: int, data: EntityTypeUpdateS
     tags=["Subordinates"],
 )
 def renew_subordinate(request: HttpRequest, subid: int):
-    """Renews a subordinate by re-fetching and verifying its entity configuration."""
+    """Renew using the verified entity configuration, stored overrides, and critical policy."""
 
     try:
         sub = Subordinate.objects.get(id=subid)
@@ -778,20 +763,12 @@ def renew_subordinate(request: HttpRequest, subid: int):
         return 400, {
             "message": f"TA domain {settings.TA_DOMAIN} is not in the authority_hints of the entity configuration."
         }
-    # If the entity has policy, then we should try to merge to verify.
-    if "metadata_policy" in claims:
-        sub_policy = claims.get("metadata_policy", {})
-        try:
-            _resp = merge_our_policy_ontop_subpolicy(sub_policy)
-        except Exception as e:
-            print(e)
-            return 400, {
-                "message": f"Could not succesfully merge TA/IA POLICY on the policy of the subordinate. {e}"
-            }
 
     metadata: dict[str, Any] = claims["metadata"]
     try:
-        _ = apply_server_policy(json.dumps(metadata))
+        _ = apply_server_policy(
+            json.dumps(metadata), sub.forced_metadata, additional_claims=sub.additional_claims
+        )
     except Exception as e:
         print(e)
         return 400, {"message": f"Could not succesfully apply POLICY on the metadata. {e}"}

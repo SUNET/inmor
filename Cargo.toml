@@ -47,7 +47,8 @@ tokio = { version = "1", features = ["full"] }
 env_logger = "0.11.8"
 log = "0.4.27"
 base64 = "0.23"
-oidfed_metadata_policy = "0.8.0"
+# The resolver uses the chain policy API introduced in 0.9.0.
+oidfed_metadata_policy = "0.9.0"
 anyhow = "1.0.98"
 toml = "1.1"
 clap = { version = "4.5.41", features = ["derive"] }

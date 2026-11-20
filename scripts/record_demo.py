@@ -40,13 +40,13 @@ SUBORDINATES = [
     "https://fakerp1.labb.sunet.se",
 ]
 
+# Match the role-scoped overrides in the Redis fixture generator.
 FORCED_METADATA_FOR_FAKEOP0 = """{
   "openid_provider": {
     "application_type": "mutant",
     "system": ["py", "rust"],
     "subject_types_supported": ["pairwise", "public", "e2e"]
-  },
-  "extra_field": "extra_value"
+  }
 }"""
 
 

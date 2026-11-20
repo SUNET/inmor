@@ -10,7 +10,6 @@ from entities.lib import (
     apply_server_policy,
     create_subordinate_statement,
     fetch_entity_configuration,
-    merge_our_policy_ontop_subpolicy,
     update_redis_with_subordinate,
 )
 from entities.models import Subordinate
@@ -18,7 +17,7 @@ from entities.models import Subordinate
 
 @click.command()
 def command():
-    "Renews all active subordinates by re-fetching and verifying their entity configurations."
+    """Renew active subordinates after checking stored overrides and critical declarations."""
     con = get_redis_connection("default")
     subs = Subordinate.objects.filter(active=True)
     total = subs.count()
@@ -52,19 +51,12 @@ def command():
             failed += 1
             continue
 
-        # Verify metadata policy merge if present
-        if "metadata_policy" in claims:
-            sub_policy = claims.get("metadata_policy", {})
-            try:
-                merge_our_policy_ontop_subpolicy(sub_policy)
-            except Exception as e:
-                click.secho(f"FAILED (policy merge: {e})", fg="red")
-                failed += 1
-                continue
-
         metadata: dict[str, Any] = claims["metadata"]
+        # Renewal signs the stored critical declaration along with the overrides.
         try:
-            apply_server_policy(json.dumps(metadata))
+            apply_server_policy(
+                json.dumps(metadata), sub.forced_metadata, additional_claims=sub.additional_claims
+            )
         except Exception as e:
             click.secho(f"FAILED (policy apply: {e})", fg="red")
             failed += 1
