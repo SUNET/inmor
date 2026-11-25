@@ -158,10 +158,12 @@ class TestAPIAuthEndpoints:
 
     @pytest.mark.django_db
     def test_csrf_endpoint(self, db):
-        """Test CSRF token endpoint."""
+        """Browser clients initialize CSRF from the cookie on an empty response."""
         client = Client()
         response = client.get("/api/v1/auth/csrf")
         assert response.status_code == 200
+        assert response.content == b""
+        assert response.cookies["csrftoken"].value
 
     @pytest.mark.django_db
     def test_me_endpoint_unauthenticated(self, db):
@@ -179,6 +181,21 @@ class TestAPIAuthEndpoints:
         assert data["username"] == "testuser"
         assert "id" in data
         assert "is_staff" in data
+        assert data["can_manage_federation"] is True
+
+    def test_me_reports_management_permission(self, db, client):
+        """The UI sees the same permission decision as the protected API."""
+        user = User.objects.create_user("staff-only", is_staff=True)
+        client.force_login(user)
+        assert client.get("/api/v1/auth/me").json()["can_manage_federation"] is False
+        assert client.get("/api/v1/trustmarktypes").status_code == 403
+
+        # A group grant must work without superuser privileges.
+        group = Group.objects.create(name="federation-managers")
+        group.permissions.add(Permission.objects.get(codename="manage_federation"))
+        user.groups.add(group)
+        assert client.get("/api/v1/auth/me").json()["can_manage_federation"] is True
+        assert client.get("/api/v1/trustmarktypes").status_code == 200
 
 
 class TestAuthResult:

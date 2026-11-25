@@ -28,45 +28,20 @@ announcer.setAttribute('aria-atomic', 'true');
 announcer.className = 'sr-only';
 document.body.appendChild(announcer);
 
-// Authentication guard
-let isAuthenticated: boolean | null = null;
-let csrfInitialized = false;
-
-router.beforeEach(async (to, _from, next) => {
-    // Initialize CSRF token on first navigation
-    if (!csrfInitialized) {
-        await sdk.initCSRF();
-        csrfInitialized = true;
-    }
-
-    // Check if route requires authentication
-    const requiresAuth = to.meta.requiresAuth !== false;
-
-    // Check authentication status if we haven't yet
-    if (isAuthenticated === null) {
-        try {
-            const user = await sdk.getCurrentUser();
-            isAuthenticated = user !== null;
-        } catch {
-            isAuthenticated = false;
+// Recheck the session on navigation so permission changes take effect in an open tab.
+router.beforeEach(async to => {
+    if (to.name === 'access-denied' || to.name === 'service-unavailable') return;
+    try {
+        const user = await sdk.getCurrentUser();
+        if (!user && to.meta.requiresAuth !== false) {
+            return { name: 'login', query: { redirect: to.fullPath } };
         }
-    }
-
-    if (requiresAuth && !isAuthenticated) {
-        // Redirect to login if not authenticated
-        next({ name: 'login', query: { redirect: to.fullPath } });
-    } else if (to.name === 'login' && isAuthenticated) {
-        // Redirect to home if already authenticated
-        next({ name: 'home' });
-    } else {
-        next();
+        if (user && !user.can_manage_federation) return { name: 'access-denied' };
+        if (user && to.name === 'login') return { name: 'home' };
+    } catch {
+        return { name: 'service-unavailable' };
     }
 });
-
-// Reset auth state on logout (will be checked again on next navigation)
-app.config.globalProperties.$resetAuth = () => {
-    isAuthenticated = null;
-};
 
 // Route change announcements and document title updates
 router.afterEach(async (to) => {

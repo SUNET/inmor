@@ -42,11 +42,12 @@ export type User = {
     email: string;
     is_staff: boolean;
     is_superuser: boolean;
+    can_manage_federation: boolean;
 };
 
 export class AdminSDK {
     readonly #apiUrl: URL;
-    #csrfInitialized = false;
+    #csrfRequest?: Promise<unknown>;
 
     constructor(config: Config) {
         const { apiUrl } = config;
@@ -58,14 +59,12 @@ export class AdminSDK {
      * This sets the csrftoken cookie needed for subsequent requests.
      */
     async initCSRF(): Promise<void> {
-        if (this.#csrfInitialized) return;
-
-        const url = new URL('/api/v1/auth/csrf', this.#apiUrl);
-        await fetch(url, {
-            method: 'GET',
-            credentials: 'include',
+        if (this.#getCSRFToken()) return;
+        // Concurrent writes must share one cookie, including after it expires.
+        this.#csrfRequest ??= this.#fetch('GET', '/auth/csrf').finally(() => {
+            this.#csrfRequest = undefined;
         });
-        this.#csrfInitialized = true;
+        await this.#csrfRequest;
     }
 
     /**
@@ -76,16 +75,6 @@ export class AdminSDK {
             .split('; ')
             .find(row => row.startsWith('csrftoken='));
         return match ? match.split('=')[1] : null;
-    }
-
-    /**
-     * Login with username and password.
-     */
-    async login(username: string, password: string): Promise<User> {
-        const res = await this.#fetch('POST', '/auth/login', {
-            body: JSON.stringify({ username, password }),
-        });
-        return res as User;
     }
 
     /**
@@ -115,8 +104,10 @@ export class AdminSDK {
      * Get CSRF token for forms.
      */
     async getCSRFToken(): Promise<string> {
-        const res = await this.#fetch('GET', '/auth/csrf') as { csrf_token: string };
-        return res.csrf_token;
+        await this.initCSRF();
+        const token = this.#getCSRFToken();
+        if (!token) throw new FetchError({ message: 'The CSRF cookie is unavailable.' });
+        return token;
     }
 
     /**
@@ -163,6 +154,18 @@ export class AdminSDK {
         }
 
         return data.output;
+    }
+
+    /** Collect every type for the issuance selector and historical mark labels. */
+    async listAllTrustMarkTypes(): Promise<TrustMarkType[]> {
+        const types: TrustMarkType[] = [];
+        let page: TrustMarkTypes;
+        do {
+            page = await this.listTrustMarkTypes({ limit: 100, offset: types.length });
+            // A shrinking list may end before a previous count.
+            types.push(...page.items);
+        } while (page.items.length && types.length < page.count);
+        return types;
     }
 
     /**
@@ -508,10 +511,7 @@ export class AdminSDK {
 
         // Include CSRF token for state-changing requests
         if (method !== 'GET') {
-            const csrfToken = this.#getCSRFToken();
-            if (csrfToken) {
-                headers['X-CSRFToken'] = csrfToken;
-            }
+            headers['X-CSRFToken'] = await this.getCSRFToken();
         }
 
         const init: RequestInit = {

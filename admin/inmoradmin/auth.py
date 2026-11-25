@@ -123,6 +123,11 @@ def _enforce_csrf(request: HttpRequest):
 # ---------------------------------------------------------------------------
 
 
+def can_manage_federation(user: AbstractUser) -> bool:
+    """Return whether this account may use the federation management endpoints."""
+    return user.is_active and user.has_perm("entities.manage_federation")
+
+
 class CombinedAuthentication(APIKeyBase):
     """Authenticates via a chain of pluggable backends.
 
@@ -145,9 +150,7 @@ class CombinedAuthentication(APIKeyBase):
         for backend in self.backends:
             result = backend.authenticate(request)
             if result is not None:
-                if not result.user.is_active or not result.user.has_perm(
-                    "entities.manage_federation"
-                ):
+                if not can_manage_federation(result.user):
                     raise AuthorizationError()
                 if result.api_key is not None:
                     result.api_key.update_last_used()
@@ -166,6 +169,7 @@ class UserSchema(Schema):
     email: str
     is_staff: bool
     is_superuser: bool
+    can_manage_federation: bool
 
 
 class MessageSchema(Schema):
@@ -194,6 +198,8 @@ def get_current_user(request: HttpRequest):
             "email": request.user.email or "",
             "is_staff": request.user.is_staff,
             "is_superuser": request.user.is_superuser,
+            # Use the same decision as the protected router, including group grants.
+            "can_manage_federation": can_manage_federation(request.user),
         }
     return 401, {"message": "Not authenticated"}
 
