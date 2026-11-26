@@ -66,13 +66,13 @@ for direct API clients to exchange a username and password for a session.
      - Description
    * - GET
      - ``/api/v1/auth/csrf``
-     - Get CSRF token (sets cookie)
+     - Set the ``csrftoken`` cookie and return an empty response body
    * - POST
      - ``/api/v1/auth/logout``
      - Logout and clear session
    * - GET
      - ``/api/v1/auth/me``
-     - Get current authenticated user info
+     - Get current user info, including the ``can_manage_federation`` permission flag
 
 **API Key Example:**
 
@@ -813,10 +813,9 @@ Fetches and self-validates an entity's OpenID Federation configuration from
 their ``/.well-known/openid-federation`` endpoint. Use this before adding a
 subordinate to inspect their metadata and keys.
 
-If the entity publishes a ``jwks_uri`` instead of inline ``jwks``, the
-endpoint automatically fetches the keys from the URI and returns them as
-inline ``jwks`` in the response. This ensures the response always contains
-populated keys regardless of how the entity publishes them.
+If the verified configuration contains a ``jwks_uri`` and omits inline
+``jwks``, the endpoint tries to retrieve the public keys from that URI
+for the response.
 
 **Request Body:**
 
@@ -864,9 +863,9 @@ populated keys regardless of how the entity publishes them.
      ]
    }
 
-The ``jwks_uri`` field is included in the response when the entity's
-configuration contains one. Even when ``jwks_uri`` is present, the ``jwks``
-field will be populated with the resolved keys.
+If that key retrieval fails after signature verification, the response can
+still be HTTP 200 with ``jwks: null`` and the published ``jwks_uri``.
+Obtain and review the public JWKS before submitting the registration.
 
 **Response (400 Bad Request):** Connection errors, invalid URL, signature
 validation failure, or no OpenID Federation configuration found.

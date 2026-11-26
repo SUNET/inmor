@@ -1,10 +1,12 @@
 Inmor Trust Anchor Documentation
 =================================
 
-Inmor is a Trust Anchor (TA) implementation for `OpenID Federation 1.0 <https://openid.net/specs/openid-federation-1_0.html>`_.
+Inmor is a Trust Anchor (TA) implementation for `OpenID Federation 1.1 <https://openid.net/specs/openid-federation-1_1.html>`_.
 It provides a complete solution for managing OpenID Federation trust chains, subordinate entities, and trust marks.
 
-The system consists of two components:
+For the changes and rollout steps in this release, see :doc:`upgrades/0.6.0`.
+
+The system includes:
 
 * **Trust Anchor (Rust)**: High-performance federation server handling entity statements, trust marks, and resolution
 * **Collection CLI (Rust)**: ``inmor-collection`` tool that walks federation trees and populates the collection endpoint data

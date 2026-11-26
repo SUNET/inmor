@@ -33,7 +33,11 @@ return create_signed_jwt(sub_data, key, "trust-mark+jwt")
 
 ### Trust Mark Storage
 
-- **Database:** `TrustMark` model in `trustmarks/models.py`
+- **Database:** `TrustMark` holds the current JWT. `IssuedTrustMarkHash`
+  records issued JWT digests for status checks after renewal or revocation.
+  `PendingPublication` records Redis updates in the same transaction as
+  the mark. See the [management command guide](../docs/guides/management-commands.rst)
+  for delivery retries and index recovery.
 - **Redis:** 
   - `inmor:tm:{entity}` - Hash of Trust Marks per entity
   - `inmor:tmtype:{trustmarktype}` - Set of entities with this Trust Mark type
@@ -358,10 +362,10 @@ The Python reference implementation in `fedservice/src/fedservice/entity/server/
 
 **Note on Parameter Names:** The fedservice Python implementation uses slightly different parameter names than the spec:
 - Spec: `entity_type`, `trust_anchor` (Section 8.3.1)  
-- fedservice: `type`, `anchor` (see [message.py](fedservice/src/fedservice/message.py#L684-L691))
+- fedservice: `type`, `anchor` (see [message.py](https://github.com/rohe/fedservice/blob/5c894b3e9e5fa65a89cc799ea3069675583f20d4/src/fedservice/message.py#L650-L655))
 
 ```python
-# fedservice/src/fedservice/message.py - Lines 684-691
+# fedservice/src/fedservice/message.py - Lines 650-655
 class ResolveRequest(Message):
     c_param = {
         "sub": SINGLE_REQUIRED_STRING,
@@ -370,28 +374,28 @@ class ResolveRequest(Message):
     }
 ```
 
-**The actual entity_type filtering logic in [resolve.py](fedservice/src/fedservice/entity/server/resolve.py#L47-L50):**
+**The actual entity_type filtering logic in [resolve.py](https://github.com/rohe/fedservice/blob/5c894b3e9e5fa65a89cc799ea3069675583f20d4/src/fedservice/entity/server/resolve.py#L46-L49):**
 
 ```python
-# fedservice/src/fedservice/entity/server/resolve.py - Lines 47-50
+# fedservice/src/fedservice/entity/server/resolve.py - Lines 46-49
 if "type" in request:
     metadata = {request['type']: _chosen_chain.metadata[request['type']]}
 else:
     metadata = _chosen_chain.metadata
 ```
 
-**Full context from [resolve.py](fedservice/src/fedservice/entity/server/resolve.py#L1-L78):**
+**Full context from [resolve.py](https://github.com/rohe/fedservice/blob/5c894b3e9e5fa65a89cc799ea3069675583f20d4/src/fedservice/entity/server/resolve.py#L28-L76):**
 
 | Line | Code | Description |
 |------|------|-------------|
 | 28 | `def process_request(self, request=None, **kwargs):` | Entry point for resolve requests |
-| 31-32 | `_chains, signed_entity_configuration = collect_trust_chains(...)` | Collect trust chains from subject to anchor |
-| 34-35 | `_trust_chains = verify_trust_chains(...)` | Verify signatures in trust chains |
-| 36 | `_trust_chains = apply_policies(...)` | Apply metadata policies from all authorities |
-| 38-42 | `for trust_chain in _trust_chains: ...` | Select the chain matching requested trust anchor |
-| **47-50** | `if "type" in request: metadata = {request['type']: ...}` | **THE FILTERING** - if entity_type requested, return only that type |
-| 52-60 | `for _trust_mark in _chosen_chain.verified_chain[-1].get("trust_marks", []):` | Verify and include trust marks |
-| 67-75 | `_jws = create_entity_configuration(...)` | Create signed resolve response JWT |
+| 33-35 | `_chains, signed_entity_configuration = collect_trust_chains(...)` | Collect trust chains from subject to anchor |
+| 36-37 | `_trust_chains = verify_trust_chains(...)` | Verify signatures in trust chains |
+| 38 | `_trust_chains = apply_policies(...)` | Apply metadata policies from all authorities |
+| 41-44 | `for trust_chain in _trust_chains: ...` | Select the chain matching requested trust anchor |
+| **46-49** | `if "type" in request: metadata = {request['type']: ...}` | **THE FILTERING** - if entity_type requested, return only that type |
+| 53-60 | `for _trust_mark in _chosen_chain.verified_chain[-1].get("trust_marks", []):` | Verify and include trust marks |
+| 70-75 | `_jws = create_entity_statement(...)` | Create signed resolve response JWT |
 
 The filtering is remarkably simple - it's just selecting a subset of keys from the metadata dict.
 

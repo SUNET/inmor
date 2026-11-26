@@ -303,7 +303,7 @@ Updating Subordinates
 ---------------------
 
 Update a subordinate's configuration. The ``metadata``, ``forced_metadata``,
-and ``jwks`` fields are required for every update:
+and ``jwks`` fields are required for a configuration edit:
 
 .. code-block:: bash
 
@@ -333,25 +333,21 @@ The update process:
 Disabling Subordinates
 ----------------------
 
-Disable a subordinate without removing it:
+To withdraw a subordinate, send only its inactive status. This preserves
+the stored configuration and also works when the entity is offline.
 
 .. code-block:: bash
 
    curl -X POST http://localhost:8000/api/v1/subordinates/1 \
      -H "X-API-Key: $INMOR_API_KEY" \
      -H "Content-Type: application/json" \
-     -d '{
-       "metadata": {"openid_relying_party": {"redirect_uris": ["..."]}},
-       "forced_metadata": {},
-       "jwks": {"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "..."}]},
-       "active": false
-     }'
+     -d '{"active": false}'
 
 When ``active`` is false:
 
 * The subordinate statement is no longer served via ``/fetch``
 * The entity is removed from ``/list`` results
-* Existing trust chains become invalid
+* New trust chains can no longer be built through this withdrawn statement
 
 Subordinate Statement Structure
 -------------------------------
@@ -630,10 +626,10 @@ Complete workflow for onboarding a new subordinate:
    ``authority_hints``, and ``trust_marks`` after signature validation.
 
    If the entity publishes a ``jwks_uri`` instead of inline ``jwks``, the
-   endpoint automatically fetches the keys from the URI and returns them
-   as inline ``jwks`` in the response. This means the registration step
-   always receives populated keys regardless of how the entity publishes
-   them.
+   endpoint tries to retrieve the public keys for the response. If
+   ``jwks`` is ``null``, obtain and review the entity's public JWKS before
+   continuing to registration. The Admin UI preserves any keys already
+   entered and displays the URI when available.
 
 4. **Registration**
 

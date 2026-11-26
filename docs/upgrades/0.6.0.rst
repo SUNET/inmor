@@ -1,13 +1,18 @@
 Upgrade to Inmor 0.6.0
 ======================
 
-This guide covers upgrading from 0.5.1. Version 0.6.0 is in development.
+Inmor 0.6.0 was released on November 26, 2026. This guide covers upgrading
+from 0.5.1.
 
 Before rollout
 --------------
 
 * If you use the bundled PostgreSQL 14 or 15 database, follow
   :doc:`../postgresql-upgrade` before starting the 0.6.0 stack.
+* Back up Redis and retain the existing data through the upgrade. The
+  migration imports digests for trust mark JWTs still in PostgreSQL. For
+  older JWTs already replaced or cleared, the issuance history may exist
+  only in the Redis set ``inmor:tm:alltime``.
 * If clients use ``/resolve`` with an external trust anchor, provision its
   public keys before rollout. The local anchor uses its existing public keys.
   See :ref:`resolver-trust-anchors`.
@@ -43,17 +48,21 @@ Before rollout
 Deploy and grant operator access
 --------------------------------
 
-1. Deploy the 0.6.0 Trust Anchor and Admin together with the matching
+1. Pause Admin writes and scheduled renewals. Deploy the 0.6.0 Trust Anchor
+   and all Admin processes together with the matching
    templates and frontend, if used. Keep the existing signing keys and MFA
    encryption key. The Admin container runs Django migrations at startup.
    For a source deployment, build the Trust Anchor with ``cargo build
    --release --locked``. From ``admin/``, run ``uv sync --locked`` and
    ``uv run python manage.py migrate`` with the deployment's settings.
-   In Compose, check the applied migration::
+   In Compose, check the applied migrations::
 
       docker compose exec -T admin python manage.py showmigrations entities
 
-   Look for ``[X] 0004_manage_federation_permission`` before assigning access.
+   Confirm that ``0004_manage_federation_permission``,
+   ``0005_pendingpublication`` and ``0006_issuedtrustmarkhash`` each show
+   ``[X]``. Replace scheduled renewal commands with the 0.6.0 version before
+   resuming writes.
 
 2. In Django admin (``/admin/``), open **Groups**, create or edit an operator
    group, and add **Can manage the federation**
@@ -85,6 +94,13 @@ Verify before resuming automation
 * In a fresh browser session, open ``/admin/`` as a staff member with an
   enrolled factor and complete the MFA challenge. Open the Admin UI as an
   authorized operator and confirm that it lists the expected subordinates.
+  If the frontend runs behind a custom proxy, check login, MFA and logout
+  through its public origin. See :doc:`../guides/admin-ui` for the proxy paths.
+* Run ``docker compose exec -T admin python manage.py retry_publications``
+  and check that it exits successfully. Schedule the command periodically.
+  If Redis delivery fails after a database commit, the public endpoints can
+  still serve the previous state until the retry succeeds. See
+  :doc:`../guides/management-commands`.
 * Retrieve ``/.well-known/openid-federation`` from the Trust Anchor and verify
   its signature with your federation client. Resolve a known subordinate and
   confirm that the chain still leads to the expected Trust Anchor. Repeat

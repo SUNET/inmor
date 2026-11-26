@@ -1,5 +1,5 @@
 <a id='changelog-0.6.0'></a>
-# 0.6.0 - Unreleased
+# 0.6.0 - 2026-11-26
 
 See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verification.
 
@@ -17,6 +17,8 @@ See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verificat
 - The resolver now verifies each returned trust-chain link and both
   anchor-issued statements against their expected keys. Deployments resolving
   to external anchors must configure their public keys in `taconfig.toml`.
+  Clients must read the subject's `trust_chain` from the signed payload.
+  The resolver now omits the optional JWS header containing a chain.
 
 - The Admin UI and protected management API now require the Django permission
   `entities.manage_federation`. Grant it to existing non-superuser operators
@@ -51,6 +53,30 @@ See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verificat
   named by the token is rejected. See "Signature algorithms and
   JOSE libraries" in `docs/installation.rst`.
 
+- The Admin UI paginates subordinates, trust marks and trust mark types in
+  ID order. When issuing a mark, operators can select a type from any page.
+  The dashboard distinguishes a failed count request from a count of zero.
+- The frontend proxies authentication, MFA, Django admin, API and static files
+  through the same origin. It checks the session's management permission
+  and reads Django's CSRF cookie for writes. If discovery returns
+  `jwks: null`, the subordinate form preserves entered keys and shows the
+  published `jwks_uri` when available.
+
+## Fixed
+
+- Operators can deactivate an offline subordinate by sending only
+  `{"active": false}`. The Admin preserves its settings, withdraws its
+  statement and list entry, and prevents a concurrent renewal from restoring it.
+- Revoking a trust mark clears its stored JWT and preserves omitted claims.
+  The Admin records issued JWT digests in PostgreSQL so the Redis status
+  index can be restored after renewal or revocation.
+- The Admin records pending Redis updates in the same database transaction
+  as subordinate and trust mark changes. If delivery fails after commit,
+  run `python manage.py retry_publications` to publish the saved state.
+  See the [management command guide](docs/guides/management-commands.rst).
+- Signed resolve responses preserve fractional seconds when selecting the
+  earliest expiry from the chain and included trust marks.
+
 ## Dependencies
 
 - The resolver uses `oidfed_metadata_policy` 0.9.0 and the Admin uses
@@ -61,6 +87,11 @@ See the [0.6.0 upgrade guide](docs/upgrades/0.6.0.rst) for rollout and verificat
   window (`exclude-newer`, 2026-11-01), so both `pyproject.toml` files carry
   an `exclude-newer-package` exception for it. Remove the exception when the
   window moves past 2026-11-18.
+
+- Frontend builds use Vue 3.5.45, Vue Router 5.5.0, Vite 8.3.8,
+  TypeScript 6.0.3 and `@lucide/vue` 1.72.0. The frontend image and CI
+  use the pnpm 10.34.9 version pinned in the package manifest.
+- CI uses `astral-sh/setup-uv` 10.4.0.
 
 
 <a id='changelog-0.5.1'></a>

@@ -1,7 +1,7 @@
 PostgreSQL 18 Upgrade
 =====================
 
-This release changes every bundled PostgreSQL container to major version 18.
+Inmor 0.6.0 changes every bundled PostgreSQL container to major version 18.
 Inmor 0.5.0 and 0.5.1 shipped PostgreSQL 15; earlier releases shipped
 PostgreSQL 14. PostgreSQL major versions do not share a compatible on-disk data
 format, so an existing PostgreSQL 14 or 15 data directory cannot be started by
