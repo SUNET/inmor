@@ -329,7 +329,9 @@ Redis stores the federation runtime data:
 * Entity type sets (``inmor:rp``, ``inmor:op``, ``inmor:taia``)
 * Collection data (``inmor:collection:*``) — populated by ``inmor-collection``
 
-Redis data is ephemeral and can be rebuilt from the database::
+Preserve Redis backups across the 0.6.0 upgrade. Older trust mark digests
+that exist only in Redis cannot be recovered from PostgreSQL. After restoring
+Redis, the following commands refresh individual indexes::
 
    # Rebuild entity configuration
    curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
@@ -339,8 +341,11 @@ Redis data is ephemeral and can be rebuilt from the database::
    curl -X POST -H "X-API-Key: $INMOR_API_KEY" \
      http://localhost:8000/api/v1/server/historical_keys
 
-   # Reload trust marks from database
+   # Restore the all-time trust mark digest index
    docker compose exec admin python manage.py reload_issued_tms
+
+   # Deliver committed subordinate and trust mark changes still awaiting publication
+   docker compose exec admin python manage.py retry_publications
 
    # Rebuild collection data (walks the federation tree)
    docker compose exec ta ./inmor-collection -c taconfig.toml https://ta.example.com

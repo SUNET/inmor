@@ -18,13 +18,17 @@ The Admin UI allows administrators to:
 * Issue and revoke Trust Marks
 * Add and manage Subordinates with automatic configuration fetching
 
+The subordinate, trust mark and trust mark type lists show 25 records per
+page in ID order. Use **Previous** and **Next** to move between pages. When
+issuing a trust mark, the type selector includes types from every page.
+
 Screenshots
 -----------
 
 Login
 ^^^^^
 
-The login page provides username/password authentication.
+Select **Sign In** to open the Django allauth login page.
 
 .. figure:: /_static/screenshots/01-login.png
    :alt: Login Page
@@ -36,7 +40,8 @@ Dashboard
 ^^^^^^^^^
 
 The dashboard shows the Trust Anchor status and provides quick access to
-regenerate the entity configuration.
+regenerate the entity configuration. A count of zero means the list is
+empty. An unavailable count means the API request failed.
 
 .. figure:: /_static/screenshots/02-dashboard.png
    :alt: Dashboard
@@ -85,6 +90,8 @@ Subordinates
 
 Add federation subordinates with automatic configuration fetching.
 The UI fetches the entity's published configuration and validates it.
+If discovery returns no public keys, the form keeps the JWKS already
+entered and shows the published key URI when available.
 
 .. figure:: /_static/screenshots/05-subordinates.png
    :alt: Subordinates List
@@ -124,20 +131,21 @@ The frontend will be available at ``http://localhost:5173``.
 Production Mode
 ^^^^^^^^^^^^^^^
 
-For production, the frontend is built and served via nginx or the
-Docker frontend container:
+To build the assets locally, run these commands from the repository root:
 
 .. code-block:: bash
 
    # Build frontend
    cd admin/frontend
+   pnpm install --frozen-lockfile
    pnpm build
 
-   # Or use Docker
-   just build
+To build the production images, run ``just build-prod`` from the repository
+root. Enable the frontend when starting the production Compose stack::
 
-The Docker Compose setup includes a frontend container that serves the
-built assets on host port 5173 when enabled.
+   docker compose -f dev/docker-compose.prod.yml --project-directory . --profile frontend up -d
+
+The frontend container serves the assets through nginx on host port 5173.
 
 Authentication
 --------------
@@ -154,9 +162,10 @@ Authentication (MFA) support. Direct API clients must use API keys.
 Authentication Flow
 ^^^^^^^^^^^^^^^^^^^
 
-1. **Authentication Check**: The frontend checks ``/api/v1/auth/me``. An
-   unauthenticated user is redirected to
-   ``/accounts/login/?next=<admin-ui-url>``
+1. **Authentication check**: The frontend checks ``/api/v1/auth/me``.
+   Signed-out users see the sign-in page. A signed-in user who lacks
+   ``entities.manage_federation`` sees an access-denied message. If the
+   session check fails, the UI offers a retry.
 
 2. **Login**: django-allauth validates the user's primary credentials
 
@@ -166,8 +175,9 @@ Authentication Flow
 4. **Session**: Only after the complete allauth flow succeeds is a session
    cookie available to the Admin UI
 
-5. **Admin API Requests**: The browser sends that session cookie and a CSRF
-   token obtained from ``/api/v1/auth/csrf`` where required
+5. **Admin API requests**: The browser sends the session cookie. For writes,
+   the frontend reads Django's ``csrftoken`` cookie and sends its value in
+   the ``X-CSRFToken`` header.
 
 There is no password-login endpoint under ``/api/v1/``. Scripts, integrations,
 and other direct API clients must authenticate with ``X-API-Key``.

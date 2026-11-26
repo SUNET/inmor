@@ -105,16 +105,10 @@ new key.
 readd_subordinates
 ------------------
 
-Re-synchronise subordinates from the database to Redis. Clears the
-``inmor:subordinates`` Redis hash and re-adds every subordinate from
-PostgreSQL.
-
-::
-
-   python manage.py readd_subordinates
-
-Use this after a Redis flush or if the Redis subordinate data is out of sync
-with the database.
+In 0.6.0 this command clears the ``inmor:subordinates`` Redis hash without
+repopulating it. To recover an interrupted publication, use
+``retry_publications``. To fetch fresh configurations and reissue statements
+for all active subordinates, see :ref:`renew-subordinates`.
 
 pre_migrate_check
 -----------------

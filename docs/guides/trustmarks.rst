@@ -70,7 +70,7 @@ Trust Mark Type Parameters
    * - ``valid_for``
      - Maximum validity period for trust marks in hours. Individual marks can have shorter validity but not longer.
    * - ``autorenew``
-     - If true, trust marks of this type will be automatically renewed before expiry.
+     - Default renewal preference for marks of this type.
    * - ``renewal_time``
      - Hours before expiry when renewal should occur.
    * - ``active``
@@ -207,22 +207,14 @@ Manually renew a trust mark:
 This generates a new JWT with updated ``iat`` and ``exp`` claims while
 preserving all other trust mark properties.
 
-Automatic Renewal
+Scheduled Renewal
 ^^^^^^^^^^^^^^^^^
 
-Trust marks with ``autorenew: true`` will be automatically renewed when:
-
-1. The ``renewal_time`` threshold is reached (e.g., 48 hours before expiry)
-2. The trust mark type is active
-3. The trust mark itself is active
-
-The ``reload_issued_tms`` management command handles automatic renewal:
-
-.. code-block:: bash
-
-   docker compose exec admin python manage.py reload_issued_tms
-
-This command is run automatically when the admin container starts.
+Deployments that automate renewal must schedule calls to the renewal API.
+Use the mark's ``autorenew``, ``renewal_time`` and ``expire_at`` fields to
+select active marks due for renewal. At Admin startup,
+``reload_issued_tms`` restores the Redis index of issued JWT digests for
+status lookups. See :doc:`management-commands` for recovery instructions.
 
 Revoking Trust Marks
 --------------------
@@ -440,8 +432,8 @@ Best Practices
 2. **Set Appropriate Validity**: Balance security (shorter validity) with
    operational overhead (more frequent renewals).
 
-3. **Enable Auto-Renewal**: For operational trust marks, enable auto-renewal
-   to prevent accidental expiry.
+3. **Schedule renewals**: Check that your renewal job processes active marks
+   before they expire.
 
 4. **Document Requirements**: Clearly document what criteria an entity must
    meet to receive each trust mark type.

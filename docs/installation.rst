@@ -2,6 +2,8 @@ Installation
 ============
 
 This guide covers how to install and set up Inmor Trust Anchor for development and production use.
+For an existing 0.5.1 deployment, follow :doc:`upgrades/0.6.0` before
+starting the new services.
 
 Prerequisites
 -------------
